@@ -26,13 +26,13 @@ jobs:
         cache: gradle
 
     - name: Grant execute permission for gradlew
-      run: chmod +x ./gradlew || true
+      run: chmod +x ./gradlew
 
     - name: Run Unit Tests
-      run: gradle testDebugUnitTest
+      run: ./gradlew testDebugUnitTest
 
     - name: Build Debug APK
-      run: gradle assembleDebug
+      run: ./gradlew assembleDebug
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
