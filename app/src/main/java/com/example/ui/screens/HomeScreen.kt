@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -134,7 +135,7 @@ fun HomeScreen(
                         )
                         DropdownMenuItem(
                             text = { Text("Yeni Sohbet", color = Color.White) },
-                            leadingIcon = { Icon(Icons.Default.Chat, contentDescription = null, tint = DakkYellow) },
+                            leadingIcon = { Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = DakkYellow) },
                             onClick = {
                                 showMenu = false
                                 showNewChatSheet = true
@@ -147,7 +148,7 @@ fun HomeScreen(
                                 showMenu = false
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "WhatsApp yerine doğrudan cihazdan cihaza ve güvenli mesajlaşalım! Dakk uygulamasını indir: https://github.com/thecukulataa/Dakk/releases/latest")
+                                    putExtra(Intent.EXTRA_TEXT, "WhatsApp yerine doğrudan cihazdan cihaza ve güvenli mesajlaşalım! Dakk uygulamasını indir: https://github.com/cnrcrm20-ctrl/Dakk/releases/latest")
                                     type = "text/plain"
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Dakk'a Davet Et"))
@@ -263,7 +264,7 @@ fun HomeScreen(
                             action = Intent.ACTION_SEND
                             putExtra(
                                 Intent.EXTRA_TEXT,
-                                "Selam! WhatsApp yerine Dakk üzerinden doğrudan P2P ve güvenli konuşalım. Katılmak için tıkla:\nhttps://github.com/thecukulataa/Dakk/releases/latest"
+                                "Selam! WhatsApp yerine Dakk üzerinden doğrudan P2P ve güvenli konuşalım. Katılmak için tıkla:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/latest"
                             )
                             type = "text/plain"
                         }
