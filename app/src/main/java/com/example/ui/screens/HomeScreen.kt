@@ -148,7 +148,7 @@ fun HomeScreen(
                                 showMenu = false
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "WhatsApp yerine doğrudan cihazdan cihaza ve güvenli mesajlaşalım! Dakk uygulamasını indir: https://github.com/cnrcrm20-ctrl/Dakk/releases/latest")
+                                    putExtra(Intent.EXTRA_TEXT, "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli ve %100 gizli mesajlaşalım! 🐥\n\nUygulamayı hemen indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/download/v1.0.1/app-debug.apk")
                                     type = "text/plain"
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Dakk'a Davet Et"))
@@ -264,7 +264,7 @@ fun HomeScreen(
                             action = Intent.ACTION_SEND
                             putExtra(
                                 Intent.EXTRA_TEXT,
-                                "Selam! WhatsApp yerine Dakk üzerinden doğrudan P2P ve güvenli konuşalım. Katılmak için tıkla:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/latest"
+                                "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli mesajlaşalım! 🐥\n\nUygulamayı hemen indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/download/v1.0.1/app-debug.apk"
                             )
                             type = "text/plain"
                         }

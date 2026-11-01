@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -16,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.signaling.SignalingPayload
 import com.example.ui.DakkViewModel
 import com.example.ui.Screen
+import com.example.ui.components.DakkUpdateDialog
 import com.example.ui.screens.*
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkTheme
@@ -80,30 +82,46 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DakkApp(viewModel: DakkViewModel) {
     val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
+    val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
+    val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
 
-    when (val screen = currentScreen) {
-        is Screen.Splash -> {
-            SplashScreen(
-                onTimeout = { viewModel.navigateTo(Screen.Home) }
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (val screen = currentScreen) {
+            is Screen.Splash -> {
+                SplashScreen(
+                    onTimeout = { viewModel.navigateTo(Screen.Home) }
+                )
+            }
+            is Screen.Home -> {
+                HomeScreen(viewModel = viewModel)
+            }
+            is Screen.ChatDetail -> {
+                ChatScreen(
+                    peer = screen.peer,
+                    viewModel = viewModel
+                )
+            }
+            is Screen.Handshake -> {
+                HandshakeScreen(viewModel = viewModel)
+            }
+            is Screen.Diagnostic -> {
+                NetworkDiagnosticScreen(viewModel = viewModel)
+            }
+            is Screen.Profile -> {
+                ProfileScreen(viewModel = viewModel)
+            }
+        }
+
+        if (showUpdateDialog && updateInfo != null) {
+            DakkUpdateDialog(
+                releaseInfo = updateInfo!!,
+                downloadProgress = downloadProgress,
+                isDownloading = isDownloading,
+                onDownloadClick = { viewModel.downloadAndInstallUpdate() },
+                onDismissClick = { viewModel.dismissUpdateDialog() }
             )
-        }
-        is Screen.Home -> {
-            HomeScreen(viewModel = viewModel)
-        }
-        is Screen.ChatDetail -> {
-            ChatScreen(
-                peer = screen.peer,
-                viewModel = viewModel
-            )
-        }
-        is Screen.Handshake -> {
-            HandshakeScreen(viewModel = viewModel)
-        }
-        is Screen.Diagnostic -> {
-            NetworkDiagnosticScreen(viewModel = viewModel)
-        }
-        is Screen.Profile -> {
-            ProfileScreen(viewModel = viewModel)
         }
     }
 }

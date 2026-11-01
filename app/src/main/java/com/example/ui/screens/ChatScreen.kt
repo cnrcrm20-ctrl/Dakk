@@ -1,12 +1,21 @@
 package com.example.ui.screens
 
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -20,20 +29,28 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.db.ContactEntity
 import com.example.data.db.MessageEntity
 import com.example.ui.DakkViewModel
 import com.example.ui.Screen
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -45,6 +62,8 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     BackHandler {
         viewModel.navigateTo(Screen.Home)
     }
@@ -52,12 +71,52 @@ fun ChatScreen(
     var messageText by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
+    var showEmojiSheet by remember { mutableStateOf(false) }
+    var activeCallType by remember { mutableStateOf<String?>(null) } // "AUDIO" or "VIDEO" or null
+    var showMediaGallery by remember { mutableStateOf(false) }
+    var selectedImageForFullscreen by remember { mutableStateOf<String?>(null) }
+
+    // Ses kaydı durumu
     var isRecordingAudio by remember { mutableStateOf(false) }
+    var recordDurationSeconds by remember { mutableIntStateOf(0) }
+
+    // Fotoğraf Seçici (Android Photo Picker)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.sendMessageToActivePeer("📷 $uri")
+            Toast.makeText(context, "Fotoğraf iletildi", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Dosya Seçici (Document Picker)
+    val documentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val fileName = uri.lastPathSegment ?: "Belge.pdf"
+            viewModel.sendMessageToActivePeer("📄 [Belge: $fileName]")
+            Toast.makeText(context, "Belge gönderildi", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
     val isBot = peer.userId == "DAKK_BOT_OFFICIAL"
     val listState = rememberLazyListState()
 
+    // Ses kayıt zamanlayıcısı
+    LaunchedEffect(isRecordingAudio) {
+        if (isRecordingAudio) {
+            recordDurationSeconds = 0
+            while (isRecordingAudio) {
+                delay(1000)
+                recordDurationSeconds++
+            }
+        }
+    }
+
+    // Mesajlar eklendiğinde otomatik aşağı kaydır
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -68,6 +127,7 @@ fun ChatScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("chat_screen_root"),
+        contentWindowInsets = WindowInsets.ime,
         containerColor = DakkDarkBg,
         topBar = {
             TopAppBar(
@@ -75,7 +135,7 @@ fun ChatScreen(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable {
-                            Toast.makeText(context, "${peer.alias} profili", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "${peer.alias} P2P Profil Detayı", Toast.LENGTH_SHORT).show()
                         }
                     ) {
                         Box(
@@ -105,7 +165,7 @@ fun ChatScreen(
 
                         Spacer(modifier = Modifier.width(10.dp))
 
-                        Column(modifier = Modifier.widthIn(max = 200.dp)) {
+                        Column(modifier = Modifier.widthIn(max = 180.dp)) {
                             Text(
                                 text = peer.alias,
                                 fontWeight = FontWeight.Bold,
@@ -115,19 +175,14 @@ fun ChatScreen(
                             )
                             if (peer.isGroup) {
                                 Text(
-                                    text = if (peer.groupMembers.isNotBlank()) peer.groupMembers else "Grup Sohbeti",
+                                    text = if (peer.groupMembers.isNotBlank()) peer.groupMembers else "P2P Grup",
                                     fontSize = 11.sp,
                                     color = DakkTextSecondaryDark,
                                     maxLines = 1
                                 )
                             } else {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(DakkStatusConnected)
-                                    )
+                                    PulsatingOnlineBadge()
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = "çevrimiçi",
@@ -153,15 +208,11 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Doğrudan P2P görüntülü arama başlatılıyor...", Toast.LENGTH_SHORT).show()
-                    }) {
+                    IconButton(onClick = { activeCallType = "VIDEO" }) {
                         Icon(Icons.Default.Videocam, contentDescription = "Görüntülü Arama", tint = Color.White)
                     }
 
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Doğrudan P2P sesli arama başlatılıyor...", Toast.LENGTH_SHORT).show()
-                    }) {
+                    IconButton(onClick = { activeCallType = "AUDIO" }) {
                         Icon(Icons.Default.Call, contentDescription = "Sesli Arama", tint = Color.White)
                     }
 
@@ -179,7 +230,7 @@ fun ChatScreen(
                             leadingIcon = { Icon(Icons.Default.PermMedia, contentDescription = null, tint = DakkYellow) },
                             onClick = {
                                 showMenu = false
-                                Toast.makeText(context, "Paylaşılan medya yok", Toast.LENGTH_SHORT).show()
+                                showMediaGallery = true
                             }
                         )
                         DropdownMenuItem(
@@ -188,14 +239,17 @@ fun ChatScreen(
                             onClick = {
                                 showMenu = false
                                 viewModel.clearChat(peer.userId)
+                                Toast.makeText(context, "Sohbet temizlendi", Toast.LENGTH_SHORT).show()
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Kişiyi Engelle", color = DakkStatusFailed) },
+                            text = { Text(if (peer.isBlocked) "Engeli Kaldır" else "Kişiyi Engelle", color = DakkStatusFailed) },
                             leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, tint = DakkStatusFailed) },
                             onClick = {
                                 showMenu = false
                                 viewModel.toggleBlock(peer.userId, peer.isBlocked)
+                                val msg = if (peer.isBlocked) "Engel kaldırıldı" else "Kişi engellendi"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
@@ -245,17 +299,62 @@ fun ChatScreen(
                     .padding(horizontal = 12.dp)
             ) {
                 items(messages, key = { it.id }) { msg ->
-                    WhatsAppMessageBubble(message = msg)
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(animationSpec = tween(200)) + slideInVertically { it / 3 }
+                    ) {
+                        WhatsAppMessageBubble(
+                            message = msg,
+                            onImageClick = { imgUri -> selectedImageForFullscreen = imgUri }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(6.dp))
                 }
             }
 
-            // WhatsApp Tarzı Alt Mesaj Yazma Alanı
+            // Ses Kayıt Durum Göstergesi (Varsa)
+            if (isRecordingAudio) {
+                Surface(
+                    color = Color(0xFF331B1B),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color.Red)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Ses Kaydediliyor... 00:${if (recordDurationSeconds < 10) "0$recordDurationSeconds" else recordDurationSeconds}",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "İptal",
+                            color = DakkTextSecondaryDark,
+                            fontSize = 12.sp,
+                            modifier = Modifier.clickable { isRecordingAudio = false }
+                        )
+                    }
+                }
+            }
+
+            // WhatsApp Tarzı Alt Mesaj Yazma Alanı (Klavye Dostu)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 6.dp)
-                    .navigationBarsPadding(),
+                    .imePadding(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Mesaj Input Hapı
@@ -270,12 +369,12 @@ fun ChatScreen(
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Emoji Butonu
+                        // Emoji / Sticker Butonu
                         IconButton(
-                            onClick = { messageText += "🐥 " },
+                            onClick = { showEmojiSheet = true },
                             modifier = Modifier.size(36.dp)
                         ) {
-                            Icon(Icons.Default.Mood, contentDescription = "Emoji", tint = DakkTextSecondaryDark)
+                            Icon(Icons.Default.Mood, contentDescription = "Emoji & Çıkartma", tint = DakkTextSecondaryDark)
                         }
 
                         // Metin Alanı
@@ -294,6 +393,14 @@ fun ChatScreen(
                             ),
                             modifier = Modifier
                                 .weight(1f)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused && messages.isNotEmpty()) {
+                                        coroutineScope.launch {
+                                            delay(100)
+                                            listState.animateScrollToItem(messages.size - 1)
+                                        }
+                                    }
+                                }
                                 .testTag("input_message_text")
                         )
 
@@ -309,7 +416,9 @@ fun ChatScreen(
                         if (messageText.isBlank()) {
                             IconButton(
                                 onClick = {
-                                    viewModel.sendMessageToActivePeer("📷 [Fotoğraf]")
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
                                 },
                                 modifier = Modifier.size(36.dp)
                             ) {
@@ -326,19 +435,18 @@ fun ChatScreen(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(DakkYellow)
+                        .background(if (isRecordingAudio) Color.Red else DakkYellow)
                         .clickable {
                             if (messageText.isNotBlank()) {
                                 viewModel.sendMessageToActivePeer(messageText)
                                 messageText = ""
                             } else {
-                                // Hızlı sesli mesaj simülasyonu
-                                isRecordingAudio = !isRecordingAudio
-                                if (!isRecordingAudio) {
-                                    viewModel.sendMessageToActivePeer("🎙️ Sesli Mesaj (0:07)")
-                                    Toast.makeText(context, "Sesli mesaj iletildi", Toast.LENGTH_SHORT).show()
+                                if (isRecordingAudio) {
+                                    isRecordingAudio = false
+                                    viewModel.sendMessageToActivePeer("🎙️ Sesli Mesaj (0:${if (recordDurationSeconds < 10) "0$recordDurationSeconds" else recordDurationSeconds})")
+                                    Toast.makeText(context, "Sesli mesaj gönderildi", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, "Kayıt yapılıyor... Bitirmek için tekrar basın", Toast.LENGTH_SHORT).show()
+                                    isRecordingAudio = true
                                 }
                             }
                         }
@@ -356,7 +464,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = if (isRecordingAudio) Icons.Default.Stop else Icons.Default.Mic,
                             contentDescription = "Ses Kaydet",
-                            tint = if (isRecordingAudio) Color.Red else Color.Black,
+                            tint = Color.Black,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -365,6 +473,7 @@ fun ChatScreen(
         }
     }
 
+    // Ek Gönder Bottom Sheet
     if (showAttachmentSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAttachmentSheet = false },
@@ -380,22 +489,332 @@ fun ChatScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     AttachmentOption(icon = Icons.Default.Image, bg = Color(0xFF9333EA), label = "Galeri") {
                         showAttachmentSheet = false
-                        viewModel.sendMessageToActivePeer("🖼️ [Galeri Resmi]")
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
                     }
                     AttachmentOption(icon = Icons.Default.CameraAlt, bg = Color(0xFFE11D48), label = "Kamera") {
                         showAttachmentSheet = false
-                        viewModel.sendMessageToActivePeer("📷 [Anlık Fotoğraf]")
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
                     }
                     AttachmentOption(icon = Icons.Default.InsertDriveFile, bg = Color(0xFF2563EB), label = "Belge") {
                         showAttachmentSheet = false
-                        viewModel.sendMessageToActivePeer("📄 [Belge.pdf]")
+                        documentPickerLauncher.launch("*/*")
                     }
-                    AttachmentOption(icon = Icons.Default.Headphones, bg = Color(0xFFEA580C), label = "Ses") {
+                    AttachmentOption(icon = Icons.Default.LocationOn, bg = Color(0xFF10B981), label = "Konum") {
                         showAttachmentSheet = false
-                        viewModel.sendMessageToActivePeer("🎵 [Ses Dosyası]")
+                        viewModel.sendMessageToActivePeer("📍 Konum Paylaşıldı: İstanbul, Türkiye")
+                        Toast.makeText(context, "Mevcut konum gönderildi", Toast.LENGTH_SHORT).show()
                     }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // Emoji & Çıkartma Bottom Sheet
+    if (showEmojiSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showEmojiSheet = false },
+            containerColor = DakkDarkSurface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text("Dakk Emojileri & Çıkartmalar 🐥", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val emojis = listOf(
+                    "🐥", "💬", "🔒", "🚀", "❤️", "👍", "😂", "🔥",
+                    "🎯", "⚡", "📱", "🎉", "🤫", "🤝", "🌟", "🍕",
+                    "🏆", "💯", "🆒", "🎈", "📷", "🎵", "📍", "🛡️"
+                )
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(6),
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(emojis) { emoji ->
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(DakkDarkBg)
+                                .clickable {
+                                    messageText += emoji
+                                    showEmojiSheet = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = emoji, fontSize = 22.sp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // P2P Sesli / Görüntülü Arama Ekranı Modal
+    if (activeCallType != null) {
+        P2pCallDialog(
+            peerAlias = peer.alias,
+            callType = activeCallType!!,
+            onEndCall = { activeCallType = null }
+        )
+    }
+
+    // Medyaları Görüntüle Dialog
+    if (showMediaGallery) {
+        val mediaMessages = messages.filter { it.content.startsWith("📷") || it.content.contains("Fotoğraf") || it.content.contains("Galeri") }
+
+        Dialog(onDismissRequest = { showMediaGallery = false }) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = DakkDarkSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Paylaşılan Medyalar 🖼️", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (mediaMessages.isEmpty()) {
+                        Text("Bu sohbet içinde henüz paylaşılan medya bulunmuyor.", color = DakkTextSecondaryDark, fontSize = 13.sp)
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.height(240.dp)
+                        ) {
+                            items(mediaMessages) { msg ->
+                                val cleanUri = msg.content.removePrefix("📷").trim()
+                                Box(
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(DakkDarkBg)
+                                        .clickable { selectedImageForFullscreen = cleanUri },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (cleanUri.startsWith("content://") || cleanUri.startsWith("file://")) {
+                                        AsyncImage(
+                                            model = cleanUri,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(Icons.Default.Image, contentDescription = null, tint = DakkYellow)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = { showMediaGallery = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Kapat", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    // Tam Ekran Fotoğraf Görüntüleyici Modal
+    if (selectedImageForFullscreen != null) {
+        Dialog(
+            onDismissRequest = { selectedImageForFullscreen = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.95f)),
+                contentAlignment = Alignment.Center
+            ) {
+                IconButton(
+                    onClick = { selectedImageForFullscreen = null },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(24.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Kapat", tint = Color.White, modifier = Modifier.size(32.dp))
+                }
+
+                val uriStr = selectedImageForFullscreen!!
+                if (uriStr.startsWith("content://") || uriStr.startsWith("file://")) {
+                    AsyncImage(
+                        model = uriStr,
+                        contentDescription = "Tam Ekran Fotoğraf",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Image, contentDescription = null, tint = DakkYellow, modifier = Modifier.size(100.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Fotoğraf Önizlemesi", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PulsatingOnlineBadge() {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(DakkStatusConnected.copy(alpha = alpha))
+    )
+}
+
+@Composable
+fun P2pCallDialog(
+    peerAlias: String,
+    callType: String,
+    onEndCall: () -> Unit
+) {
+    var durationSeconds by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            durationSeconds++
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onEndCall,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF121418)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Text(
+                    text = if (callType == "VIDEO") "Doğrudan P2P Görüntülü Arama" else "Doğrudan P2P Sesli Arama",
+                    color = DakkYellow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = peerAlias,
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val durationStr = String.format(Locale.getDefault(), "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
+                Text(
+                    text = "Şifreli Bağlantı • $durationStr",
+                    color = DakkStatusConnected,
+                    fontSize = 14.sp
+                )
+
+                Spacer(modifier = Modifier.height(40.dp))
+
+                // Avatar ve Dalga Efekti
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .clip(CircleShape)
+                            .background(DakkYellow.copy(alpha = 0.15f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(CircleShape)
+                            .background(DakkOrange),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = peerAlias.take(1).uppercase(),
+                            color = Color.White,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(60.dp))
+
+                // Arama Kontrol Tuşları
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { },
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2D34))
+                    ) {
+                        Icon(Icons.Default.MicOff, contentDescription = "Sustur", tint = Color.White)
+                    }
+
+                    IconButton(
+                        onClick = onEndCall,
+                        modifier = Modifier
+                            .size(68.dp)
+                            .clip(CircleShape)
+                            .background(Color.Red)
+                    ) {
+                        Icon(Icons.Default.CallEnd, contentDescription = "Aramayı Sonlandır", tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
+
+                    IconButton(
+                        onClick = { },
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2D34))
+                    ) {
+                        Icon(if (callType == "VIDEO") Icons.Default.VideocamOff else Icons.Default.VolumeUp, contentDescription = "Hoparlör", tint = Color.White)
+                    }
+                }
             }
         }
     }
@@ -427,7 +846,10 @@ fun AttachmentOption(
 }
 
 @Composable
-fun WhatsAppMessageBubble(message: MessageEntity) {
+fun WhatsAppMessageBubble(
+    message: MessageEntity,
+    onImageClick: (String) -> Unit
+) {
     val isMe = message.isFromMe
     val timeStr = remember(message.timestamp) {
         val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -459,8 +881,36 @@ fun WhatsAppMessageBubble(message: MessageEntity) {
                     )
                 }
 
+                // Fotoğraf Balonu
+                if (message.content.startsWith("📷")) {
+                    val uriStr = message.content.removePrefix("📷").trim()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black)
+                            .clickable { onImageClick(uriStr) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (uriStr.startsWith("content://") || uriStr.startsWith("file://")) {
+                            AsyncImage(
+                                model = uriStr,
+                                contentDescription = "Fotoğraf",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, tint = DakkYellow, modifier = Modifier.size(36.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Fotoğraf", color = Color.White, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
                 // Sesli Mesaj Balonu Görünümü
-                if (message.content.startsWith("🎙️")) {
+                else if (message.content.startsWith("🎙️")) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(vertical = 4.dp)
@@ -477,7 +927,7 @@ fun WhatsAppMessageBubble(message: MessageEntity) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text("|||||||||||||||||||||||||", color = DakkYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text("0:07", color = DakkTextSecondaryDark, fontSize = 11.sp)
+                            Text(message.content.removePrefix("🎙️").trim(), color = DakkTextSecondaryDark, fontSize = 11.sp)
                         }
                     }
                 } else {

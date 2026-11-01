@@ -88,6 +88,15 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateStatusMessage = MutableStateFlow<String?>(null)
     val updateStatusMessage: StateFlow<String?> = _updateStatusMessage
 
+    private val _showUpdateDialog = MutableStateFlow(false)
+    val showUpdateDialog: StateFlow<Boolean> = _showUpdateDialog
+
+    private val _downloadProgress = MutableStateFlow<Int?>(null)
+    val downloadProgress: StateFlow<Int?> = _downloadProgress
+
+    private val _isDownloading = MutableStateFlow(false)
+    val isDownloading: StateFlow<Boolean> = _isDownloading
+
     private var currentSequenceNumber = 0L
 
     init {
@@ -128,6 +137,8 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                 repository.saveMessage(welcomeMsg)
             }
         }
+
+        checkGitHubUpdatesOnLaunch()
     }
 
     fun navigateTo(screen: Screen) {
@@ -443,10 +454,46 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                 _updateStatusMessage.value = error
             } else if (hasUpdate && info != null) {
                 _updateInfo.value = info
+                _showUpdateDialog.value = true
                 _updateStatusMessage.value = "Yeni sürüm bulundu: v${info.tagName}"
             } else {
                 _updateStatusMessage.value = "Dakk güncel (v${GitHubUpdateManager.CURRENT_VERSION})"
             }
         }
+    }
+
+    fun checkGitHubUpdatesOnLaunch() {
+        updateManager.checkForUpdate { hasUpdate, info, _ ->
+            if (hasUpdate && info != null) {
+                _updateInfo.value = info
+                _showUpdateDialog.value = true
+            }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _showUpdateDialog.value = false
+    }
+
+    fun downloadAndInstallUpdate() {
+        val info = _updateInfo.value ?: return
+        val apkUrl = info.apkDownloadUrl ?: return
+        _isDownloading.value = true
+        _downloadProgress.value = 0
+
+        updateManager.downloadAndPromptInstall(
+            downloadUrl = apkUrl,
+            onProgress = { progress ->
+                _downloadProgress.value = progress
+            },
+            onComplete = {
+                _isDownloading.value = false
+                _showUpdateDialog.value = false
+            },
+            onError = { errorMsg ->
+                _isDownloading.value = false
+                _updateStatusMessage.value = errorMsg
+            }
+        )
     }
 }

@@ -170,7 +170,7 @@ fun ProfileScreen(
                         action = Intent.ACTION_SEND
                         putExtra(
                             Intent.EXTRA_TEXT,
-                            "Selam! WhatsApp yerine doğrudan cihazdan cihaza (P2P), reklamsız ve merkezi sunucusuz mesajlaşalım! Dakk'ı indir: https://github.com/cnrcrm20-ctrl/Dakk/releases/latest"
+                            "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), reklamsız ve sunucusuz mesajlaşalım! 🐥\n\nUygulamayı indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/download/v1.0.1/app-debug.apk"
                         )
                         type = "text/plain"
                     }

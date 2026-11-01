@@ -20,3 +20,4 @@ debug.keystore
 *.apk
 *.aab
 .aistudio/
+public/assets/
