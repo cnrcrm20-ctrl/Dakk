@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dakk Davet</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #121418;
+            color: white;
+            text-align: center;
+        }
+        .container {
+            padding: 20px;
+            max-width: 400px;
+        }
+        .logo {
+            width: 100px;
+            height: 100px;
+            background: white;
+            border-radius: 50%;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #FFC107;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #A0A4A8;
+            margin-bottom: 30px;
+        }
+        .btn {
+            background-color: #FFC107;
+            color: #000;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 16.sp;
+            display: inline-block;
+            transition: transform 0.2s;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="https://raw.githubusercontent.com/cnrcrm20-ctrl/Dakk/main/app/src/main/res/drawable/dakk_logo.png" alt="Dakk" class="logo">
+        <h1>Dakk P2P Daveti</h1>
+        <p id="status">Dakk uygulaması açılıyor...</p>
+        <a href="https://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk" class="btn">Dakk Uygulamasını İndir</a>
+    </div>
+
+    <script>
+        function getQueryParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
+        const data = getQueryParam('data');
+        const inviteUrl = `dakk://invite?data=${data}`;
+        const downloadUrl = "https://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk";
+
+        if (data) {
+            // Uygulamayı açmayı dene
+            window.location.href = inviteUrl;
+
+            // Eğer 2 saniye sonra hala buradaysak, uygulama yüklü olmayabilir
+            setTimeout(() => {
+                document.getElementById('status').innerText = "Dakk yüklü değilse aşağıdaki butondan indirebilirsiniz.";
+            }, 2500);
+        } else {
+            document.getElementById('status').innerText = "Geçersiz davet bağlantısı.";
+        }
+    </script>
+</body>
+</html>

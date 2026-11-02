@@ -69,14 +69,20 @@ data class SignalingPayload(
     }
 
     fun toInvitationLink(): String {
-        return "dakk://invite?data=${encodeToCompactString()}"
+        return "https://cnrcrm20-ctrl.github.io/Dakk/invite?data=${encodeToCompactString()}"
     }
 
     companion object {
         fun decodeFromCompactString(compactString: String): SignalingPayload? {
             return try {
-                val rawString = compactString.removePrefix("dakk://invite?data=").trim()
-                val compressedBytes = Base64.decode(rawString, Base64.URL_SAFE or Base64.NO_WRAP)
+                // Hem dakk:// hem de https:// formatını destekle
+                val dataParam = if (compactString.contains("data=")) {
+                    compactString.substringAfter("data=").substringBefore("&")
+                } else {
+                    compactString.trim()
+                }
+
+                val compressedBytes = Base64.decode(dataParam, Base64.URL_SAFE or Base64.NO_WRAP)
 
                 val bais = ByteArrayInputStream(compressedBytes)
                 val inflaterStream = InflaterInputStream(bais)
