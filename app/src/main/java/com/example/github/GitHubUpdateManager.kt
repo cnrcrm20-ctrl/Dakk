@@ -28,7 +28,7 @@ class GitHubUpdateManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DakkUpdate"
-        const val CURRENT_VERSION = "1.0.3"
+        const val CURRENT_VERSION = "1.0.4"
         const val DEFAULT_REPO = "cnrcrm20-ctrl/Dakk"
     }
 

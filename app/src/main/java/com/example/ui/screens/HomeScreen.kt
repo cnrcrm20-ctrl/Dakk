@@ -12,6 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -246,33 +248,43 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (selectedTab) {
-                0 -> WhatsAppChatsContent(
-                    contacts = filteredContacts,
-                    onContactClick = { contact ->
-                        viewModel.navigateTo(Screen.ChatDetail(contact))
-                    },
-                    onNewChat = { showNewChatSheet = true }
-                )
-                1 -> ContactsTabContent(
-                    contacts = contacts,
-                    onContactClick = { contact ->
-                        viewModel.navigateTo(Screen.ChatDetail(contact))
-                    },
-                    onInviteWhatsApp = {
-                        val sendIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(
-                                Intent.EXTRA_TEXT,
-                                "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli mesajlaşalım! 🐥\n\nUygulamayı hemen indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk"
-                            )
-                            type = "text/plain"
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "WhatsApp ile Davet Gönder"))
-                    },
-                    onScanQr = { showNewChatSheet = true }
-                )
-                2 -> ProfileScreen(viewModel = viewModel)
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(180)).togetherWith(
+                        fadeOut(animationSpec = tween(180))
+                    )
+                },
+                label = "TabTransition"
+            ) { tab ->
+                when (tab) {
+                    0 -> WhatsAppChatsContent(
+                        contacts = filteredContacts,
+                        onContactClick = { contact ->
+                            viewModel.navigateTo(Screen.ChatDetail(contact))
+                        },
+                        onNewChat = { showNewChatSheet = true }
+                    )
+                    1 -> ContactsTabContent(
+                        contacts = contacts,
+                        onContactClick = { contact ->
+                            viewModel.navigateTo(Screen.ChatDetail(contact))
+                        },
+                        onInviteWhatsApp = {
+                            val sendIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(
+                                    Intent.EXTRA_TEXT,
+                                    "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli mesajlaşalım! 🐥\n\nUygulamayı hemen indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk"
+                                )
+                                type = "text/plain"
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "WhatsApp ile Davet Gönder"))
+                        },
+                        onScanQr = { showNewChatSheet = true }
+                    )
+                    2 -> ProfileScreen(viewModel = viewModel)
+                }
             }
         }
     }

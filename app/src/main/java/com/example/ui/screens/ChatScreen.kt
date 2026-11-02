@@ -63,8 +63,11 @@ fun ChatScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val audioManager = remember { com.example.audio.AudioRecorderManager(context) }
 
     BackHandler {
+        audioManager.stopPlaying()
+        audioManager.stopRecording()
         viewModel.navigateTo(Screen.Home)
     }
 
@@ -305,6 +308,7 @@ fun ChatScreen(
                     ) {
                         WhatsAppMessageBubble(
                             message = msg,
+                            audioManager = audioManager,
                             onImageClick = { imgUri -> selectedImageForFullscreen = imgUri }
                         )
                     }
@@ -443,9 +447,18 @@ fun ChatScreen(
                             } else {
                                 if (isRecordingAudio) {
                                     isRecordingAudio = false
-                                    viewModel.sendMessageToActivePeer("🎙️ Sesli Mesaj (0:${if (recordDurationSeconds < 10) "0$recordDurationSeconds" else recordDurationSeconds})")
-                                    Toast.makeText(context, "Sesli mesaj gönderildi", Toast.LENGTH_SHORT).show()
+                                    val file = audioManager.stopRecording()
+                                    if (file != null) {
+                                        viewModel.sendMessageToActivePeer("🎙️ ${file.absolutePath}")
+                                        Toast.makeText(context, "Sesli mesaj iletildi", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.sendMessageToActivePeer("🎙️ Sesli Mesaj (0:${if (recordDurationSeconds < 10) "0$recordDurationSeconds" else recordDurationSeconds})")
+                                    }
                                 } else {
+                                    val startedFile = audioManager.startRecording()
+                                    if (startedFile == null) {
+                                        Toast.makeText(context, "Mikrofon iznini kontrol edin", Toast.LENGTH_SHORT).show()
+                                    }
                                     isRecordingAudio = true
                                 }
                             }
@@ -704,7 +717,11 @@ fun P2pCallDialog(
     callType: String,
     onEndCall: () -> Unit
 ) {
+    val context = LocalContext.current
     var durationSeconds by remember { mutableIntStateOf(0) }
+    var isMuted by remember { mutableStateOf(false) }
+    var isSpeakerOn by remember { mutableStateOf(true) }
+    var isCameraOff by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -747,18 +764,26 @@ fun P2pCallDialog(
 
                 val durationStr = String.format(Locale.getDefault(), "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
                 Text(
-                    text = "Şifreli Bağlantı • $durationStr",
-                    color = DakkStatusConnected,
+                    text = if (isMuted) "Mikrofon Kapalı • $durationStr" else "Şifreli P2P Ses Aktif • $durationStr",
+                    color = if (isMuted) DakkOrange else DakkStatusConnected,
                     fontSize = 14.sp
                 )
 
                 Spacer(modifier = Modifier.height(40.dp))
 
-                // Avatar ve Dalga Efekti
+                // Avatar ve Ses Dalga Efekti
                 Box(contentAlignment = Alignment.Center) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                    val pulseScale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.25f,
+                        animationSpec = infiniteRepeatable(tween(1000), repeatMode = RepeatMode.Reverse),
+                        label = "pulseScale"
+                    )
+
                     Box(
                         modifier = Modifier
-                            .size(140.dp)
+                            .size((140 * pulseScale).dp)
                             .clip(CircleShape)
                             .background(DakkYellow.copy(alpha = 0.15f))
                     )
@@ -782,17 +807,25 @@ fun P2pCallDialog(
 
                 // Arama Kontrol Tuşları
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = { },
+                        onClick = {
+                            isMuted = !isMuted
+                            val msg = if (isMuted) "Mikrofon Kapatıldı" else "Mikrofon Açıldı"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(56.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF2A2D34))
+                            .background(if (isMuted) Color.Red else Color(0xFF2A2D34))
                     ) {
-                        Icon(Icons.Default.MicOff, contentDescription = "Sustur", tint = Color.White)
+                        Icon(
+                            imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = "Sustur",
+                            tint = Color.White
+                        )
                     }
 
                     IconButton(
@@ -802,17 +835,40 @@ fun P2pCallDialog(
                             .clip(CircleShape)
                             .background(Color.Red)
                     ) {
-                        Icon(Icons.Default.CallEnd, contentDescription = "Aramayı Sonlandır", tint = Color.White, modifier = Modifier.size(32.dp))
+                        Icon(
+                            imageVector = Icons.Default.CallEnd,
+                            contentDescription = "Aramayı Sonlandır",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
                     }
 
                     IconButton(
-                        onClick = { },
+                        onClick = {
+                            if (callType == "VIDEO") {
+                                isCameraOff = !isCameraOff
+                                val msg = if (isCameraOff) "Kamera Kapatıldı" else "Kamera Açıldı"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            } else {
+                                isSpeakerOn = !isSpeakerOn
+                                val msg = if (isSpeakerOn) "Hoparlör Açık" else "Ahize Açık"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        },
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(56.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF2A2D34))
+                            .background(if (isCameraOff) Color.Red else Color(0xFF2A2D34))
                     ) {
-                        Icon(if (callType == "VIDEO") Icons.Default.VideocamOff else Icons.Default.VolumeUp, contentDescription = "Hoparlör", tint = Color.White)
+                        Icon(
+                            imageVector = if (callType == "VIDEO") {
+                                if (isCameraOff) Icons.Default.VideocamOff else Icons.Default.Videocam
+                            } else {
+                                if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.VolumeDown
+                            },
+                            contentDescription = "Kontrol",
+                            tint = Color.White
+                        )
                     }
                 }
             }
@@ -848,8 +904,10 @@ fun AttachmentOption(
 @Composable
 fun WhatsAppMessageBubble(
     message: MessageEntity,
+    audioManager: com.example.audio.AudioRecorderManager,
     onImageClick: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val isMe = message.isFromMe
     val timeStr = remember(message.timestamp) {
         val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -909,25 +967,49 @@ fun WhatsAppMessageBubble(
                         }
                     }
                 }
-                // Sesli Mesaj Balonu Görünümü
+                // Sesli Mesaj Balonu Görünümü (Gerçek Ses Çalma)
                 else if (message.content.startsWith("🎙️")) {
+                    val rawPath = message.content.removePrefix("🎙️").trim()
+                    var isPlaying by remember { mutableStateOf(false) }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                if (isPlaying) {
+                                    audioManager.stopPlaying()
+                                    isPlaying = false
+                                } else {
+                                    if (rawPath.startsWith("/") || rawPath.endsWith(".m4a")) {
+                                        isPlaying = true
+                                        audioManager.playAudio(rawPath) {
+                                            isPlaying = false
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "Sesli Mesaj $rawPath", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
-                                .background(DakkYellow),
+                                .background(if (isPlaying) Color.Green else DakkYellow),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text("|||||||||||||||||||||||||", color = DakkYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text(message.content.removePrefix("🎙️").trim(), color = DakkTextSecondaryDark, fontSize = 11.sp)
+                            Text("|||||||||||||||||||||||||", color = if (isPlaying) Color.Green else DakkYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(if (rawPath.startsWith("/")) "Ses Kaydı (.m4a)" else rawPath, color = DakkTextSecondaryDark, fontSize = 11.sp)
                         }
                     }
                 } else {

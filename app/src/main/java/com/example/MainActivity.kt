@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -14,12 +15,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.signaling.SignalingPayload
 import com.example.ui.DakkViewModel
 import com.example.ui.Screen
 import com.example.ui.components.DakkUpdateDialog
+import com.example.ui.components.PrivacyPolicyDialog
 import com.example.ui.screens.*
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkTheme
@@ -83,6 +89,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun DakkApp(viewModel: DakkViewModel) {
+    val context = LocalContext.current
+    var isPrivacyAccepted by remember {
+        val prefs = context.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
+        mutableStateOf(prefs.getBoolean("is_privacy_accepted", false))
+    }
+
     val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
     val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
@@ -90,16 +102,22 @@ fun DakkApp(viewModel: DakkViewModel) {
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize()) {
+        if (!isPrivacyAccepted) {
+            PrivacyPolicyDialog(
+                onAccepted = { isPrivacyAccepted = true }
+            )
+        }
+
         AnimatedContent(
             targetState = currentScreen,
             transitionSpec = {
                 if (targetState is Screen.ChatDetail) {
-                    (slideInHorizontally(animationSpec = tween(300)) { it } + fadeIn()).togetherWith(
-                        slideOutHorizontally(animationSpec = tween(300)) { -it / 3 } + fadeOut()
+                    (slideInHorizontally(animationSpec = tween(220)) { it } + fadeIn()).togetherWith(
+                        slideOutHorizontally(animationSpec = tween(220)) { -it / 3 } + fadeOut()
                     )
                 } else {
-                    (slideInHorizontally(animationSpec = tween(300)) { -it / 3 } + fadeIn()).togetherWith(
-                        slideOutHorizontally(animationSpec = tween(300)) { it } + fadeOut()
+                    (slideInHorizontally(animationSpec = tween(220)) { -it / 3 } + fadeIn()).togetherWith(
+                        slideOutHorizontally(animationSpec = tween(220)) { it } + fadeOut()
                     )
                 }
             },
