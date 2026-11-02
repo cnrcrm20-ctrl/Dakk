@@ -50,7 +50,7 @@
                 <data
                     android:scheme="https"
                     android:host="cnrcrm20-ctrl.github.io"
-                    android:pathPrefix="/Dakk/invite" />
+                    android:pathPrefix="/Dakk" />
             </intent-filter>
         </activity>
 

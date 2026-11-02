@@ -148,12 +148,7 @@ fun HomeScreen(
                             leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF25D366)) },
                             onClick = {
                                 showMenu = false
-                                val sendIntent = Intent().apply {
-                                    action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli ve %100 gizli mesajlaşalım! 🐥\n\nUygulamayı hemen indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk")
-                                    type = "text/plain"
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "Dakk'a Davet Et"))
+                                viewModel.shareInviteLinkViaWhatsApp(context)
                             }
                         )
                         DropdownMenuItem(
@@ -271,15 +266,7 @@ fun HomeScreen(
                             viewModel.navigateTo(Screen.ChatDetail(contact))
                         },
                         onInviteWhatsApp = {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(
-                                    Intent.EXTRA_TEXT,
-                                    "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli mesajlaşalım! 🐥\n\nUygulamayı hemen indir:\nhttps://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk"
-                                )
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "WhatsApp ile Davet Gönder"))
+                            viewModel.shareInviteLinkViaWhatsApp(context)
                         },
                         onScanQr = { showNewChatSheet = true }
                     )

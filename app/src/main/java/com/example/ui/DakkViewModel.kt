@@ -355,6 +355,31 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * WhatsApp ve diğer mesajlaşma uygulamaları için otomatik P2P teklif bağlantısı paylaşır
+     */
+    fun shareInviteLinkViaWhatsApp(context: android.content.Context) {
+        val sendShareIntent: (SignalingPayload) -> Unit = { payload ->
+            val link = payload.toInvitationLink()
+            val text = "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli mesajlaşalım! 🐥\n\nBeni eklemek için linke tıkla:\n$link"
+            val sendIntent = android.content.Intent().apply {
+                action = android.content.Intent.ACTION_SEND
+                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                type = "text/plain"
+            }
+            context.startActivity(android.content.Intent.createChooser(sendIntent, "Dakk'a Davet Et"))
+        }
+
+        val existingOffer = _myOfferPayload.value
+        if (existingOffer != null) {
+            sendShareIntent(existingOffer)
+        } else {
+            createOfferForHandshake { payload ->
+                sendShareIntent(payload)
+            }
+        }
+    }
+
+    /**
      * Gelen davet linki veya QR okutulduğunda tetiklenir
      */
     fun onIncomingInviteReceived(payload: SignalingPayload) {
