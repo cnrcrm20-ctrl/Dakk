@@ -41,17 +41,28 @@ jobs:
     - name: Build Debug APK
       run: ./gradlew assembleDebug
 
+    - name: Prepare Release APK Name
+      run: |
+        TAG_NAME="${{ github.ref_name }}"
+        if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "main" ]; then
+          TAG_NAME="v1.0.3"
+        fi
+        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dakk-${TAG_NAME}.apk
+        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dakk.apk
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dakk-debug-apk
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: dakk-apk
+        path: app/build/outputs/apk/debug/Dakk*.apk
 
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
-        files: app/build/outputs/apk/debug/app-debug.apk
+        files: |
+          app/build/outputs/apk/debug/Dakk-${{ github.ref_name }}.apk
+          app/build/outputs/apk/debug/Dakk.apk
         name: Dakk Release ${{ github.ref_name }}
         draft: false
         prerelease: false

@@ -36,6 +36,7 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     val webRtc = WebRtcManager(application)
     val updateManager = GitHubUpdateManager(application)
     val rendezvous = ZeroCostRendezvous()
+    val notificationHelper = com.example.notification.NotificationHelper(application)
 
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Splash)
     val currentScreen: StateFlow<Screen> = _currentScreen
@@ -295,6 +296,12 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                 sequenceNumber = seq
             )
             repository.saveMessage(messageEntity)
+
+            // Bildirim Gönder
+            notificationHelper.showMessageNotification(
+                senderAlias = contact?.alias ?: "Dakk Kullanıcısı",
+                messageText = decrypted
+            )
         }
     }
 

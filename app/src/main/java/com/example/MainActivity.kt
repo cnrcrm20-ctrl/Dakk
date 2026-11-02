@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -88,29 +90,45 @@ fun DakkApp(viewModel: DakkViewModel) {
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize()) {
-        when (val screen = currentScreen) {
-            is Screen.Splash -> {
-                SplashScreen(
-                    onTimeout = { viewModel.navigateTo(Screen.Home) }
-                )
-            }
-            is Screen.Home -> {
-                HomeScreen(viewModel = viewModel)
-            }
-            is Screen.ChatDetail -> {
-                ChatScreen(
-                    peer = screen.peer,
-                    viewModel = viewModel
-                )
-            }
-            is Screen.Handshake -> {
-                HandshakeScreen(viewModel = viewModel)
-            }
-            is Screen.Diagnostic -> {
-                NetworkDiagnosticScreen(viewModel = viewModel)
-            }
-            is Screen.Profile -> {
-                ProfileScreen(viewModel = viewModel)
+        AnimatedContent(
+            targetState = currentScreen,
+            transitionSpec = {
+                if (targetState is Screen.ChatDetail) {
+                    (slideInHorizontally(animationSpec = tween(300)) { it } + fadeIn()).togetherWith(
+                        slideOutHorizontally(animationSpec = tween(300)) { -it / 3 } + fadeOut()
+                    )
+                } else {
+                    (slideInHorizontally(animationSpec = tween(300)) { -it / 3 } + fadeIn()).togetherWith(
+                        slideOutHorizontally(animationSpec = tween(300)) { it } + fadeOut()
+                    )
+                }
+            },
+            label = "ScreenTransition"
+        ) { screen ->
+            when (screen) {
+                is Screen.Splash -> {
+                    SplashScreen(
+                        onTimeout = { viewModel.navigateTo(Screen.Home) }
+                    )
+                }
+                is Screen.Home -> {
+                    HomeScreen(viewModel = viewModel)
+                }
+                is Screen.ChatDetail -> {
+                    ChatScreen(
+                        peer = screen.peer,
+                        viewModel = viewModel
+                    )
+                }
+                is Screen.Handshake -> {
+                    HandshakeScreen(viewModel = viewModel)
+                }
+                is Screen.Diagnostic -> {
+                    NetworkDiagnosticScreen(viewModel = viewModel)
+                }
+                is Screen.Profile -> {
+                    ProfileScreen(viewModel = viewModel)
+                }
             }
         }
 

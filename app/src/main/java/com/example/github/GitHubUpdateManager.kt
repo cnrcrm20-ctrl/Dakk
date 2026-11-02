@@ -13,6 +13,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
+import android.os.Build
+import android.provider.Settings
+
 data class ReleaseInfo(
     val tagName: String,
     val name: String,
@@ -25,7 +28,7 @@ class GitHubUpdateManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DakkUpdate"
-        const val CURRENT_VERSION = "1.0.1"
+        const val CURRENT_VERSION = "1.0.3"
         const val DEFAULT_REPO = "cnrcrm20-ctrl/Dakk"
     }
 
@@ -173,11 +176,28 @@ class GitHubUpdateManager(private val context: Context) {
 
     fun promptInstall(file: File) {
         try {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(
-                    Uri.fromFile(file),
-                    "application/vnd.android.package-archive"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!context.packageManager.canRequestPackageInstalls()) {
+                    val settingsIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(settingsIntent)
+                }
+            }
+
+            val apkUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
                 )
+            } else {
+                Uri.fromFile(file)
+            }
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
             }
             context.startActivity(intent)

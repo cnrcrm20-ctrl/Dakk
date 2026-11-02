@@ -178,6 +178,29 @@ fun DakkUpdateDialog(
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Play Protect Bilgilendirme Rozeti
+                        Surface(
+                            color = DakkDarkBg,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "🛡️", fontSize = 14.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Yüklerken 'Play Protect' uyarısı çıkarsa 'Yine de Yükle / Install anyway' butonuna basabilirsiniz.",
+                                    fontSize = 10.sp,
+                                    color = DakkTextTertiaryDark,
+                                    lineHeight = 12.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
