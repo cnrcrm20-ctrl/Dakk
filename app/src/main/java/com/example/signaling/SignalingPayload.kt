@@ -33,7 +33,6 @@ data class SignalingPayload(
 
     /**
      * JSON olarak paketler, Zlib ile sıkıştırır ve URL-Safe Base64 string üretir.
-     * Bu sayede büyük SDP verisi küçülür ve QR koduna ya da davet linkine tek parça sığar.
      */
     fun encodeToCompactString(): String {
         val root = JSONObject().apply {
@@ -77,16 +76,43 @@ data class SignalingPayload(
     }
 
     companion object {
-        fun decodeFromCompactString(compactString: String): SignalingPayload? {
+        fun decodeFromCompactString(rawInput: String): SignalingPayload? {
             return try {
-                // Hem dakk:// hem de https:// formatını destekle
-                val dataParam = if (compactString.contains("data=")) {
-                    compactString.substringAfter("data=").substringBefore("&")
-                } else {
-                    compactString.trim()
+                var str = rawInput.trim()
+
+                // URL veya WhatsApp mesajı içinden data parametresini çıkar
+                if (str.contains("data=")) {
+                    str = str.substringAfter("data=")
+                        .substringBefore(" ")
+                        .substringBefore("\n")
+                        .substringBefore("\r")
+                        .substringBefore("&")
+                        .substringBefore("#")
+                } else if (str.contains("dakk://invite?")) {
+                    str = str.substringAfter("dakk://invite?")
+                        .substringBefore(" ")
+                        .substringBefore("\n")
                 }
 
-                val compressedBytes = Base64.decode(dataParam, Base64.URL_SAFE or Base64.NO_WRAP)
+                // URL-decode işlemi
+                if (str.contains("%")) {
+                    try {
+                        str = java.net.URLDecoder.decode(str, "UTF-8")
+                    } catch (_: Exception) {}
+                }
+
+                str = str.trim()
+
+                // Base64 Pad tamamlama
+                while (str.length % 4 != 0 && !str.endsWith("=")) {
+                    str += "="
+                }
+
+                val compressedBytes = try {
+                    Base64.decode(str, Base64.URL_SAFE or Base64.NO_WRAP)
+                } catch (_: Exception) {
+                    Base64.decode(str, Base64.DEFAULT)
+                }
 
                 val bais = ByteArrayInputStream(compressedBytes)
                 val inflaterStream = InflaterInputStream(bais)

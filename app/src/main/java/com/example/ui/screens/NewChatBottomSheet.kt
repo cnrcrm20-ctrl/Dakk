@@ -5,18 +5,18 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,10 +30,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.signaling.QrCodeHelper
 import com.example.signaling.SignalingPayload
 import com.example.ui.DakkViewModel
+import com.example.ui.components.CameraQrScannerView
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,41 +47,20 @@ fun NewChatBottomSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var activeView by remember { mutableStateOf<String?>("MENU") } // MENU, SHOW_QR, PASTE_LINK, PIN
+    var activeView by remember { mutableStateOf<String?>("MENU") } // MENU, SHOW_QR, PASTE_LINK, PIN, LIVE_CAMERA
     var pasteInput by remember { mutableStateOf("") }
     var pinInput by remember { mutableStateOf("") }
+    var isPinMatching by remember { mutableStateOf(false) }
 
     val myOffer by viewModel.myOfferPayload.collectAsStateWithLifecycle()
-    val isGenerating by viewModel.isGeneratingOffer.collectAsStateWithLifecycle()
 
     val handleDecodedQr: (String) -> Unit = { rawContent ->
         val payload = SignalingPayload.decodeFromCompactString(rawContent)
         if (payload != null) {
-            if (payload.type == "OFFER") {
-                viewModel.processRemoteOfferAndCreateAnswer(payload) {
-                    Toast.makeText(context, "${payload.alias} kişisi eklendi!", Toast.LENGTH_SHORT).show()
-                    onDismiss()
-                }
-            } else if (payload.type == "ANSWER") {
-                viewModel.applyRemoteAnswer(payload)
-                Toast.makeText(context, "Bağlantı kuruldu!", Toast.LENGTH_SHORT).show()
-                onDismiss()
-            }
+            viewModel.onIncomingInviteReceived(payload)
+            onDismiss()
         } else {
-            Toast.makeText(context, "QR kod okundu ancak Dakk daveti algılanamadı.", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    val cameraScannerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap ->
-        if (bitmap != null) {
-            val decoded = QrCodeHelper.decodeQrFromBitmap(bitmap)
-            if (decoded != null) {
-                handleDecodedQr(decoded)
-            } else {
-                Toast.makeText(context, "Fotoğrafta QR kod bulunamadı. Lütfen kodu daha net ve yakından çekin.", Toast.LENGTH_LONG).show()
-            }
+            Toast.makeText(context, "Dakk daveti algılanamadı. Geçersiz kod veya link.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -90,15 +72,31 @@ fun NewChatBottomSheet(
             if (decoded != null) {
                 handleDecodedQr(decoded)
             } else {
-                Toast.makeText(context, "Seçilen görselde geçerli bir QR kod okunamadı.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Seçilen görselde geçerli bir Dakk QR kodu okunamadı.", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    // Açılır açılmaz STUN üzerinden P2P teklifi arka planda önceden hazırla
+    // Açılır açılmaz P2P teklifini arka planda hazırla
     LaunchedEffect(Unit) {
         if (myOffer == null) {
             viewModel.createOfferForHandshake()
+        }
+    }
+
+    // Canlı Kamera QR Tarayıcı Modal Ekranı
+    if (activeView == "LIVE_CAMERA") {
+        Dialog(
+            onDismissRequest = { activeView = "MENU" },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            CameraQrScannerView(
+                onQrCodeScanned = { rawQrText ->
+                    activeView = "MENU"
+                    handleDecodedQr(rawQrText)
+                },
+                onClose = { activeView = "MENU" }
+            )
         }
     }
 
@@ -117,28 +115,28 @@ fun NewChatBottomSheet(
             when (activeView) {
                 "MENU" -> {
                     Text(
-                        text = "Yeni Sohbet Başlat",
+                        text = "Yeni Sohbet Başlat 🐥",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Text(
-                        text = "Arkadaşınla kameradan QR taratarak, WhatsApp'tan veya kodla anında bağlan",
+                        text = "Arkadaşınla canlı kamerasız/kameralı QR, WhatsApp veya kodla anında bağlan",
                         fontSize = 13.sp,
                         color = DakkTextSecondaryDark
                     )
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    // 1. Kamera ile Doğrudan QR Tara
+                    // 1. Canlı Kamerayla QR Tara
                     QuickActionRow(
                         icon = Icons.Default.QrCodeScanner,
                         iconBg = DakkYellow,
                         iconTint = Color.Black,
-                        title = "Kamerayla QR Tara 📷",
-                        subtitle = "Arkadaşının QR koduna kamerayı tut, tek tıkla sohbete bağlan",
+                        title = "Kamerayla Canlı QR Tara 📷",
+                        subtitle = "Kamerayı tut, anında şifreli P2P sohbete bağlan",
                         onClick = {
-                            cameraScannerLauncher.launch(null)
+                            activeView = "LIVE_CAMERA"
                         }
                     )
 
@@ -147,9 +145,9 @@ fun NewChatBottomSheet(
                     // 2. Galeriden QR Görseli Seç
                     QuickActionRow(
                         icon = Icons.Default.Image,
-                        iconBg = Color(0xFF6366F1), // İndigo
-                        title = "Galeriden QR Seç",
-                        subtitle = "Sana ekran görüntüsü atılan QR kodunu galeriden seç ve çöz",
+                        iconBg = Color(0xFF6366F1),
+                        title = "Galeriden QR Görseli Seç",
+                        subtitle = "Sana ekran görüntüsü atılan QR kodunu galeriden seç",
                         onClick = {
                             galleryScannerLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -162,33 +160,12 @@ fun NewChatBottomSheet(
                     // 3. WhatsApp ile Davet Bağlantısı Gönder
                     QuickActionRow(
                         icon = Icons.Default.Share,
-                        iconBg = Color(0xFF25D366), // WhatsApp Yeşili
+                        iconBg = Color(0xFF25D366),
                         title = "WhatsApp ile Davet Et",
-                        subtitle = "Arkadaşına doğrudan WhatsApp üzerinden sohbet bağlantısı gönder",
+                        subtitle = "Arkadaşına doğrudan kişisel P2P sohbet bağlantısı gönder",
                         onClick = {
-                            val sharePayload = { payload: SignalingPayload ->
-                                val link = payload.toInvitationLink()
-                                val shareIntent = Intent().apply {
-                                    action = Intent.ACTION_SEND
-                                    putExtra(
-                                        Intent.EXTRA_TEXT,
-                                        "Selam! WhatsApp yerine Dakk üzerinden doğrudan P2P ve güvenli konuşalım. Sohbete katılmak için tıkla:\n$link"
-                                    )
-                                    type = "text/plain"
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "WhatsApp ile Davet Gönder"))
-                                onDismiss()
-                            }
-
-                            val currentOffer = myOffer
-                            if (currentOffer != null) {
-                                sharePayload(currentOffer)
-                            } else {
-                                Toast.makeText(context, "Davet bağlantısı hazırlanıyor...", Toast.LENGTH_SHORT).show()
-                                viewModel.createOfferForHandshake { generatedOffer ->
-                                    sharePayload(generatedOffer)
-                                }
-                            }
+                            viewModel.shareInviteLinkViaWhatsApp(context)
+                            onDismiss()
                         }
                     )
 
@@ -228,8 +205,8 @@ fun NewChatBottomSheet(
                     QuickActionRow(
                         icon = Icons.Default.Link,
                         iconBg = Color(0xFF64748B),
-                        title = "Gelen Bağlantıyı Yapıştır",
-                        subtitle = "Sana gelen davet linkini yapıştır ve sohbete gir",
+                        title = "Gelen Bağlantıyı veya Kodu Yapıştır",
+                        subtitle = "WhatsApp'tan gelen davet linkini yapıştır ve sohbete gir",
                         onClick = { activeView = "PASTE_LINK" }
                     )
 
@@ -240,7 +217,7 @@ fun NewChatBottomSheet(
                         icon = Icons.Default.Dialpad,
                         iconBg = Color(0xFF3B82F6),
                         title = "6 Haneli Hızlı Kod ile Eşleş",
-                        subtitle = "Ortak bir 6 haneli kod belirleyerek uzaktan tek tıkla bağlanın",
+                        subtitle = "Ortak bir 6 haneli kod belirleyerek uzaktan anında bağlanın",
                         onClick = { activeView = "PIN" }
                     )
 
@@ -253,7 +230,7 @@ fun NewChatBottomSheet(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         IconButton(onClick = { activeView = "MENU" }) {
-                            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri", tint = Color.White)
                         }
                         Text(
                             text = "Dakk QR Kodum",
@@ -317,7 +294,7 @@ fun NewChatBottomSheet(
                             Spacer(modifier = Modifier.height(10.dp))
 
                             OutlinedButton(
-                                onClick = { cameraScannerLauncher.launch(null) },
+                                onClick = { activeView = "LIVE_CAMERA" },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                             ) {
@@ -340,7 +317,7 @@ fun NewChatBottomSheet(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         IconButton(onClick = { activeView = "MENU" }) {
-                            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri", tint = Color.White)
                         }
                         Text(
                             text = "Davet Bağlantısını Yapıştır",
@@ -355,7 +332,7 @@ fun NewChatBottomSheet(
                     OutlinedTextField(
                         value = pasteInput,
                         onValueChange = { pasteInput = it },
-                        placeholder = { Text("dakk://invite?data=... veya arkadaşının kodu", color = DakkTextTertiaryDark, fontSize = 13.sp) },
+                        placeholder = { Text("https://cnrcrm20-ctrl.github.io/Dakk/invite?data=... veya dakk://...", color = DakkTextTertiaryDark, fontSize = 13.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = DakkYellow,
@@ -372,24 +349,16 @@ fun NewChatBottomSheet(
                         onClick = {
                             val payload = SignalingPayload.decodeFromCompactString(pasteInput)
                             if (payload != null) {
-                                if (payload.type == "OFFER") {
-                                    viewModel.processRemoteOfferAndCreateAnswer(payload) {
-                                        Toast.makeText(context, "${payload.alias} kişisi eklendi!", Toast.LENGTH_SHORT).show()
-                                        onDismiss()
-                                    }
-                                } else if (payload.type == "ANSWER") {
-                                    viewModel.applyRemoteAnswer(payload)
-                                    Toast.makeText(context, "Bağlantı kuruldu!", Toast.LENGTH_SHORT).show()
-                                    onDismiss()
-                                }
+                                viewModel.onIncomingInviteReceived(payload)
+                                onDismiss()
                             } else {
-                                Toast.makeText(context, "Geçersiz davet bağlantısı", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Geçersiz davet bağlantısı veya kod", Toast.LENGTH_LONG).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Sohbeti Başlat", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Sohbeti Başlat 🚀", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.height(20.dp))
                 }
@@ -400,7 +369,7 @@ fun NewChatBottomSheet(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         IconButton(onClick = { activeView = "MENU" }) {
-                            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri", tint = Color.White)
                         }
                         Text(
                             text = "6 Haneli Hızlı PIN",
@@ -413,7 +382,7 @@ fun NewChatBottomSheet(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "Arkadaşınızla belirlediğiniz 6 haneli kodu yazın:",
+                        text = "Arkadaşınızla aynı 6 haneli kodu yazıp 'Eşleş' butonuna basın:",
                         fontSize = 13.sp,
                         color = DakkTextSecondaryDark
                     )
@@ -423,7 +392,7 @@ fun NewChatBottomSheet(
                     OutlinedTextField(
                         value = pinInput,
                         onValueChange = { if (it.length <= 6) pinInput = it },
-                        placeholder = { Text("Örn: 948210", color = DakkTextTertiaryDark) },
+                        placeholder = { Text("Örn: 839210", color = DakkTextTertiaryDark) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = DakkYellow,
@@ -436,43 +405,29 @@ fun NewChatBottomSheet(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                if (pinInput.length >= 4) {
-                                    viewModel.createOfferForHandshake()
-                                    viewModel.listenToPinRoom("${pinInput}_ans") { ans ->
-                                        viewModel.applyRemoteAnswer(ans)
-                                        Toast.makeText(context, "Bağlandı!", Toast.LENGTH_SHORT).show()
-                                        onDismiss()
-                                    }
-                                    Toast.makeText(context, "Oda açıldı! Karşı taraf bağlanıyor...", Toast.LENGTH_SHORT).show()
+                    Button(
+                        onClick = {
+                            if (pinInput.trim().length >= 4) {
+                                isPinMatching = true
+                                viewModel.startPinRoomMatch(pinInput.trim()) {
+                                    isPinMatching = false
+                                    Toast.makeText(context, "Eşleşildi! P2P sohbet kuruldu.", Toast.LENGTH_SHORT).show()
+                                    onDismiss()
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Oda Aç", color = Color.Black, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = {
-                                if (pinInput.length >= 4) {
-                                    viewModel.listenToPinRoom(pinInput) { offer ->
-                                        viewModel.processRemoteOfferAndCreateAnswer(offer) { ans ->
-                                            viewModel.publishToPinRoom("${pinInput}_ans", ans) {
-                                                Toast.makeText(context, "Bağlantı kuruldu!", Toast.LENGTH_SHORT).show()
-                                                onDismiss()
-                                            }
-                                        }
-                                    }
-                                    Toast.makeText(context, "Odaya bağlanılıyor...", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = DakkOrange),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Katıl", color = Color.White, fontWeight = FontWeight.Bold)
+                            } else {
+                                Toast.makeText(context, "Lütfen en az 4 haneli kod girin.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !isPinMatching,
+                        colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isPinMatching) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Eşleşiliyor...", color = Color.Black, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("Eşleş ve Bağlan 🚀", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     }
                     Spacer(modifier = Modifier.height(20.dp))

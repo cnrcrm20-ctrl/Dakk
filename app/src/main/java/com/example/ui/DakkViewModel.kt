@@ -489,6 +489,37 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * 6 Haneli PIN ile İki Yönlü Anında Eşleşme
+     */
+    fun startPinRoomMatch(pin: String, onConnected: () -> Unit) {
+        val cleanPin = pin.trim()
+        if (cleanPin.length < 4) return
+
+        _handshakeStatus.value = "PIN odasına bağlanılıyor ($cleanPin)..."
+
+        createOfferForHandshake { myOffer ->
+            publishToPinRoom(cleanPin, myOffer) {
+                listenToPinRoom(cleanPin) { remotePayload ->
+                    if (remotePayload.userId != crypto.getOrCreateUserId()) {
+                        if (remotePayload.type == "OFFER") {
+                            processRemoteOfferAndCreateAnswer(remotePayload) { myAnswer ->
+                                publishToPinRoom(cleanPin, myAnswer) {
+                                    notificationHelper.showFriendConnectedNotification(remotePayload.alias)
+                                    onConnected()
+                                }
+                            }
+                        } else if (remotePayload.type == "ANSWER") {
+                            applyRemoteAnswer(remotePayload)
+                            notificationHelper.showFriendConnectedNotification(remotePayload.alias)
+                            onConnected()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * 6 Haneli PIN ile Sıfır Maliyetli Odaya Gönderim
      */
     fun publishToPinRoom(pin: String, payload: SignalingPayload, onDone: (Boolean) -> Unit) {

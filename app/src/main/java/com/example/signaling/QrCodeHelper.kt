@@ -2,8 +2,9 @@ package com.example.signaling
 
 import android.graphics.Bitmap
 import android.graphics.Color
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
+import com.google.zxing.*
+import com.google.zxing.common.GlobalHistogramBinarizer
+import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import java.util.EnumMap
@@ -11,7 +12,7 @@ import java.util.EnumMap
 object QrCodeHelper {
 
     /**
-     * Kompakt sinyalleşme verisi için yüksek kontrastlı net QR Kod Bitmap'i üretir.
+     * Yüksek kontrastlı ve net QR Kod Bitmap'i üretir.
      */
     fun generateQrBitmap(
         content: String,
@@ -46,7 +47,7 @@ object QrCodeHelper {
     }
 
     /**
-     * Kamera önizlemesi veya görselden QR kod içeriğini çözer.
+     * Kamera önizlemesi veya görselden QR kod içeriğini yüksek hassasiyetle çözer.
      */
     fun decodeQrFromBitmap(bitmap: Bitmap): String? {
         return try {
@@ -54,13 +55,38 @@ object QrCodeHelper {
             val height = bitmap.height
             val pixels = IntArray(width * height)
             bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-            val source = com.google.zxing.RGBLuminanceSource(width, height, pixels)
-            val binaryBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
-            val hints = EnumMap<com.google.zxing.DecodeHintType, Any>(com.google.zxing.DecodeHintType::class.java).apply {
-                put(com.google.zxing.DecodeHintType.TRY_HARDER, java.lang.Boolean.TRUE)
+
+            val source = RGBLuminanceSource(width, height, pixels)
+            val reader = MultiFormatReader()
+            val hints = EnumMap<DecodeHintType, Any>(DecodeHintType::class.java).apply {
+                put(DecodeHintType.TRY_HARDER, java.lang.Boolean.TRUE)
+                put(DecodeHintType.POSSIBLE_FORMATS, listOf(BarcodeFormat.QR_CODE))
+                put(DecodeHintType.CHARACTER_SET, "UTF-8")
             }
-            val reader = com.google.zxing.MultiFormatReader()
-            reader.decode(binaryBitmap, hints).text
+
+            // 1. HybridBinarizer dene
+            try {
+                val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+                val result = reader.decode(binaryBitmap, hints)
+                if (!result.text.isNullOrBlank()) return result.text
+            } catch (_: Exception) {}
+
+            // 2. GlobalHistogramBinarizer dene
+            try {
+                val binaryBitmap = BinaryBitmap(GlobalHistogramBinarizer(source))
+                val result = reader.decode(binaryBitmap, hints)
+                if (!result.text.isNullOrBlank()) return result.text
+            } catch (_: Exception) {}
+
+            // 3. Ters kontrast dene (Inverted Luminance)
+            try {
+                val invertedSource = source.invert()
+                val binaryBitmap = BinaryBitmap(HybridBinarizer(invertedSource))
+                val result = reader.decode(binaryBitmap, hints)
+                if (!result.text.isNullOrBlank()) return result.text
+            } catch (_: Exception) {}
+
+            null
         } catch (e: Exception) {
             null
         }
