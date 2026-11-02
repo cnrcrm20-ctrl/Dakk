@@ -107,9 +107,10 @@ fun ProfileScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Dakk kullanıyor 🐥",
+                            text = "Vak vak! Sertifikalı Gizli Ördek 🦆",
                             fontSize = 13.sp,
-                            color = DakkTextSecondaryDark
+                            fontWeight = FontWeight.Medium,
+                            color = DakkYellow
                         )
                     }
 

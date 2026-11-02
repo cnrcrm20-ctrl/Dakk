@@ -27,7 +27,8 @@ data class SignalingPayload(
     val sdp: String,
     val candidates: List<IceCandidateDto>,
     val timestamp: Long = System.currentTimeMillis(),
-    val signature: String = ""
+    val signature: String = "",
+    val roomId: String = "" // Otomatik 2 yönlü el sıkışma için geçici kanal odası
 ) {
 
     /**
@@ -43,6 +44,9 @@ data class SignalingPayload(
             put("s", sdp)
             put("ts", timestamp)
             put("sig", signature)
+            if (roomId.isNotBlank()) {
+                put("r", roomId)
+            }
 
             val candArray = JSONArray()
             for (c in candidates) {
@@ -115,7 +119,8 @@ data class SignalingPayload(
                     sdp = root.getString("s"),
                     candidates = cands,
                     timestamp = root.optLong("ts", System.currentTimeMillis()),
-                    signature = root.optString("sig", "")
+                    signature = root.optString("sig", ""),
+                    roomId = root.optString("r", "")
                 )
             } catch (e: Exception) {
                 null

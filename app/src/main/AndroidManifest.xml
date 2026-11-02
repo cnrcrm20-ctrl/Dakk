@@ -35,12 +35,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep link for Dakk invitation links -->
+            <!-- Deep link for Dakk invitation links (Custom scheme & HTTPS GitHub Pages) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="dakk" android:host="invite" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="cnrcrm20-ctrl.github.io"
+                    android:pathPrefix="/Dakk/invite" />
             </intent-filter>
         </activity>
 

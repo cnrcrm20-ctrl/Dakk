@@ -131,7 +131,7 @@ fun ChatScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("chat_screen_root"),
-        contentWindowInsets = WindowInsets.ime,
+        contentWindowInsets = WindowInsets.statusBars,
         containerColor = DakkDarkBg,
         topBar = {
             TopAppBar(
@@ -294,26 +294,71 @@ fun ChatScreen(
                 }
             }
 
-            // Mesajlar Listesi
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-            ) {
-                items(messages, key = { it.id }) { msg ->
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn(animationSpec = tween(200)) + slideInVertically { it / 3 }
+            // Mesajlar Listesi veya Boş Sohbet Ördek Karşılaması
+            if (messages.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(16.dp)
                     ) {
-                        WhatsAppMessageBubble(
-                            message = msg,
-                            audioManager = audioManager,
-                            onImageClick = { imgUri -> selectedImageForFullscreen = imgUri }
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                                .padding(6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.dakk_logo),
+                                contentDescription = "Dakk Logo",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "Vak vak! Burası çok sessiz 🐥",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DakkYellow
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Bu sohbet tamamen P2P ve uçtan uca şifrelidir.\nSunucu yok, veri tabanı yok. İlk mesajı sen yaz!",
+                            fontSize = 12.sp,
+                            color = DakkTextSecondaryDark,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 18.sp
                         )
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    items(messages, key = { it.id }) { msg ->
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn(animationSpec = tween(200)) + slideInVertically { it / 3 }
+                        ) {
+                            WhatsAppMessageBubble(
+                                message = msg,
+                                audioManager = audioManager,
+                                onImageClick = { imgUri -> selectedImageForFullscreen = imgUri }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
                 }
             }
 
@@ -388,6 +433,8 @@ fun ChatScreen(
                             value = messageText,
                             onValueChange = { messageText = it },
                             placeholder = { Text("Mesaj...", fontSize = 15.sp, color = DakkTextTertiaryDark) },
+                            maxLines = 5,
+                            minLines = 1,
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,

@@ -79,6 +79,10 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGeneratingOffer = MutableStateFlow(false)
     val isGeneratingOffer: StateFlow<Boolean> = _isGeneratingOffer
 
+    // Gelen Arkadaşlık / El Sıkışma İsteği
+    private val _pendingIncomingInvite = MutableStateFlow<SignalingPayload?>(null)
+    val pendingIncomingInvite: StateFlow<SignalingPayload?> = _pendingIncomingInvite
+
     // GitHub Güncelleme State
     private val _updateInfo = MutableStateFlow<ReleaseInfo?>(null)
     val updateInfo: StateFlow<ReleaseInfo?> = _updateInfo
@@ -306,11 +310,14 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Yeni bir P2P Offer (Teklif) oluşturur
+     * Yeni bir P2P Offer (Teklif) oluşturur ve otomatik iki yönlü el sıkışma odasını dinlemeye başlar
      */
     fun createOfferForHandshake(onReady: ((SignalingPayload) -> Unit)? = null) {
         _isGeneratingOffer.value = true
         _handshakeStatus.value = "STUN sunucularından ICE adayları toplanıyor..."
+
+        // Otomatik 2 yönlü eşleşme için benzersiz geçici oda ID'si
+        val autoRoomId = "dk_" + UUID.randomUUID().toString().replace("-", "").take(10)
 
         webRtc.createOffer { sdp, candidates ->
             _isGeneratingOffer.value = false
@@ -324,13 +331,69 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                     alias = crypto.getUserAlias(),
                     publicKey = crypto.getPublicKeyBase64(),
                     sdp = sdp.description,
-                    candidates = candidateDtos
+                    candidates = candidateDtos,
+                    roomId = autoRoomId
                 )
                 _myOfferPayload.value = payload
                 _handshakeStatus.value = "Teklif hazır! QR kodu gösterin veya bağlantıyı paylaşın."
+
+                // Karşı taraf bağlantıyı açıp kabul ettiğinde otomatik cevabı dinle (2 tarafa da veri gitmesi için)
+                rendezvous.subscribeToRoom(autoRoomId) { answerCompact ->
+                    val answerPayload = SignalingPayload.decodeFromCompactString(answerCompact)
+                    if (answerPayload != null && answerPayload.type == "ANSWER") {
+                        rendezvous.stopListening()
+                        applyRemoteAnswer(answerPayload)
+                        notificationHelper.showFriendConnectedNotification(answerPayload.alias)
+                    }
+                }
+
                 onReady?.invoke(payload)
             } else {
                 _handshakeStatus.value = "Teklif oluşturulamadı. Lütfen tekrar deneyin."
+            }
+        }
+    }
+
+    /**
+     * Gelen davet linki veya QR okutulduğunda tetiklenir
+     */
+    fun onIncomingInviteReceived(payload: SignalingPayload) {
+        if (payload.type == "OFFER") {
+            _pendingIncomingInvite.value = payload
+        } else if (payload.type == "ANSWER") {
+            applyRemoteAnswer(payload)
+            notificationHelper.showFriendConnectedNotification(payload.alias)
+        }
+    }
+
+    fun dismissIncomingInvite() {
+        _pendingIncomingInvite.value = null
+    }
+
+    /**
+     * Kullanıcı gelen arkadaşlık teklifini kabul ettiğinde çalışır
+     */
+    fun acceptIncomingInvite(payload: SignalingPayload, onConnected: ((ContactEntity) -> Unit)? = null) {
+        _pendingIncomingInvite.value = null
+        processRemoteOfferAndCreateAnswer(payload) { answerPayload ->
+            // Karşı tarafın dinlediği geçici rendezvous odasına cevabı anında yayınla
+            if (payload.roomId.isNotBlank()) {
+                rendezvous.publishOfferOrAnswer(payload.roomId, answerPayload.encodeToCompactString()) { success ->
+                    // 2. tarafa da veri iletildi!
+                }
+            }
+
+            viewModelScope.launch {
+                val contact = repository.getContact(payload.userId) ?: ContactEntity(
+                    userId = payload.userId,
+                    alias = payload.alias,
+                    publicKey = payload.publicKey,
+                    lastMessage = "Bağlantı kuruldu! Vak vak 🐥"
+                )
+                notificationHelper.showFriendConnectedNotification(payload.alias)
+                onConnected?.invoke(contact)
+                _activeChatPeer.value = contact
+                _currentScreen.value = Screen.ChatDetail(contact)
             }
         }
     }
@@ -353,10 +416,11 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                     alias = crypto.getUserAlias(),
                     publicKey = crypto.getPublicKeyBase64(),
                     sdp = answerSdp.description,
-                    candidates = candidateDtos
+                    candidates = candidateDtos,
+                    roomId = remotePayload.roomId
                 )
                 _myAnswerPayload.value = answerPayload
-                _handshakeStatus.value = "Cevap üretildi! Karşı tarafa taratın veya gönderin."
+                _handshakeStatus.value = "Cevap üretildi! P2P bağlantısı başlatılıyor..."
 
                 // Karşı tarafı arkadaş olarak kaydet
                 viewModelScope.launch {
@@ -394,6 +458,7 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                     lastMessage = "P2P El sıkışması tamamlandı"
                 )
                 repository.saveContact(contact)
+                notificationHelper.showFriendConnectedNotification(answerPayload.alias)
             }
         }
     }

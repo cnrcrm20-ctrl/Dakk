@@ -347,33 +347,34 @@ fun WhatsAppChatsContent(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Henüz Sohbetiniz Yok",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        text = "Vak vak! Bir ördek yalnız yüzemez 🐥",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Black,
+                        color = DakkYellow
                     )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "WhatsApp yerine kullanmaya başlamak için bir arkadaşını davet et veya Dakk Asistanı ile konuş.",
+                        text = "Dedikodular bulut sunucularında değil aranızda kalsın! Bir arkadaşını davet et veya QR kodunu tara, %100 şifreli P2P sohbete başla.",
                         fontSize = 13.sp,
                         color = DakkTextSecondaryDark,
                         lineHeight = 18.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 12.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Button(
                         onClick = onNewChat,
                         colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.AddComment, contentDescription = null, tint = Color.Black)
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Sohbet Başlat", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Arkadaş Ekle / QR Tara 🐥", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
