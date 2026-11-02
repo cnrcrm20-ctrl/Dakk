@@ -13,6 +13,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 
@@ -28,7 +29,7 @@ class GitHubUpdateManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DakkUpdate"
-        const val CURRENT_VERSION = "1.0.4"
+        const val CURRENT_VERSION = "1.0.5"
         const val DEFAULT_REPO = "cnrcrm20-ctrl/Dakk"
     }
 
@@ -141,7 +142,8 @@ class GitHubUpdateManager(private val context: Context) {
                 try {
                     val body = response.body ?: return
                     val totalLength = body.contentLength()
-                    val destFile = File(context.cacheDir, "dakk_update.apk")
+                    val updateDir = context.getExternalFilesDir(null) ?: context.cacheDir
+                    val destFile = File(updateDir, "dakk_update.apk")
                     val inputStream = body.byteStream()
                     val outputStream = FileOutputStream(destFile)
 
@@ -198,8 +200,18 @@ class GitHubUpdateManager(private val context: Context) {
 
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
+
+            val resInfoList = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            for (resolveInfo in resInfoList) {
+                val packageName = resolveInfo.activityInfo.packageName
+                context.grantUriPermission(packageName, apkUri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Install prompt failed: ${e.message}")
