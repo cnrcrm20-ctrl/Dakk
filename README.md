@@ -1,3 +1,10 @@
+> [!CAUTION]
+> # ⚠️ The application is currently in beta, it may not work
+> ### Uygulama şu anda beta aşamasındadır, çalışmayabilir
+
+ 
+ 
+
 # Dakk — Güvenli, Bağımsız ve Sıfır Maliyetli Doğrudan P2P Mesajlaşma
 
 <p align="center">
