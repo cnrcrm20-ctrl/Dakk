@@ -11,6 +11,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.*
@@ -48,6 +51,50 @@ fun NewChatBottomSheet(
     val myOffer by viewModel.myOfferPayload.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGeneratingOffer.collectAsStateWithLifecycle()
 
+    val handleDecodedQr: (String) -> Unit = { rawContent ->
+        val payload = SignalingPayload.decodeFromCompactString(rawContent)
+        if (payload != null) {
+            if (payload.type == "OFFER") {
+                viewModel.processRemoteOfferAndCreateAnswer(payload) {
+                    Toast.makeText(context, "${payload.alias} kişisi eklendi!", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                }
+            } else if (payload.type == "ANSWER") {
+                viewModel.applyRemoteAnswer(payload)
+                Toast.makeText(context, "Bağlantı kuruldu!", Toast.LENGTH_SHORT).show()
+                onDismiss()
+            }
+        } else {
+            Toast.makeText(context, "QR kod okundu ancak Dakk daveti algılanamadı.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val cameraScannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) {
+            val decoded = QrCodeHelper.decodeQrFromBitmap(bitmap)
+            if (decoded != null) {
+                handleDecodedQr(decoded)
+            } else {
+                Toast.makeText(context, "Fotoğrafta QR kod bulunamadı. Lütfen kodu daha net ve yakından çekin.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val galleryScannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val decoded = QrCodeHelper.decodeQrFromUri(context, uri)
+            if (decoded != null) {
+                handleDecodedQr(decoded)
+            } else {
+                Toast.makeText(context, "Seçilen görselde geçerli bir QR kod okunamadı.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Açılır açılmaz STUN üzerinden P2P teklifi arka planda önceden hazırla
     LaunchedEffect(Unit) {
         if (myOffer == null) {
@@ -76,29 +123,43 @@ fun NewChatBottomSheet(
                         color = Color.White
                     )
                     Text(
-                        text = "Arkadaşınla WhatsApp'tan davet paylaş, grup kur veya QR ile eşleş",
+                        text = "Arkadaşınla kameradan QR taratarak, WhatsApp'tan veya kodla anında bağlan",
                         fontSize = 13.sp,
                         color = DakkTextSecondaryDark
                     )
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    // 0. Yeni Grup Oluştur
+                    // 1. Kamera ile Doğrudan QR Tara
                     QuickActionRow(
-                        icon = Icons.Default.GroupAdd,
+                        icon = Icons.Default.QrCodeScanner,
                         iconBg = DakkYellow,
                         iconTint = Color.Black,
-                        title = "Yeni Grup Oluştur",
-                        subtitle = "Birden fazla arkadaşınla doğrudan şifreli P2P grup sohbeti başlat",
+                        title = "Kamerayla QR Tara 📷",
+                        subtitle = "Arkadaşının QR koduna kamerayı tut, tek tıkla sohbete bağlan",
                         onClick = {
-                            onDismiss()
-                            onCreateGroupClick()
+                            cameraScannerLauncher.launch(null)
                         }
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 1. WhatsApp ile Davet Bağlantısı Gönder
+                    // 2. Galeriden QR Görseli Seç
+                    QuickActionRow(
+                        icon = Icons.Default.Image,
+                        iconBg = Color(0xFF6366F1), // İndigo
+                        title = "Galeriden QR Seç",
+                        subtitle = "Sana ekran görüntüsü atılan QR kodunu galeriden seç ve çöz",
+                        onClick = {
+                            galleryScannerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 3. WhatsApp ile Davet Bağlantısı Gönder
                     QuickActionRow(
                         icon = Icons.Default.Share,
                         iconBg = Color(0xFF25D366), // WhatsApp Yeşili
@@ -133,12 +194,11 @@ fun NewChatBottomSheet(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 2. QR Kodumu Göster / Tara
+                    // 4. Benim Dakk QR Kodum
                     QuickActionRow(
-                        icon = Icons.Default.QrCodeScanner,
-                        iconBg = DakkYellow,
-                        iconTint = Color.Black,
-                        title = "Dakk QR Kodum",
+                        icon = Icons.Default.QrCode,
+                        iconBg = DakkOrange,
+                        title = "Dakk QR Kodumu Göster",
                         subtitle = "Yanındaki arkadaşına göster, anında sohbet başlasın",
                         onClick = {
                             if (myOffer == null) {
@@ -150,18 +210,32 @@ fun NewChatBottomSheet(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 3. Davet Bağlantısı Yapıştır
+                    // 5. Yeni Grup Oluştur
+                    QuickActionRow(
+                        icon = Icons.Default.GroupAdd,
+                        iconBg = Color(0xFF10B981),
+                        title = "Yeni Grup Oluştur",
+                        subtitle = "Birden fazla arkadaşınla doğrudan şifreli P2P grup sohbeti başlat",
+                        onClick = {
+                            onDismiss()
+                            onCreateGroupClick()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 6. Davet Bağlantısı Yapıştır
                     QuickActionRow(
                         icon = Icons.Default.Link,
-                        iconBg = DakkOrange,
+                        iconBg = Color(0xFF64748B),
                         title = "Gelen Bağlantıyı Yapıştır",
-                        subtitle = "Sana WhatsApp'tan gelen davet linkini yapıştır ve sohbete gir",
+                        subtitle = "Sana gelen davet linkini yapıştır ve sohbete gir",
                         onClick = { activeView = "PASTE_LINK" }
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 4. 6 Haneli Hızlı PIN
+                    // 7. 6 Haneli Hızlı PIN
                     QuickActionRow(
                         icon = Icons.Default.Dialpad,
                         iconBg = Color(0xFF3B82F6),
@@ -238,6 +312,18 @@ fun NewChatBottomSheet(
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Bağlantıyı Kopyala", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedButton(
+                                onClick = { cameraScannerLauncher.launch(null) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, tint = DakkYellow)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Arkadaşının Kodunu Kamerayla Tara 📷", color = Color.White)
                             }
                         } else {
                             CircularProgressIndicator(color = DakkYellow)

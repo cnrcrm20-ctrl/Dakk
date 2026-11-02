@@ -104,6 +104,7 @@ fun DakkApp(viewModel: DakkViewModel) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (!isPrivacyAccepted) {
             PrivacyPolicyDialog(
+                viewModel = viewModel,
                 onAccepted = { isPrivacyAccepted = true }
             )
         }

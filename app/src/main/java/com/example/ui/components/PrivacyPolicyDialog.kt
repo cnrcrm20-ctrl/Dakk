@@ -31,11 +31,20 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.ui.theme.*
 
+import androidx.compose.material.icons.filled.Person
+import com.example.ui.DakkViewModel
+
 @Composable
 fun PrivacyPolicyDialog(
+    viewModel: DakkViewModel,
     onAccepted: () -> Unit
 ) {
     val context = LocalContext.current
+    var usernameInput by remember {
+        val current = viewModel.crypto.getUserAlias()
+        mutableStateOf(if (current == "Dakk-Kullanıcı") "" else current)
+    }
+    var isError by remember { mutableStateOf(false) }
 
     // İzinler Listesi
     val permissionsToRequest = remember {
@@ -54,7 +63,7 @@ fun PrivacyPolicyDialog(
     ) { _ ->
         val prefs = context.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("is_privacy_accepted", true).apply()
-        Toast.makeText(context, "Dakk Gizlilik Politikası Kabul Edildi!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Hoş geldin, ${viewModel.crypto.getUserAlias()}! 🐥", Toast.LENGTH_SHORT).show()
         onAccepted()
     }
 
@@ -124,10 +133,46 @@ fun PrivacyPolicyDialog(
                     PrivacyBullet(title = "Uçtan Uca Şifreli", desc = "Tüm yazışmalarınız ve sesli mesajlarınız P-256 / AES-256 ile şifrelenir.")
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Zorunlu Kullanıcı Adı Girişi
+                OutlinedTextField(
+                    value = usernameInput,
+                    onValueChange = {
+                        usernameInput = it
+                        if (it.trim().isNotBlank()) isError = false
+                    },
+                    label = { Text("Kullanıcı Adınız (Zorunlu)", color = if (isError) DakkStatusFailed else DakkYellow, fontSize = 12.sp) },
+                    placeholder = { Text("Örn: Caner, Ahmet, Ece...", color = DakkTextTertiaryDark, fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = if (isError) DakkStatusFailed else DakkYellow) },
+                    singleLine = true,
+                    isError = isError,
+                    supportingText = {
+                        if (isError) {
+                            Text("Sohbete başlamak için kullanıcı adı girmelisiniz!", color = DakkStatusFailed, fontSize = 11.sp)
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = DakkYellow,
+                        unfocusedBorderColor = DakkDarkBorder,
+                        errorBorderColor = DakkStatusFailed,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Button(
                     onClick = {
+                        if (usernameInput.trim().isBlank()) {
+                            isError = true
+                            Toast.makeText(context, "Lütfen bir kullanıcı adı girin!", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isError = false
+                        viewModel.crypto.setUserAlias(usernameInput.trim())
                         permissionLauncher.launch(permissionsToRequest)
                     },
                     modifier = Modifier
@@ -140,7 +185,7 @@ fun PrivacyPolicyDialog(
                         Icon(Icons.Default.Shield, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Kabul Et ve Tüm İzinleri Ver 🚀",
+                            text = "Başla ve İzinleri Ver 🚀",
                             color = Color.Black,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp

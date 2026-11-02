@@ -44,4 +44,39 @@ object QrCodeHelper {
         bitmap.setPixels(pixels, 0, matrixWidth, 0, 0, matrixWidth, matrixHeight)
         return bitmap
     }
+
+    /**
+     * Kamera önizlemesi veya görselden QR kod içeriğini çözer.
+     */
+    fun decodeQrFromBitmap(bitmap: Bitmap): String? {
+        return try {
+            val width = bitmap.width
+            val height = bitmap.height
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            val source = com.google.zxing.RGBLuminanceSource(width, height, pixels)
+            val binaryBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
+            val hints = EnumMap<com.google.zxing.DecodeHintType, Any>(com.google.zxing.DecodeHintType::class.java).apply {
+                put(com.google.zxing.DecodeHintType.TRY_HARDER, java.lang.Boolean.TRUE)
+            }
+            val reader = com.google.zxing.MultiFormatReader()
+            reader.decode(binaryBitmap, hints).text
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Galeriden seçilen görsel URI'sından QR kod çözer.
+     */
+    fun decodeQrFromUri(context: android.content.Context, uri: android.net.Uri): String? {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+            if (bitmap != null) decodeQrFromBitmap(bitmap) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
 }
