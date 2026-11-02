@@ -49,6 +49,8 @@ fun ProfileScreen(
     var showAliasDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var showNetworkDialog by remember { mutableStateOf(false) }
+    var showBlockedUsersDialog by remember { mutableStateOf(false) }
+    var showSecurityDetailsDialog by remember { mutableStateOf(false) }
 
     var aliasInput by remember { mutableStateOf(viewModel.crypto.getUserAlias()) }
 
@@ -127,9 +129,7 @@ fun ProfileScreen(
                 iconBg = Color(0xFF10B981),
                 title = "Uçtan Uca Şifreleme",
                 subtitle = "Mesajlarınız AES-256 ile yalnızca cihazınızda şifrelenir",
-                onClick = {
-                    Toast.makeText(context, "Dakk'ta tüm mesajlar %100 uçtan uca şifrelidir", Toast.LENGTH_SHORT).show()
-                }
+                onClick = { showSecurityDetailsDialog = true }
             )
 
             SettingsRow(
@@ -145,7 +145,7 @@ fun ProfileScreen(
                 iconBg = DakkStatusFailed,
                 title = "Engellenen Kişiler",
                 subtitle = "${blockedUsers.size} kişi engellendi",
-                onClick = {}
+                onClick = { showBlockedUsersDialog = true }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -157,7 +157,7 @@ fun ProfileScreen(
                 iconBg = Color(0xFF3B82F6),
                 title = "Ağ & STUN Durumu",
                 subtitle = "Operatör, ICE ve P2P bağlantı metrikleri",
-                onClick = { showNetworkDialog = true }
+                onClick = { viewModel.navigateTo(Screen.Diagnostic) }
             )
 
             SettingsRow(
@@ -431,6 +431,200 @@ fun ProfileScreen(
             },
             containerColor = DakkDarkSurface
         )
+    }
+
+    // Engellenen Kişiler Dialog'u
+    if (showBlockedUsersDialog) {
+        Dialog(onDismissRequest = { showBlockedUsersDialog = false }) {
+            Surface(
+                color = DakkDarkSurface,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Engellenen Kişiler 🚫",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        IconButton(onClick = { showBlockedUsersDialog = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Kapat", tint = Color.LightGray)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (blockedUsers.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(text = "🎉", fontSize = 32.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Engellenen kimse yok.",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Rahatsız edilmiyorsunuz!",
+                                    fontSize = 12.sp,
+                                    color = DakkTextSecondaryDark
+                                )
+                            }
+                        }
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            blockedUsers.forEach { user ->
+                                Surface(
+                                    color = DakkDarkBg,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = user.alias,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "Engellendi",
+                                                fontSize = 11.sp,
+                                                color = DakkStatusFailed
+                                            )
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                viewModel.toggleBlock(user.userId, true)
+                                                Toast.makeText(context, "${user.alias} engeli kaldırıldı", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("Engeli Kaldır", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = { showBlockedUsersDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = DakkDarkSurfaceVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Kapat", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+
+    // Uçtan Uca Şifreleme Bilgi Dialog'u
+    if (showSecurityDetailsDialog) {
+        Dialog(onDismissRequest = { showSecurityDetailsDialog = false }) {
+            Surface(
+                color = DakkDarkSurface,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Security, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Dakk Güvenlik Mimarisi",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    SecurityInfoPoint(
+                        title = "🔐 Sıfır Sunucu & Sıfır Maliyet",
+                        description = "Mesajlarınız hiçbir bulut sunucusunda toplanmaz. İletişim doğrudan iki cihaz arasında STUN destekli WebRTC DataChannel ile akar."
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    SecurityInfoPoint(
+                        title = "🔑 AES-256-GCM & ECDSA",
+                        description = "Cihazınızda üretilen özel anahtarlar donanım korumalı Keystore içinde tutulur. Her mesaj P-256 el sıkışması ve AES-256 simetrik şifresiyle zırhlanır."
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    SecurityInfoPoint(
+                        title = "🛡️ Sıfır Hesap & Telefon Gereksiz",
+                        description = "Telefon numaranız, e-postanız veya rehberiniz asla istenmez. 512 karakterlik kriptografik Dakk ID ile tam anonimsiniz."
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Button(
+                        onClick = { showSecurityDetailsDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Anladım", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SecurityInfoPoint(title: String, description: String) {
+    Surface(
+        color = DakkDarkBg,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DakkYellow)
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(text = description, fontSize = 11.sp, color = DakkTextSecondaryDark, lineHeight = 15.sp)
+        }
     }
 }
 

@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.db.NetworkLogEntity
 import com.example.ui.DakkViewModel
+import com.example.ui.Screen
 import com.example.ui.theme.*
 import org.webrtc.DataChannel
 import org.webrtc.PeerConnection
@@ -47,31 +50,48 @@ fun NetworkDiagnosticScreen(
     val operators = listOf("Turkcell", "Vodafone", "Türk Telekom", "BİMcell", "Netgsm", "Wi-Fi (Ev/Ofis)", "Otomatik")
     var testNoteInput by remember { mutableStateOf("") }
 
+    BackHandler {
+        viewModel.navigateTo(Screen.Home)
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .background(DakkDarkBg)
+            .statusBarsPadding()
             .padding(16.dp)
             .testTag("diagnostic_screen_root")
     ) {
         item {
-            Text(
-                text = "TÜRKİYE OPERATÖRLERİ & P2P TEST LABORATUVARI",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Black,
-                color = DakkYellow,
-                letterSpacing = 1.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                IconButton(onClick = { viewModel.navigateTo(Screen.Home) }) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Geri",
+                        tint = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Column {
+                    Text(
+                        text = "AĞ & P2P TEST LABORATUVARI",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Black,
+                        color = DakkYellow,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = "Doğrudan STUN & DataChannel teşhis ölçümleri",
+                        fontSize = 12.sp,
+                        color = DakkTextSecondaryDark
+                    )
+                }
+            }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = "Farklı operatör ve ağlar arasında doğrudan P2P STUN ve DataChannel performansı test edilir. IP adresi kaydedilmez.",
-                fontSize = 12.sp,
-                color = DakkTextSecondaryDark
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Operatör Seçici
             Card(

@@ -184,20 +184,20 @@ fun DakkUpdateDialog(
                         // Play Protect Bilgilendirme Rozeti
                         Surface(
                             color = DakkDarkBg,
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(text = "🛡️", fontSize = 14.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = "🛡️", fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Yüklerken 'Play Protect' uyarısı çıkarsa 'Yine de Yükle / Install anyway' butonuna basabilirsiniz.",
-                                    fontSize = 10.sp,
-                                    color = DakkTextTertiaryDark,
-                                    lineHeight = 12.sp
+                                    text = "Google Play Protect 'Uygulama engellendi' uyarısı verirse: 'Yine de yükle (Install anyway)' butonuna dokunarak kurulumu kolayca tamamlayabilirsiniz.",
+                                    fontSize = 11.sp,
+                                    color = DakkTextSecondaryDark,
+                                    lineHeight = 14.sp
                                 )
                             }
                         }

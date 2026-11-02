@@ -48,6 +48,13 @@ fun NewChatBottomSheet(
     val myOffer by viewModel.myOfferPayload.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGeneratingOffer.collectAsStateWithLifecycle()
 
+    // Açılır açılmaz STUN üzerinden P2P teklifi arka planda önceden hazırla
+    LaunchedEffect(Unit) {
+        if (myOffer == null) {
+            viewModel.createOfferForHandshake()
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = DakkDarkSurface,
@@ -98,21 +105,29 @@ fun NewChatBottomSheet(
                         title = "WhatsApp ile Davet Et",
                         subtitle = "Arkadaşına doğrudan WhatsApp üzerinden sohbet bağlantısı gönder",
                         onClick = {
-                            if (myOffer == null) {
-                                viewModel.createOfferForHandshake()
+                            val sharePayload = { payload: SignalingPayload ->
+                                val link = payload.toInvitationLink()
+                                val shareIntent = Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "Selam! WhatsApp yerine Dakk üzerinden doğrudan P2P ve güvenli konuşalım. Sohbete katılmak için tıkla:\n$link"
+                                    )
+                                    type = "text/plain"
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "WhatsApp ile Davet Gönder"))
+                                onDismiss()
                             }
-                            val offer = myOffer
-                            val link = offer?.toInvitationLink() ?: "dakk://invite?data=setup"
-                            val shareIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(
-                                    Intent.EXTRA_TEXT,
-                                    "Selam! WhatsApp yerine Dakk üzerinden doğrudan P2P ve güvenli konuşalım. Sohbete katılmak için tıkla:\n$link"
-                                )
-                                type = "text/plain"
+
+                            val currentOffer = myOffer
+                            if (currentOffer != null) {
+                                sharePayload(currentOffer)
+                            } else {
+                                Toast.makeText(context, "Davet bağlantısı hazırlanıyor...", Toast.LENGTH_SHORT).show()
+                                viewModel.createOfferForHandshake { generatedOffer ->
+                                    sharePayload(generatedOffer)
+                                }
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "WhatsApp ile Davet Gönder"))
-                            onDismiss()
                         }
                     )
 

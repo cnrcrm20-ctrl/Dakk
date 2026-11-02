@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -30,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.signaling.QrCodeHelper
 import com.example.signaling.SignalingPayload
 import com.example.ui.DakkViewModel
+import com.example.ui.Screen
 import com.example.ui.theme.*
 import org.webrtc.PeerConnection
 
@@ -53,29 +56,46 @@ fun HandshakeScreen(
 
     val scrollState = rememberScrollState()
 
+    BackHandler {
+        viewModel.navigateTo(Screen.Home)
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(DakkDarkBg)
+            .statusBarsPadding()
             .padding(16.dp)
             .verticalScroll(scrollState)
             .testTag("handshake_screen_root")
     ) {
-        Text(
-            text = "P2P SİNYALLEŞME & EŞLEŞME",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Black,
-            color = DakkYellow,
-            letterSpacing = 1.sp
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = "Sıfır sunucu ve 0 TL maliyetle SDP/ICE alışverişi yapın.",
-            fontSize = 13.sp,
-            color = DakkTextSecondaryDark
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            IconButton(onClick = { viewModel.navigateTo(Screen.Home) }) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Geri",
+                    tint = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Column {
+                Text(
+                    text = "P2P SİNYALLEŞME & EŞLEŞME",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black,
+                    color = DakkYellow,
+                    letterSpacing = 0.5.sp
+                )
+                Text(
+                    text = "Sıfır sunucu ve 0 TL maliyetle doğrudan P2P",
+                    fontSize = 12.sp,
+                    color = DakkTextSecondaryDark
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 

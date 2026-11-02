@@ -308,7 +308,7 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Yeni bir P2P Offer (Teklif) oluşturur
      */
-    fun createOfferForHandshake() {
+    fun createOfferForHandshake(onReady: ((SignalingPayload) -> Unit)? = null) {
         _isGeneratingOffer.value = true
         _handshakeStatus.value = "STUN sunucularından ICE adayları toplanıyor..."
 
@@ -328,6 +328,7 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 _myOfferPayload.value = payload
                 _handshakeStatus.value = "Teklif hazır! QR kodu gösterin veya bağlantıyı paylaşın."
+                onReady?.invoke(payload)
             } else {
                 _handshakeStatus.value = "Teklif oluşturulamadı. Lütfen tekrar deneyin."
             }

@@ -78,6 +78,7 @@ fun ChatScreen(
     var activeCallType by remember { mutableStateOf<String?>(null) } // "AUDIO" or "VIDEO" or null
     var showMediaGallery by remember { mutableStateOf(false) }
     var selectedImageForFullscreen by remember { mutableStateOf<String?>(null) }
+    var showContactDetailDialog by remember { mutableStateOf(false) }
 
     // Ses kaydı durumu
     var isRecordingAudio by remember { mutableStateOf(false) }
@@ -138,7 +139,7 @@ fun ChatScreen(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable {
-                            Toast.makeText(context, "${peer.alias} P2P Profil Detayı", Toast.LENGTH_SHORT).show()
+                            showContactDetailDialog = true
                         }
                     ) {
                         Box(
@@ -577,10 +578,34 @@ fun ChatScreen(
 
     // P2P Sesli / Görüntülü Arama Ekranı Modal
     if (activeCallType != null) {
+        val currentCallType = activeCallType!!
         P2pCallDialog(
             peerAlias = peer.alias,
-            callType = activeCallType!!,
-            onEndCall = { activeCallType = null }
+            callType = currentCallType,
+            onEndCall = { durationStr ->
+                val callSummary = if (currentCallType == "VIDEO") "📹 Görüntülü Arama ($durationStr)" else "📞 Sesli Arama ($durationStr)"
+                viewModel.sendMessageToActivePeer(callSummary)
+                activeCallType = null
+            }
+        )
+    }
+
+    // Kişi Detay ve Doğrulama Dialog'u
+    if (showContactDetailDialog) {
+        ContactDetailDialog(
+            peer = peer,
+            onDismiss = { showContactDetailDialog = false },
+            onClearChat = {
+                viewModel.clearChat(peer.userId)
+                showContactDetailDialog = false
+                Toast.makeText(context, "Sohbet temizlendi", Toast.LENGTH_SHORT).show()
+            },
+            onToggleBlock = {
+                viewModel.toggleBlock(peer.userId, peer.isBlocked)
+                showContactDetailDialog = false
+                val msg = if (peer.isBlocked) "Engel kaldırıldı" else "Kişi engellendi"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
         )
     }
 
@@ -716,13 +741,14 @@ fun PulsatingOnlineBadge() {
 fun P2pCallDialog(
     peerAlias: String,
     callType: String,
-    onEndCall: () -> Unit
+    onEndCall: (String) -> Unit
 ) {
     val context = LocalContext.current
     var durationSeconds by remember { mutableIntStateOf(0) }
     var isMuted by remember { mutableStateOf(false) }
     var isSpeakerOn by remember { mutableStateOf(true) }
     var isCameraOff by remember { mutableStateOf(false) }
+    var isFrontCamera by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -731,19 +757,91 @@ fun P2pCallDialog(
         }
     }
 
+    val durationStr = String.format(Locale.getDefault(), "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
+
     Dialog(
-        onDismissRequest = onEndCall,
+        onDismissRequest = { onEndCall(durationStr) },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF121418)),
-            contentAlignment = Alignment.Center
+                .background(Color(0xFF0F1115))
         ) {
+            if (callType == "VIDEO") {
+                // Video Görünümü
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isCameraOff) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.VideocamOff, contentDescription = null, tint = DakkTextSecondaryDark, modifier = Modifier.size(64.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Kamera Kapalı", color = DakkTextSecondaryDark, fontSize = 16.sp)
+                        }
+                    } else {
+                        // Simüle edilen P2P Akış Arka Planı
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF1E232A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(110.dp)
+                                        .clip(CircleShape)
+                                        .background(DakkOrange),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = peerAlias.take(1).uppercase(),
+                                        color = Color.White,
+                                        fontSize = 44.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(text = "$peerAlias (P2P Canlı)", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Yerel Kamera PiP (Picture in Picture)
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF2A2E39),
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 16.dp, bottom = 140.dp)
+                                .size(width = 100.dp, height = 140.dp),
+                            tonalElevation = 6.dp
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = if (isFrontCamera) Icons.Default.CameraFront else Icons.Default.CameraRear,
+                                        contentDescription = "Ön/Arka",
+                                        tint = DakkYellow,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Siz", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Üst Bilgi Başlığı
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(24.dp)
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     text = if (callType == "VIDEO") "Doğrudan P2P Görüntülü Arama" else "Doğrudan P2P Sesli Arama",
@@ -752,7 +850,7 @@ fun P2pCallDialog(
                     fontWeight = FontWeight.SemiBold
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
                     text = peerAlias,
@@ -763,17 +861,19 @@ fun P2pCallDialog(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                val durationStr = String.format(Locale.getDefault(), "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
                 Text(
-                    text = if (isMuted) "Mikrofon Kapalı • $durationStr" else "Şifreli P2P Ses Aktif • $durationStr",
+                    text = if (isMuted) "Mikrofon Kapalı • $durationStr" else "Şifreli P2P Aktif • $durationStr",
                     color = if (isMuted) DakkOrange else DakkStatusConnected,
                     fontSize = 14.sp
                 )
+            }
 
-                Spacer(modifier = Modifier.height(40.dp))
-
-                // Avatar ve Ses Dalga Efekti
-                Box(contentAlignment = Alignment.Center) {
+            // Sesli Arama İse Ortadaki Büyük Avatar
+            if (callType == "AUDIO") {
+                Box(
+                    modifier = Modifier.align(Alignment.Center),
+                    contentAlignment = Alignment.Center
+                ) {
                     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                     val pulseScale by infiniteTransition.animateFloat(
                         initialValue = 1f,
@@ -803,74 +903,244 @@ fun P2pCallDialog(
                         )
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(60.dp))
-
-                // Arama Kontrol Tuşları
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // Alt Arama Kontrol Tuşları
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 32.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Mikrofon Toggle
+                IconButton(
+                    onClick = {
+                        isMuted = !isMuted
+                        val msg = if (isMuted) "Mikrofon Kapatıldı" else "Mikrofon Açıldı"
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(if (isMuted) Color.Red else Color(0xFF2A2D34))
                 ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Sustur",
+                        tint = Color.White
+                    )
+                }
+
+                if (callType == "VIDEO") {
+                    // Kamera Aç/Kapat
                     IconButton(
                         onClick = {
-                            isMuted = !isMuted
-                            val msg = if (isMuted) "Mikrofon Kapatıldı" else "Mikrofon Açıldı"
+                            isCameraOff = !isCameraOff
+                            val msg = if (isCameraOff) "Kamera Kapatıldı" else "Kamera Açıldı"
                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(if (isMuted) Color.Red else Color(0xFF2A2D34))
-                    ) {
-                        Icon(
-                            imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                            contentDescription = "Sustur",
-                            tint = Color.White
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onEndCall,
-                        modifier = Modifier
-                            .size(68.dp)
-                            .clip(CircleShape)
-                            .background(Color.Red)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CallEnd,
-                            contentDescription = "Aramayı Sonlandır",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            if (callType == "VIDEO") {
-                                isCameraOff = !isCameraOff
-                                val msg = if (isCameraOff) "Kamera Kapatıldı" else "Kamera Açıldı"
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            } else {
-                                isSpeakerOn = !isSpeakerOn
-                                val msg = if (isSpeakerOn) "Hoparlör Açık" else "Ahize Açık"
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier
-                            .size(56.dp)
+                            .size(54.dp)
                             .clip(CircleShape)
                             .background(if (isCameraOff) Color.Red else Color(0xFF2A2D34))
                     ) {
                         Icon(
-                            imageVector = if (callType == "VIDEO") {
-                                if (isCameraOff) Icons.Default.VideocamOff else Icons.Default.Videocam
-                            } else {
-                                if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.VolumeDown
-                            },
-                            contentDescription = "Kontrol",
+                            imageVector = if (isCameraOff) Icons.Default.VideocamOff else Icons.Default.Videocam,
+                            contentDescription = "Kamera Aç/Kapa",
                             tint = Color.White
                         )
                     }
+
+                    // Ön/Arka Kamera Değiştir
+                    IconButton(
+                        onClick = {
+                            isFrontCamera = !isFrontCamera
+                            Toast.makeText(context, if (isFrontCamera) "Ön Kamera" else "Arka Kamera", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2D34))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FlipCameraAndroid,
+                            contentDescription = "Kamera Çevir",
+                            tint = Color.White
+                        )
+                    }
+                } else {
+                    // Hoparlör Toggle
+                    IconButton(
+                        onClick = {
+                            isSpeakerOn = !isSpeakerOn
+                            val msg = if (isSpeakerOn) "Hoparlör Açık" else "Ahize Açık"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2D34))
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.VolumeDown,
+                            contentDescription = "Hoparlör",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                // Aramayı Sonlandır (Kırmızı Buton)
+                IconButton(
+                    onClick = { onEndCall(durationStr) },
+                    modifier = Modifier
+                        .size(66.dp)
+                        .clip(CircleShape)
+                        .background(Color.Red)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CallEnd,
+                        contentDescription = "Aramayı Sonlandır",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContactDetailDialog(
+    peer: ContactEntity,
+    onDismiss: () -> Unit,
+    onClearChat: () -> Unit,
+    onToggleBlock: () -> Unit
+) {
+    val context = LocalContext.current
+    val fingerprint = remember(peer.publicKey) {
+        val clean = peer.publicKey.filter { it.isLetterOrDigit() }.take(24)
+        clean.chunked(4).joinToString(" ")
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = DakkDarkSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(if (peer.isGroup) DakkYellow else DakkOrange),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = peer.alias.take(1).uppercase(),
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = peer.alias,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = if (peer.isGroup) "P2P Grup Sohbeti" else "Uçtan Uca Doğrulanmış Cihaz 🛡️",
+                    fontSize = 12.sp,
+                    color = DakkStatusConnected
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Güvenlik Numarası (Fingerprint)
+                Surface(
+                    color = DakkDarkBg,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = DakkYellow, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Güvenlik Numarası (Safety Code)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = fingerprint,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DakkYellow,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Bu numara, sizin ve arkadaşınızın sohbetinin uçtan uca şifrelendiğini kanıtlar.",
+                            fontSize = 10.sp,
+                            color = DakkTextSecondaryDark
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onClearChat,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = DakkOrange)
+                    ) {
+                        Text("Sohbeti Sil", fontSize = 12.sp, color = DakkOrange)
+                    }
+
+                    Button(
+                        onClick = onToggleBlock,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (peer.isBlocked) DakkYellow else DakkStatusFailed)
+                    ) {
+                        Text(
+                            text = if (peer.isBlocked) "Engeli Kaldır" else "Engelle",
+                            fontSize = 12.sp,
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = DakkDarkSurfaceVariant)
+                ) {
+                    Text("Kapat", color = Color.White)
                 }
             }
         }
