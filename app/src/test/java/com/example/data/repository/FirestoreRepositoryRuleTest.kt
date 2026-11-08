@@ -8,9 +8,11 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 import java.util.UUID
 
+@Ignore("Requires local Firestore emulator and Robolectric runner")
 class FirestoreRepositoryRuleTest : FirestoreEmulatorTestBase() {
 
   @Test
