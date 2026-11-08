@@ -2,6 +2,15 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.0.1] - 2026-11-08
+
+### Düzeltildi
+- Google hesabı seçildikten sonra giriş ekranına sessizce geri dönme sorunu. Google'ın yapılandırma
+  hatalarını "iptal" olarak bildirdiği durumlar (`[16] Account reauth failed`) artık yakalanıyor;
+  ekranda anlaşılır bir hata ve kopyalanabilir teknik ayrıntılar (sürüm, paket, imza SHA-1) gösteriliyor.
+- İlk giriş yöntemi başarısız olursa Dakk, alternatif Google giriş penceresiyle otomatik olarak
+  bir kez daha deniyor (bazı Xiaomi/MIUI cihazlarda ilk yöntem hesap seçiminden sonra kapanabiliyor).
+
 ## [2.0.0] - 2026-11-08
 
 Dakk baştan yeniden yazıldı. Bu sürüm temiz kurulum gerektirir.
