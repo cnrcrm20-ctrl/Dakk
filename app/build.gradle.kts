@@ -146,6 +146,4 @@ tasks.withType<Test> {
   failFast = true
   timeout.set(Duration.ofMinutes(2))
   testLogging { events("passed", "failed", "skipped") }
-  systemProperty("robolectric.offline", "true")
-  systemProperty("robolectric.dependency.dir", "/home/appuser/.m2/repository/org/robolectric/android-all/16-robolectric-13921718-i7")
 }

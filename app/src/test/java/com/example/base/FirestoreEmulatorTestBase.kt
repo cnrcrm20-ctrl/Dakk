@@ -17,12 +17,14 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Before
 import org.junit.runner.RunWith
+import org.junit.Assume
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
+import java.net.Socket
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36], manifest = Config.NONE)
+@Config(sdk = [34], manifest = Config.NONE)
 @LooperMode(LooperMode.Mode.INSTRUMENTATION_TEST)
 abstract class FirestoreEmulatorTestBase {
 
@@ -32,6 +34,13 @@ abstract class FirestoreEmulatorTestBase {
 
   @Before
   open fun setUpFirebase() {
+    val isEmulatorUp = try {
+      Socket(EMULATOR_HOST, FIRESTORE_PORT).use { true }
+    } catch (e: Exception) {
+      false
+    }
+    Assume.assumeTrue("Firestore emulator is not running; skipping emulator integration test", isEmulatorUp)
+
     val context = ApplicationProvider.getApplicationContext<Context>()
     val resId = context.resources.getIdentifier("firestore_database_id", "string", context.packageName)
     databaseId = if (resId != 0) context.getString(resId) else "ai-studio-android-e2d067e8-8aba-4fce-a486-b836129f76c1"
