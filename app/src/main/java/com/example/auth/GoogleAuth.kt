@@ -3,14 +3,17 @@ package com.example.auth
 import android.content.Context
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.Credential
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
+import com.example.BuildConfig
 import com.example.R
 import com.example.util.AppSignature
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.FirebaseNetworkException
@@ -20,6 +23,7 @@ import com.google.firebase.auth.auth
 import com.google.firebase.Firebase
 import kotlinx.coroutines.tasks.await
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /** Kullanıcıya gösterilecek giriş hatası. */
 data class AuthFailure(
@@ -37,33 +41,85 @@ object GoogleAuth {
 
     private const val TAG = "DakkAuth"
 
-    /** Google hesabı seçiciyi açar ve Firebase oturumu başlatır. [activityContext] bir Activity olmalıdır. */
+    /**
+     * Google hesabı seçiciyi açar ve Firebase oturumu başlatır. [activityContext] bir Activity olmalıdır.
+     *
+     * Önce "Google ile oturum aç" düğme akışı denenir. Bu akış bazı cihazlarda (ör. MIUI) veya
+     * yapılandırma sorunlarında hesap seçildikten sonra sessizce iptal edilebildiği için, kullanıcı
+     * gerçekten vazgeçmediyse alternatif Google kimlik akışı ile bir kez daha denenir.
+     */
     suspend fun signIn(activityContext: Context): SignInResult {
         val credentialManager = CredentialManager.create(activityContext)
-        val option = GetSignInWithGoogleOption.Builder(
-            activityContext.getString(R.string.default_web_client_id)
-        ).build()
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(option)
+        val webClientId = activityContext.getString(R.string.default_web_client_id)
+
+        val buttonRequest = GetCredentialRequest.Builder()
+            .addCredentialOption(GetSignInWithGoogleOption.Builder(webClientId).build())
             .build()
 
+        val firstError: Exception = try {
+            val credential = credentialManager.getCredential(activityContext, buttonRequest).credential
+            return finishWithFirebase(activityContext, credential)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            e
+        }
+        Log.w(TAG, "Google düğme akışı başarısız: ${firstError.javaClass.simpleName}: ${firstError.message}")
+
+        val firstKind = kindOf(firstError)
+        if (firstKind == AuthErrorClassifier.Kind.USER_CANCELLED) return SignInResult.Cancelled
+        if (firstError is NoCredentialException) return SignInResult.Failed(describe(activityContext, firstError))
+
+        // Alternatif akış: Google kimlik alt sayfası (tüm hesaplar, otomatik seçim kapalı).
+        val fallbackRequest = GetCredentialRequest.Builder()
+            .addCredentialOption(
+                GetGoogleIdOption.Builder()
+                    .setServerClientId(webClientId)
+                    .setFilterByAuthorizedAccounts(false)
+                    .setAutoSelectEnabled(false)
+                    .build()
+            )
+            .build()
+
+        val secondError: Exception = try {
+            val credential = credentialManager.getCredential(activityContext, fallbackRequest).credential
+            return finishWithFirebase(activityContext, credential)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            e
+        }
+        Log.e(TAG, "Alternatif Google akışı da başarısız", secondError)
+
+        val secondKind = kindOf(secondError)
+        val primary = when {
+            // Kullanıcı ikinci pencereyi kapattıysa ilk (asıl) hatayı göster.
+            secondKind == AuthErrorClassifier.Kind.USER_CANCELLED -> firstError
+            secondKind == AuthErrorClassifier.Kind.CONFIGURATION -> secondError
+            firstKind == AuthErrorClassifier.Kind.CONFIGURATION -> firstError
+            else -> secondError
+        }
+        return SignInResult.Failed(describe(activityContext, primary, listOf(firstError, secondError)))
+    }
+
+    private fun kindOf(e: Exception): AuthErrorClassifier.Kind =
+        AuthErrorClassifier.classify(e.message, isCancellation = e is GetCredentialCancellationException)
+
+    private suspend fun finishWithFirebase(context: Context, credential: Credential): SignInResult {
+        if (credential !is CustomCredential ||
+            credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            return SignInResult.Failed(AuthFailure("Beklenmeyen hesap türü. Lütfen tekrar deneyin."))
+        }
         return try {
-            val credential = credentialManager.getCredential(activityContext, request).credential
-            if (credential !is CustomCredential ||
-                credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-            ) {
-                return SignInResult.Failed(AuthFailure("Beklenmeyen hesap türü. Lütfen tekrar deneyin."))
-            }
             val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
             val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
             val result = Firebase.auth.signInWithCredential(firebaseCredential).await()
             if (result.user != null) SignInResult.Success
             else SignInResult.Failed(AuthFailure("Oturum açılamadı. Lütfen tekrar deneyin."))
-        } catch (e: GetCredentialCancellationException) {
-            SignInResult.Cancelled
         } catch (e: Exception) {
-            Log.e(TAG, "Google ile giriş başarısız", e)
-            SignInResult.Failed(describe(activityContext, e))
+            Log.e(TAG, "Firebase oturumu açılamadı", e)
+            SignInResult.Failed(describe(context, e))
         }
     }
 
@@ -76,11 +132,9 @@ object GoogleAuth {
         Firebase.auth.signOut()
     }
 
-    private fun describe(context: Context, e: Exception): AuthFailure {
+    private fun describe(context: Context, e: Exception, attempts: List<Exception> = listOf(e)): AuthFailure {
         val raw = e.message.orEmpty()
-        val isDeveloperError = raw.contains("28444") ||
-            raw.contains("Developer console", ignoreCase = true) ||
-            Regex("""(^|\D)10:""").containsMatchIn(raw)
+        val isDeveloperError = attempts.any { kindOf(it) == AuthErrorClassifier.Kind.CONFIGURATION }
 
         return when {
             isDeveloperError -> {
@@ -88,10 +142,14 @@ object GoogleAuth {
                 AuthFailure(
                     message = "Google ile giriş bu uygulama sürümü için henüz etkinleştirilmemiş. " +
                         "Lütfen kısa bir süre sonra tekrar deneyin veya uygulamayı güncelleyin.",
-                    technicalDetails = "Hata 10 (DEVELOPER_ERROR)\n" +
+                    technicalDetails = "Google yapılandırma hatası (DEVELOPER_ERROR / reauth)\n" +
+                        "Sürüm: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
                         "Paket: ${context.packageName}\n" +
                         "İmza SHA-1: $sha1\n" +
-                        "Bu SHA-1 değeri Firebase Console › Proje ayarları › Android uygulaması bölümüne eklenmelidir."
+                        attempts.joinToString("") { "Hata: ${it.javaClass.simpleName}: ${it.message.orEmpty()}\n" } +
+                        "Çözüm: Bu SHA-1 değeri Firebase Console › Proje ayarları › Android uygulaması bölümüne " +
+                        "eklenmeli; OAuth izin ekranı 'Test' modundaysa hesap test kullanıcısı olarak eklenmeli " +
+                        "veya uygulama yayınlanmalıdır."
                 )
             }
             e is NoCredentialException -> AuthFailure(

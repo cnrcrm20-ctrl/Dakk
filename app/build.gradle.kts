@@ -10,8 +10,8 @@ plugins {
 // Sürüm bilgisi — yeni bir sürüm yayınlamak için SADECE burayı değiştirin.
 // main dalına push edildiğinde GitHub Actions bu sürüm için otomatik olarak Release oluşturur.
 // ---------------------------------------------------------------------------------------------
-val dakkVersionName = "2.0.0"
-val dakkVersionCode = 20
+val dakkVersionName = "2.0.1"
+val dakkVersionCode = 21
 
 // ---------------------------------------------------------------------------------------------
 // İmzalama — SHA-1 parmak izinin HER derlemede aynı kalması için sabit anahtar deposu kullanılır.
