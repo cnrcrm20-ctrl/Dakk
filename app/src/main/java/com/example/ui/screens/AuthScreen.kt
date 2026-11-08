@@ -169,7 +169,7 @@ fun AuthScreen(
                 }
             }
 
-            // Google Sign-In Butonu
+            // Google Sign-In Butonu (MANDATORY & Enforced)
             Button(
                 onClick = {
                     isLoading = true
@@ -182,17 +182,8 @@ fun AuthScreen(
                             onAuthSuccess()
                         },
                         onAuthError = { err ->
-                            Log.w("AuthScreen", "Google Sign-In failed, attempting fallback: $err")
-                            // Fallback to anonymous auth if Google Sign-in fails on device
-                            Firebase.auth.signInAnonymously()
-                                .addOnSuccessListener {
-                                    isLoading = false
-                                    onAuthSuccess()
-                                }
-                                .addOnFailureListener { e ->
-                                    isLoading = false
-                                    errorMessage = "Giriş başarısız: ${e.localizedMessage}"
-                                }
+                            isLoading = false
+                            errorMessage = err
                         },
                         scope = coroutineScope,
                         onAuthCancelled = {
@@ -222,7 +213,7 @@ fun AuthScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "Google ile Giriş Yap 🐥",
+                            text = "Google ile Güvenli Giriş Yap 🐥",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = DakkDarkBg
@@ -230,34 +221,6 @@ fun AuthScreen(
                         )
                     }
                 }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Misafir / Hızlı Giriş Butonu (Yedek)
-            TextButton(
-                onClick = {
-                    isLoading = true
-                    errorMessage = null
-                    Firebase.auth.signInAnonymously()
-                        .addOnSuccessListener {
-                            isLoading = false
-                            onAuthSuccess()
-                        }
-                        .addOnFailureListener { e ->
-                            isLoading = false
-                            errorMessage = "Misafir girişi başarısız: ${e.localizedMessage}"
-                        }
-                },
-                enabled = !isLoading
-            ) {
-                Text(
-                    text = "Veya Misafir Olarak Giriş Yap 🚀",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Medium
-                    )
-                )
             }
         }
     }
