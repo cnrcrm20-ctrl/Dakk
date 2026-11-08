@@ -337,8 +337,16 @@ fun onGoogleSignInClicked(
         DEFAULT_FALLBACK_CLIENT_ID
     }
 
-    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-    val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
+    // setFilterByAuthorizedAccounts(false) allows any account on device to sign in (not just pre-authorized)
+    val googleIdOption = GetGoogleIdOption.Builder()
+        .setFilterByAuthorizedAccounts(false)
+        .setServerClientId(clientId)
+        .setAutoSelectEnabled(false)
+        .build()
+
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(googleIdOption)
+        .build()
 
     scope.launch {
         try {
@@ -347,17 +355,22 @@ fun onGoogleSignInClicked(
             if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
                 val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                Firebase.auth.signInWithCredential(authCredential).await()
-                onAuthSuccess()
+                val authResult = Firebase.auth.signInWithCredential(authCredential).await()
+                if (authResult.user != null) {
+                    Log.d("Auth", "Firebase auth succeeded: ${authResult.user?.uid}")
+                    onAuthSuccess()
+                } else {
+                    onAuthError("Kullanıcı doğrulaması tamamlanamadı.")
+                }
             } else {
-                onAuthError("Beklenmeyen kimlik türü")
+                onAuthError("Beklenmeyen kimlik türü: ${credential.type}")
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
         } catch (e: Exception) {
             Log.e("Auth", "Google Sign-In failed: ${e.message}", e)
-            onAuthError(e.localizedMessage ?: "Giriş yapılamadı")
+            onAuthError(e.localizedMessage ?: "Giriş işlemi sırasında hata oluştu.")
         }
     }
 }
