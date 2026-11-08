@@ -4,7 +4,7 @@
 Dakk, doğrudan cihazdan cihaza (P2P WebRTC) ve ücretsiz Firebase Firestore bulut altyapısını hibrit birleştiren, Google ile güvenli oturum açan, uçtan uca şifreli (E2EE) ve Dakk maskotu (ördek 🐥) mizahına sahip modern bir Android mesajlaşma uygulamasıdır.
 
 - **Paket Adı:** `com.aistudio.dakk.p2pchat`
-- **Mevcut Sürüm:** `1.0.10` (VersionCode: 10)
+- **Mevcut Sürüm:** `1.0.11` (VersionCode: 11)
 - **GitHub Repo:** `https://github.com/cnrcrm20-ctrl/Dakk.git`
 - **GitHub Pages:** `https://cnrcrm20-ctrl.github.io/Dakk/`
 - **Firebase Proje ID:** `gen-lang-client-0161098568`
