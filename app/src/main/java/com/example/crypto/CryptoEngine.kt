@@ -181,6 +181,37 @@ class CryptoEngine(context: Context) {
         return String(cipher.doFinal(body), StandardCharsets.UTF_8)
     }
 
+    /** İkili veriyi (ör. fotoğraf) sohbet anahtarıyla şifreler: [12 bayt IV][şifreli veri + etiket]. */
+    fun encryptBytes(data: ByteArray, peerPublicKeyBase64: String): ByteArray {
+        val iv = ByteArray(GCM_IV_BYTES).also { secureRandom.nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, sharedKey(peerPublicKeyBase64), GCMParameterSpec(GCM_TAG_BITS, iv))
+        return iv + cipher.doFinal(data)
+    }
+
+    /** [encryptBytes] ile şifrelenmiş veriyi, mesajın gönderici/alıcı anahtarlarına bakarak çözer. */
+    fun decryptBytes(data: ByteArray, senderKey: String, recipientKey: String): ByteArray? {
+        if (data.size <= GCM_IV_BYTES + 16) return null
+        val myKey = publicKeyBase64()
+        val otherKey = when (myKey) {
+            senderKey -> recipientKey
+            recipientKey -> senderKey
+            else -> return null
+        }
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                sharedKey(otherKey),
+                GCMParameterSpec(GCM_TAG_BITS, data.copyOfRange(0, GCM_IV_BYTES))
+            )
+            cipher.doFinal(data, GCM_IV_BYTES, data.size - GCM_IV_BYTES)
+        } catch (e: Exception) {
+            Log.w(TAG, "Dosya çözülemedi", e)
+            null
+        }
+    }
+
     /**
      * Bir mesajı, gönderici ve alıcı açık anahtarlarına bakarak çözer.
      * Bu cihazın anahtarı mesajın taraflarından biri değilse (ör. uygulama yeniden kurulduysa) null döner.

@@ -9,6 +9,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -142,20 +143,27 @@ class FirestoreRepository(context: Context) {
             .orderBy("createdAt", Query.Direction.ASCENDING)
             .snapshots(MetadataChanges.INCLUDE)
             .map { snap ->
-                snap.documents.map { d ->
-                    MessageDoc(
-                        id = d.id,
-                        senderId = d.getString("senderId").orEmpty(),
-                        content = d.getString("content").orEmpty(),
-                        senderKey = d.getString("senderKey").orEmpty(),
-                        recipientKey = d.getString("recipientKey").orEmpty(),
-                        deliveryStatus = d.getString("deliveryStatus") ?: "SENT",
-                        createdAt = d.getTimestamp("createdAt", estimate)?.toDate()?.time
-                            ?: System.currentTimeMillis(),
-                        isPending = d.metadata.hasPendingWrites()
-                    )
-                }
+                snap.documents.map { d -> d.toMessage() }
             }
+
+    suspend fun getMessage(chatId: String, messageId: String): MessageDoc? {
+        val d = db.collection("chats").document(chatId).collection("messages").document(messageId)
+            .get().await()
+        return if (d.exists()) d.toMessage() else null
+    }
+
+    private fun DocumentSnapshot.toMessage(): MessageDoc = MessageDoc(
+        id = id,
+        senderId = getString("senderId").orEmpty(),
+        content = getString("content").orEmpty(),
+        senderKey = getString("senderKey").orEmpty(),
+        recipientKey = getString("recipientKey").orEmpty(),
+        deliveryStatus = getString("deliveryStatus") ?: "SENT",
+        createdAt = getTimestamp("createdAt", estimate)?.toDate()?.time ?: System.currentTimeMillis(),
+        isPending = metadata.hasPendingWrites(),
+        messageType = getString("messageType") ?: "TEXT",
+        isAssistant = getBoolean("isAssistant") ?: false
+    )
 
     /**
      * Mesaj gönderir. Önce sohbet belgesi (üyelik + şifreli önizleme), ardından mesaj yazılır.
@@ -170,8 +178,11 @@ class FirestoreRepository(context: Context) {
         encryptedPreview: String,
         senderKey: String,
         recipientKey: String,
+        messageType: String = "TEXT",
+        isAssistant: Boolean = false,
+        onSent: (messageId: String) -> Unit = {},
         onError: (Exception) -> Unit
-    ) {
+    ): String {
         val chatRef = db.collection("chats").document(chatId)
         val chatPayload = mapOf(
             "chatId" to chatId,
@@ -195,12 +206,71 @@ class FirestoreRepository(context: Context) {
             "senderKey" to senderKey,
             "recipientKey" to recipientKey,
             "deliveryStatus" to "SENT",
-            "messageType" to "TEXT",
+            "messageType" to messageType,
+            "createdAt" to FieldValue.serverTimestamp()
+        ).let { if (isAssistant) it + ("isAssistant" to true) else it }
+        val messageRef = chatRef.collection("messages").document()
+        messageRef.set(messagePayload)
+            .addOnSuccessListener { onSent(messageRef.id) }
+            .addOnFailureListener { e -> Log.e(TAG, "Mesaj gönderilemedi", e); onError(e) }
+        return messageRef.id
+    }
+
+    /** Sohbet belgesinin var olduğundan emin olur (fotoğraf parçaları yüklenmeden önce gerekli). */
+    suspend fun ensureChat(chatId: String, myUid: String, peerUid: String) {
+        val payload = mapOf(
+            "chatId" to chatId,
+            "memberUids" to listOf(myUid, peerUid).sorted(),
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("chats").document(chatId).set(payload, SetOptions.merge()).await()
+    }
+
+    // ---------------------------------------------------------------- Fotoğraf parçaları
+    // chats/{chatId}/blobs/{mediaId}_{index} — şifreli fotoğraf verisi (Base64).
+    // Alıcı fotoğrafı indirince parçaları siler; gönderici 7 gün sonra kalanları temizler.
+
+    private fun blobRef(chatId: String, mediaId: String, index: Int) =
+        db.collection("chats").document(chatId).collection("blobs").document("${mediaId}_$index")
+
+    suspend fun uploadBlob(chatId: String, mediaId: String, index: Int, total: Int, myUid: String, data: String) {
+        val payload = mapOf(
+            "mediaId" to mediaId,
+            "index" to index,
+            "total" to total,
+            "senderId" to myUid,
+            "data" to data,
             "createdAt" to FieldValue.serverTimestamp()
         )
-        chatRef.collection("messages").document()
-            .set(messagePayload)
-            .addOnFailureListener { e -> Log.e(TAG, "Mesaj gönderilemedi", e); onError(e) }
+        blobRef(chatId, mediaId, index).set(payload).await()
+    }
+
+    /** Parça yoksa (süresi dolmuş/silinmiş) null döner. */
+    suspend fun getBlob(chatId: String, mediaId: String, index: Int): String? {
+        val doc = blobRef(chatId, mediaId, index).get(Source.SERVER).await()
+        return if (doc.exists()) doc.getString("data") else null
+    }
+
+    suspend fun deleteBlobs(chatId: String, mediaId: String, total: Int) {
+        val batch = db.batch()
+        for (i in 0 until total.coerceIn(1, 50)) batch.delete(blobRef(chatId, mediaId, i))
+        batch.commit().await()
+    }
+
+    // ---------------------------------------------------------------- Anlık bildirim jetonu
+
+    suspend fun savePushToken(uid: String, token: String) {
+        val payload = mapOf(
+            "token" to token,
+            "platform" to "android",
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("push_tokens").document(uid).set(payload).await()
+    }
+
+    suspend fun deletePushToken(uid: String) {
+        db.collection("push_tokens").document(uid).delete().await()
     }
 
     /** Sohbet listesi önizlemesini günceller (ör. son mesaj silindiğinde). */

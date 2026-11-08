@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+: sistem açılış ekranı beyaz ve simgesiz; ardından Dakk açılış animasyonu oynar. -->
+    <style name="Theme.Dakk.Launch">
+        <item name="android:windowBackground">@color/dakk_splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/dakk_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+    </style>
+</resources>

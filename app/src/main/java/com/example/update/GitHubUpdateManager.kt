@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.example.BuildConfig
+import com.example.util.AppSignature
 import com.example.util.VersionUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,7 +22,8 @@ data class ReleaseInfo(
     val title: String,
     val notes: String,
     val apkUrl: String,
-    val apkSize: Long
+    val apkSize: Long,
+    val pageUrl: String
 )
 
 sealed class UpdateCheckResult {
@@ -32,7 +34,8 @@ sealed class UpdateCheckResult {
 
 /**
  * GitHub Releases üzerinden uygulama içi güncelleme.
- * Tüm sürümler aynı sabit anahtarla imzalandığı için APK mevcut kurulumun üzerine sorunsuz yüklenir.
+ * İndirilen APK'nın imzası kurulu uygulamanınkiyle karşılaştırılır; farklıysa (ör. imza anahtarı
+ * değiştiyse) Android kurulumu reddedeceği için kullanıcı yeniden kurulum konusunda bilgilendirilir.
  */
 class GitHubUpdateManager(context: Context) {
 
@@ -81,7 +84,10 @@ class GitHubUpdateManager(context: Context) {
                             title = json.optString("name").ifBlank { "Dakk ${tag}" },
                             notes = json.optString("body"),
                             apkUrl = apkUrl,
-                            apkSize = apkSize
+                            apkSize = apkSize,
+                            pageUrl = json.optString("html_url").ifBlank {
+                                "https://github.com/${BuildConfig.GITHUB_REPO}/releases/latest"
+                            }
                         )
                     )
                 }
@@ -126,6 +132,28 @@ class GitHubUpdateManager(context: Context) {
             }
         }
         target
+    }
+
+    /**
+     * İndirilen APK'nın imzası kurulu uygulamayla aynı mı?
+     * true/false: karşılaştırma yapıldı; null: belirlenemedi (kurulum yine de denenir).
+     */
+    fun hasSameSignature(apk: File): Boolean? {
+        val installed = AppSignature.fingerprint(appContext, "SHA-256") ?: return null
+        val downloaded = AppSignature.archiveFingerprint(appContext, apk, "SHA-256") ?: return null
+        return installed == downloaded
+    }
+
+    fun openReleasePage(release: ReleaseInfo) {
+        runCatching {
+            appContext.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    fun deleteDownloads() {
+        File(appContext.cacheDir, "updates").listFiles()?.forEach { it.delete() }
     }
 
     fun canInstallPackages(): Boolean =

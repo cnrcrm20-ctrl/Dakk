@@ -38,18 +38,40 @@ data class MessageDoc(
     val recipientKey: String,
     val deliveryStatus: String,
     val createdAt: Long,
-    val isPending: Boolean
+    val isPending: Boolean,
+    val messageType: String = "TEXT",
+    val isAssistant: Boolean = false
 )
 
 enum class MessageStatus { PENDING, SENT, READ }
 
-/** Arayüzde gösterilen mesaj. text == null ise mesaj bu cihazda çözülemedi. */
+/** Fotoğrafın bu cihazdaki durumu. */
+enum class ImageState { READY, UPLOADING, DOWNLOADING, EXPIRED, FAILED }
+
+/** Mesajdaki fotoğraf. localPath doluysa fotoğraf cihazda hazırdır. */
+data class ImageAttachment(
+    val mediaId: String,
+    val chunks: Int,
+    val width: Int,
+    val height: Int,
+    val size: Long,
+    val thumbBase64: String?,
+    val localPath: String?,
+    val state: ImageState
+)
+
+/**
+ * Arayüzde gösterilen mesaj. text == null ve image == null ise mesaj bu cihazda çözülemedi.
+ * isAssistant: mesaj Dakk Asistan'ın sohbete eklediği bir yanıttır.
+ */
 data class UiMessage(
     val id: String,
     val text: String?,
     val isFromMe: Boolean,
     val timestamp: Long,
-    val status: MessageStatus
+    val status: MessageStatus,
+    val image: ImageAttachment? = null,
+    val isAssistant: Boolean = false
 )
 
 /** Sohbet listesi satırı. */

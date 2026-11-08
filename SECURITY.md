@@ -28,8 +28,9 @@ Bir güvenlik açığı bulduysan lütfen **herkese açık issue açma**.
   kullanıcıların yalnızca üyesi oldukları sohbetleri okuyup yazabilmesini sağlar.
 - **Ortadaki adam saldırılarına karşı:** Sohbet menüsündeki *Güvenlik numarası*, iki tarafın açık
   anahtarlarından hesaplanır. Yüz yüze karşılaştırıldığında aynıysa sohbet güvenlidir.
-- **Güncellemeler:** APK'lar her zaman aynı sabit anahtarla imzalanır; Android, farklı imzalı bir
-  güncellemenin kurulmasına izin vermez.
+- **Güncellemeler:** APK'lar her zaman aynı resmi anahtarla imzalanır; Android, farklı imzalı bir
+  güncellemenin kurulmasına izin vermez. Uygulama içi güncelleyici de indirdiği APK'nın imzasını
+  kurmadan önce kontrol eder.
 
 ### Neyi korumuyoruz? (bilinen sınırlamalar)
 - **Meta veriler:** Kimin kiminle, ne zaman yazıştığı ve iletim durumu sunucuda şifresiz tutulur.
@@ -40,13 +41,15 @@ Bir güvenlik açığı bulduysan lütfen **herkese açık issue açma**.
 - **Profil bilgileri** (ad, e-posta, fotoğraf) giriş yapmış diğer kullanıcılara görünür.
 
 ### İmza anahtarı hakkında
-Google ile girişin herkes için aynı şekilde çalışması amacıyla imza anahtarı
-(`signing/dakk-release.p12`) depoda bulunur. Bu, kodu derleyen herkesin aynı imzayla APK
-üretebileceği anlamına gelir. Dakk'ı **yalnızca resmi GitHub Releases sayfasından** indir.
-Bakımcılar, anahtarı depo secret'larına taşıyarak (`DAKK_KEYSTORE_BASE64` vb.) bu riski kaldırabilir.
+Resmi imza anahtarı depoda yalnızca AES-256 ile **şifrelenmiş** olarak bulunur
+(`signing/dakk-release.p12.enc`); şifresi sadece GitHub Actions secret'ında saklanır. Böylece kaynak
+kodu herkese açık olsa da kimse resmi Dakk imzasıyla APK üretemez.
 
-İmza parmak izleri:
-- SHA-1: `05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21`
-- SHA-256: `A1:31:5B:56:6C:73:7F:46:3E:27:D8:01:36:03:47:F9:C0:80:06:85:5F:E7:66:E7:B9:6F:E1:FB:35:23:FC:D9`
+2.0.x sürümlerinde kullanılan eski anahtar depoda açık durduğu için 2.1.0 ile **emekliye ayrılmıştır**.
+Eski imzalı (2.0.x) APK'lara artık güvenmeyin. Dakk'ı yalnızca resmi GitHub Releases sayfasından indir.
+
+Resmi imza parmak izleri (2.1.0 ve sonrası):
+- SHA-1: `1B:8A:A6:D1:88:69:43:31:9A:70:65:4F:A6:DA:DC:7D:F9:E3:5A:E1`
+- SHA-256: `A1:E4:F4:6F:E3:DE:83:B8:C7:B9:DF:3F:C9:92:EC:F8:EE:17:91:6B:DE:EB:85:C1:C5:FB:41:8E:56:FB:F6:BC`
 
 Her Release notunda APK dosyasının SHA-256 özeti yer alır; indirdiğin dosyayı bununla doğrulayabilirsin.

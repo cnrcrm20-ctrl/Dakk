@@ -18,8 +18,9 @@ projenin mimarisi ve bozulmaması gereken kurallar orada.
 
 ## Kurallar
 
-1. **İmza anahtarına dokunma.** `signing/dakk-release.p12` değişirse SHA-1 değişir ve tüm
-   kullanıcılarda Google ile giriş bozulur (hata 10). CI, imza değişirse derlemeyi durdurur.
+1. **İmza anahtarına dokunma.** `signing/dakk-release.p12.enc` (şifreli resmi anahtar) değişirse SHA-1
+   değişir ve tüm kullanıcılarda Google ile giriş bozulur (hata 10). CI, imza değişirse derlemeyi durdurur.
+   Fork'ta derlediğin APK debug anahtarıyla imzalanır; uygulama çalışır ama Google ile giriş hata verir.
 2. **Yarım özellik ekleme.** Dakk normal kullanıcılar içindir; her özellik uçtan uca çalışır
    durumda olmalı. Çalışmayan buton veya "yakında" ekranı kabul edilmez.
 3. **Firestore kuralları** (`firestore.rules`) ile uyumlu kal; kurallar değişirse aynı PR'da

@@ -10,22 +10,31 @@ plugins {
 // Sürüm bilgisi — yeni bir sürüm yayınlamak için SADECE burayı değiştirin.
 // main dalına push edildiğinde GitHub Actions bu sürüm için otomatik olarak Release oluşturur.
 // ---------------------------------------------------------------------------------------------
-val dakkVersionName = "2.0.1"
-val dakkVersionCode = 21
+val dakkVersionName = "2.1.0"
+val dakkVersionCode = 22
 
 // ---------------------------------------------------------------------------------------------
-// İmzalama — SHA-1 parmak izinin HER derlemede aynı kalması için sabit anahtar deposu kullanılır.
-// Google ile Giriş (Firebase) bu parmak izine bağlıdır; anahtarı değiştirmeyin!
-//   SHA-1  : 05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21
-//   SHA-256: A1:31:5B:56:6C:73:7F:46:3E:27:D8:01:36:03:47:F9:C0:80:06:85:5F:E7:66:E7:B9:6F:E1:FB:35:23:FC:D9
-// İsteğe bağlı olarak ortam değişkenleriyle (CI secrets) geçersiz kılınabilir.
+// İmzalama — Google ile Giriş (Firebase) APK'nın imza parmak izine bağlıdır.
+// Resmi anahtar repoda YALNIZCA şifreli olarak durur: signing/dakk-release.p12.enc
+// GitHub Actions, DAKK_SIGNING_PASSPHRASE secret'ı ile anahtarı çözer ve şu ortam değişkenlerini verir:
+//   DAKK_KEYSTORE_PATH, DAKK_KEYSTORE_PASSWORD, (isteğe bağlı) DAKK_KEY_ALIAS, DAKK_KEY_PASSWORD
+// Resmi anahtarın parmak izleri (Firebase Console'da kayıtlı olmalı):
+//   SHA-1  : 1B:8A:A6:D1:88:69:43:31:9A:70:65:4F:A6:DA:DC:7D:F9:E3:5A:E1
+//   SHA-256: A1:E4:F4:6F:E3:DE:83:B8:C7:B9:DF:3F:C9:92:EC:F8:EE:17:91:6B:DE:EB:85:C1:C5:FB:41:8E:56:FB:F6:BC
+// Anahtar yoksa (ör. yerel geliştirme veya fork) derleme Android debug anahtarıyla imzalanır;
+// bu APK çalışır ama Google ile Giriş hata verir.
 // ---------------------------------------------------------------------------------------------
 fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
 
-val dakkKeystorePath: String = envOrNull("DAKK_KEYSTORE_PATH") ?: "${rootDir}/signing/dakk-release.p12"
-val dakkKeystorePassword: String = envOrNull("DAKK_KEYSTORE_PASSWORD") ?: "dakk-android-2026"
+val dakkKeystoreFile: File? = envOrNull("DAKK_KEYSTORE_PATH")?.let { file(it) }?.takeIf { it.isFile }
+val dakkKeystorePassword: String? = envOrNull("DAKK_KEYSTORE_PASSWORD")
 val dakkKeyAlias: String = envOrNull("DAKK_KEY_ALIAS") ?: "dakk"
-val dakkKeyPassword: String = envOrNull("DAKK_KEY_PASSWORD") ?: dakkKeystorePassword
+val dakkKeyPassword: String? = envOrNull("DAKK_KEY_PASSWORD") ?: dakkKeystorePassword
+val hasOfficialSigning: Boolean = dakkKeystoreFile != null && dakkKeystorePassword != null
+
+if (!hasOfficialSigning) {
+  logger.warn("Dakk: resmi imza anahtarı bulunamadı — APK debug anahtarıyla imzalanacak (Google ile Giriş çalışmaz).")
+}
 
 android {
   namespace = "com.example"
@@ -43,12 +52,14 @@ android {
   }
 
   signingConfigs {
-    create("dakk") {
-      storeFile = file(dakkKeystorePath)
-      storePassword = dakkKeystorePassword
-      keyAlias = dakkKeyAlias
-      keyPassword = dakkKeyPassword
-      storeType = "PKCS12"
+    if (hasOfficialSigning) {
+      create("dakk") {
+        storeFile = dakkKeystoreFile
+        storePassword = dakkKeystorePassword
+        keyAlias = dakkKeyAlias
+        keyPassword = dakkKeyPassword
+        storeType = "PKCS12"
+      }
     }
   }
 
@@ -58,11 +69,11 @@ android {
       isShrinkResources = false
       isCrunchPngs = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("dakk")
+      signingConfig = signingConfigs.findByName("dakk") ?: signingConfigs.getByName("debug")
     }
     debug {
-      // Debug derlemeleri de aynı anahtarla imzalanır; böylece Google girişi her derlemede çalışır.
-      signingConfig = signingConfigs.getByName("dakk")
+      // Resmi anahtar mevcutsa debug derlemeleri de onunla imzalanır; böylece Google girişi çalışır.
+      signingConfigs.findByName("dakk")?.let { signingConfig = it }
     }
   }
 
@@ -106,6 +117,8 @@ dependencies {
 
   implementation(libs.firebase.auth)
   implementation(libs.firebase.firestore)
+  implementation(libs.firebase.messaging)
+  implementation(libs.firebase.ai)
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)

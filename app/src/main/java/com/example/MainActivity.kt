@@ -13,17 +13,23 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -31,8 +37,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.notification.NotificationHelper
 import com.example.ui.DakkViewModel
 import com.example.ui.Screen
+import com.example.ui.components.AnnouncementScreen
+import com.example.ui.components.DakkSplashAnimation
+import com.example.ui.components.ForceUpdateScreen
+import com.example.ui.components.MaintenanceScreen
 import com.example.ui.components.UpdateDialog
+import com.example.ui.screens.AssistantScreen
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.FounderPanelScreen
 import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.FoundContactDialog
 import com.example.ui.screens.HomeScreen
@@ -44,14 +56,32 @@ class MainActivity : ComponentActivity() {
     private val viewModel: DakkViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Manifest'teki Theme.Dakk.Launch yalnızca açılış penceresi içindir; uygulama koyu temayla çalışır.
+        setTheme(R.style.Theme_Dakk)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Açılış animasyonu yalnızca uygulama normal şekilde açıldığında oynar;
+        // bildirimden veya davet bağlantısından açılınca kullanıcıyı bekletmeyiz.
+        val playSplash = savedInstanceState == null &&
+            intent?.action == Intent.ACTION_MAIN &&
+            intent?.hasExtra(NotificationHelper.EXTRA_OPEN_CHAT_UID) != true
         if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
+            var showSplash by rememberSaveable { mutableStateOf(playSplash) }
             DakkTheme(darkTheme = true) {
-                Surface(modifier = Modifier.fillMaxSize(), color = DakkDarkBg) {
-                    DakkApp(viewModel)
+                Box(Modifier.fillMaxSize()) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = DakkDarkBg) {
+                        DakkApp(viewModel, dialogsAllowed = !showSplash)
+                    }
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        enter = EnterTransition.None,
+                        exit = fadeOut(tween(350))
+                    ) {
+                        DakkSplashAnimation(onFinished = { showSplash = false })
+                    }
                 }
             }
         }
@@ -84,11 +114,15 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun DakkApp(viewModel: DakkViewModel) {
+fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
     val context = LocalContext.current
     val user by viewModel.user.collectAsStateWithLifecycle()
     val screen by viewModel.screen.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
+    val config by viewModel.config.collectAsStateWithLifecycle()
+    val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
+    val announcement by viewModel.announcement.collectAsStateWithLifecycle()
+    val preview by viewModel.previewAnnouncement.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
@@ -96,14 +130,35 @@ fun DakkApp(viewModel: DakkViewModel) {
         }
     }
 
+    // Öncelik: bakım > zorunlu güncelleme > duyuru > güncelleme penceresi
+    val maintenance = user != null && config.maintenanceEnabled && !isFounder
+    val forceUpdate = user != null && !maintenance && config.requiresUpdate(viewModel.appVersion)
+
+    if (maintenance) {
+        MaintenanceScreen(config.maintenanceMessage)
+        return
+    }
+    if (forceUpdate) {
+        ForceUpdateScreen(
+            message = config.forceUpdateMessage,
+            latestVersion = update.release?.version,
+            downloading = update.downloading,
+            progress = update.progress,
+            signatureMismatch = update.signatureMismatch,
+            onUpdate = { viewModel.startUpdate() },
+            onOpenReleasePage = { viewModel.openReleasesPage() }
+        )
+        return
+    }
+
     if (user == null) {
         AuthScreen()
     } else {
-        NotificationPermissionRequest()
+        if (dialogsAllowed) NotificationPermissionRequest()
         AnimatedContent(
             targetState = screen,
             transitionSpec = {
-                if (targetState is Screen.Chat) {
+                if (targetState != Screen.Home) {
                     (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
                         .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
                 } else {
@@ -116,19 +171,33 @@ fun DakkApp(viewModel: DakkViewModel) {
             when (target) {
                 Screen.Home -> HomeScreen(viewModel)
                 is Screen.Chat -> ChatScreen(target.peerUid, viewModel)
+                Screen.Assistant -> AssistantScreen(viewModel)
+                Screen.FounderPanel -> FounderPanelScreen(viewModel)
             }
         }
-        FoundContactDialog(viewModel)
+        if (dialogsAllowed) FoundContactDialog(viewModel)
+    }
+
+    val pendingAnnouncement = announcement
+    if (dialogsAllowed && user != null && pendingAnnouncement != null) {
+        AnnouncementScreen(
+            announcement = pendingAnnouncement,
+            isPreview = preview != null,
+            onDone = { viewModel.dismissAnnouncement(pendingAnnouncement) }
+        )
+        return
     }
 
     val release = update.release
-    if (update.showDialog && release != null) {
+    if (dialogsAllowed && update.showDialog && release != null) {
         UpdateDialog(
             release = release,
             currentVersion = viewModel.appVersion,
             downloading = update.downloading,
             progress = update.progress,
+            signatureMismatch = update.signatureMismatch,
             onUpdate = { viewModel.startUpdate() },
+            onOpenReleasePage = { viewModel.openReleasePage() },
             onDismiss = { viewModel.dismissUpdateDialog() }
         )
     }
