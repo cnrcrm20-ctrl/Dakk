@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Edit
@@ -63,6 +64,9 @@ import com.example.ui.theme.DakkYellow
 
 private const val REPO_URL = "https://github.com/cnrcrm20-ctrl/Dakk"
 
+/** Yapay zekâ işleme ayrıntıları (gizlilik politikasının "Dakk Asistan" bölümü). */
+const val AI_INFO_URL = PRIVACY_POLICY_URL
+
 @Composable
 fun SettingsScreen(viewModel: DakkViewModel) {
     val context = LocalContext.current
@@ -71,6 +75,7 @@ fun SettingsScreen(viewModel: DakkViewModel) {
     val blocked by viewModel.blockedContacts.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val autoUpdate by viewModel.autoUpdate.collectAsStateWithLifecycle()
+    val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
 
     var showQr by remember { mutableStateOf(false) }
     var showEditName by remember { mutableStateOf(false) }
@@ -148,6 +153,15 @@ fun SettingsScreen(viewModel: DakkViewModel) {
                 onCheckedChange = { viewModel.setAutoUpdate(it) },
                 colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
             )
+        }
+
+        if (isFounder) {
+            SectionTitle("Kurucu")
+            SettingRow(
+                Icons.Default.AdminPanelSettings,
+                "Kurucu paneli",
+                "Asistan, duyurular, sürüm ve sunucu ayarları"
+            ) { viewModel.openFounderPanel() }
         }
 
         SectionTitle("Hakkında")

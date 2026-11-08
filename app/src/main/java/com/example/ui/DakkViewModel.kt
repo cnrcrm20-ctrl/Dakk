@@ -5,7 +5,22 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.net.Uri
 import com.example.BuildConfig
+import com.example.assistant.AssistantEngine
+import com.example.assistant.AssistantException
+import com.example.assistant.AssistantTurn
+import com.example.config.Announcement
+import com.example.config.ConfigRepository
+import com.example.config.PrivateConfig
+import com.example.config.PublicConfig
+import com.example.data.ImageAttachment
+import com.example.data.ImageState
+import com.example.media.DownloadResult
+import com.example.media.ImageMeta
+import com.example.media.MediaManager
+import com.example.push.AppState
+import com.example.push.PushClient
 import com.example.auth.GoogleAuth
 import com.example.crypto.CryptoEngine
 import com.example.data.ChatDoc
@@ -21,6 +36,7 @@ import com.example.notification.NotificationHelper
 import com.example.update.GitHubUpdateManager
 import com.example.update.ReleaseInfo
 import com.example.update.UpdateCheckResult
+import com.example.util.AssistantMention
 import com.example.util.InviteLinks
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
@@ -52,6 +68,8 @@ import java.io.File
 sealed class Screen {
     object Home : Screen()
     data class Chat(val peerUid: String) : Screen()
+    object Assistant : Screen()
+    object FounderPanel : Screen()
 }
 
 enum class HomeTab { CHATS, CONTACTS, SETTINGS }
@@ -82,6 +100,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private val notifications = NotificationHelper(app)
     private val updater = GitHubUpdateManager(app)
     private val prefs = app.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
+    val configRepo = ConfigRepository(app)
+    private val media = MediaManager(app, repo, crypto)
+    private val assistant = AssistantEngine(app)
+    private val push = PushClient(repo)
 
     val appVersion: String = BuildConfig.VERSION_NAME
 
@@ -121,6 +143,41 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events
+
+    // Uzak ayarlar (Kurucu paneli) ---------------------------------------
+    private val _config = MutableStateFlow(PublicConfig())
+    val config: StateFlow<PublicConfig> = _config
+
+    private val _isFounder = MutableStateFlow(false)
+    val isFounder: StateFlow<Boolean> = _isFounder
+    private var privateConfig: PrivateConfig? = null
+
+    // Duyurular -----------------------------------------------------------
+    private val _seenAnnouncements = MutableStateFlow(loadSeenAnnouncements())
+    private val _previewAnnouncement = MutableStateFlow<Announcement?>(null)
+    val previewAnnouncement: StateFlow<Announcement?> = _previewAnnouncement
+
+    /** Gösterilmeyi bekleyen duyuru (önizleme öncelikli). */
+    val announcement: StateFlow<Announcement?> =
+        combine(_config, _seenAnnouncements, _previewAnnouncement) { cfg, seen, preview ->
+            preview ?: cfg.announcement?.takeIf { it.isLive(System.currentTimeMillis(), appVersion) && it.id !in seen }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // Fotoğraflar ---------------------------------------------------------
+    private val _imageStates = MutableStateFlow<Map<String, ImageState>>(emptyMap())
+    private val downloadsInFlight = mutableSetOf<String>()
+    private val _uploads = MutableStateFlow<Map<String, List<UiMessage>>>(emptyMap())
+    val uploads: StateFlow<Map<String, List<UiMessage>>> = _uploads
+
+    // Dakk Asistan --------------------------------------------------------
+    private val _assistantTurns = MutableStateFlow<List<AssistantTurn>>(emptyList())
+    val assistantTurns: StateFlow<List<AssistantTurn>> = _assistantTurns
+    private val _assistantBusy = MutableStateFlow(false)
+    val assistantBusy: StateFlow<Boolean> = _assistantBusy
+    private val _chatAssistantBusy = MutableStateFlow<String?>(null)
+    /** @dakk ile çağrılan asistanın yanıt hazırladığı sohbetin kişi kimliği. */
+    val chatAssistantBusy: StateFlow<String?> = _chatAssistantBusy
+    private var assistantHistoryLoaded = false
 
     private val contactsWithProfiles: Flow<List<Contact>> =
         combine(_rawContacts, _profiles) { contacts, profiles ->
@@ -165,6 +222,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingInvite: String? = null
     private var pendingChatUid: String? = null
     private var pendingApk: File? = null
+    private var pushTokenRegistered = false
+    private val decryptCache = HashMap<String, String?>()
 
     private val authListener = FirebaseAuth.AuthStateListener { a -> onAuthChanged(a.currentUser) }
 
@@ -217,6 +276,19 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     handleNotifications(docs, uid)
                 }
             }
+            launch {
+                configRepo.observePublic().retrying("Ayarlar", uid).collect { cfg ->
+                    _config.value = cfg
+                    updatePushActive()
+                    if (cfg.requiresUpdate(appVersion) && _update.value.release == null) checkForUpdates(manual = false)
+                }
+            }
+            launch { refreshFounderStatus() }
+            launch {
+                pushTokenRegistered = push.registerToken(uid)
+                updatePushActive()
+            }
+            launch { runCatching { media.cleanupExpiredUploads() } }
         }
         ensureProfile(uid)
         pendingInvite?.let { link ->
@@ -246,6 +318,29 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _tab.value = HomeTab.CHATS
         _addContact.value = AddContactState()
         readRequested.clear()
+        _isFounder.value = false
+        privateConfig = null
+        pushTokenRegistered = false
+        updatePushActive()
+        _uploads.value = emptyMap()
+        _imageStates.value = emptyMap()
+        synchronized(decryptCache) { decryptCache.clear() }
+        _assistantTurns.value = emptyList()
+        assistantHistoryLoaded = false
+    }
+
+    private fun updatePushActive() {
+        AppState.pushActive = pushTokenRegistered && _config.value.hasServer
+    }
+
+    /** Kurucu yetkisini Firestore kurallarına sorar (yalnızca kurucular app_config/private okuyabilir). */
+    suspend fun refreshFounderStatus() {
+        try {
+            privateConfig = configRepo.loadPrivateIfFounder()
+            _isFounder.value = privateConfig != null
+        } catch (e: Exception) {
+            Log.w(TAG, "Kurucu durumu alınamadı", e)
+        }
     }
 
     private suspend fun publishMyProfile(user: FirebaseUser) {
@@ -305,13 +400,60 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 .collect { docs ->
                     lastActiveDocs = docs
-                    val cleared = _clearMarks.value[chatId] ?: 0L
-                    val ui = withContext(Dispatchers.Default) {
-                        docs.filter { it.createdAt > cleared }.map { it.toUi(myUid) }
-                    }
-                    _activeMessages.value = ui
+                    rebuildActiveMessages(chatId, myUid)
                     if (isForeground) markIncomingAsRead(chatId, myUid, docs)
                 }
+        }
+    }
+
+    private suspend fun rebuildActiveMessages(chatId: String, myUid: String) {
+        val docs = lastActiveDocs
+        val cleared = _clearMarks.value[chatId] ?: 0L
+        val ui = withContext(Dispatchers.Default) {
+            docs.filter { it.createdAt > cleared }.map { it.toUi(myUid) }
+        }
+        if ((_screen.value as? Screen.Chat)?.let { ChatIds.of(myUid, it.peerUid) } != chatId) return
+        _activeMessages.value = ui
+        startImageDownloads(chatId, docs, ui)
+    }
+
+    /** Görünen sohbette henüz cihazda olmayan fotoğrafları indirir. */
+    private fun startImageDownloads(chatId: String, docs: List<MessageDoc>, ui: List<UiMessage>) {
+        val myUid = sessionUid ?: return
+        val byId = docs.associateBy { it.id }
+        ui.forEach { m ->
+            val image = m.image ?: return@forEach
+            if (image.state != ImageState.DOWNLOADING || image.mediaId in downloadsInFlight) return@forEach
+            val doc = byId[m.id] ?: return@forEach
+            if (doc.isPending) return@forEach
+            downloadsInFlight += image.mediaId
+            viewModelScope.launch {
+                val meta = ImageMeta(image.mediaId, image.chunks, image.width, image.height, image.size, null)
+                val result = media.download(chatId, meta, doc.senderKey, doc.recipientKey, deleteAfter = doc.senderId != myUid)
+                downloadsInFlight -= image.mediaId
+                val state = when (result) {
+                    is DownloadResult.Ok -> ImageState.READY
+                    DownloadResult.Expired -> ImageState.EXPIRED
+                    DownloadResult.Failed -> ImageState.FAILED
+                }
+                _imageStates.update { it + (image.mediaId to state) }
+                rebuildActiveMessages(chatId, myUid)
+            }
+        }
+    }
+
+    /** İndirilemeyen bir fotoğrafı yeniden dener. */
+    fun retryImage(peerUid: String, mediaId: String) {
+        val myUid = sessionUid ?: return
+        _imageStates.update { it - mediaId }
+        viewModelScope.launch { rebuildActiveMessages(ChatIds.of(myUid, peerUid), myUid) }
+    }
+
+    fun imageFile(mediaId: String): File = media.localFile(mediaId)
+
+    fun saveImageToGallery(mediaId: String) {
+        viewModelScope.launch {
+            _events.tryEmit(if (media.saveToGallery(mediaId)) "Fotoğraf galeriye kaydedildi" else "Fotoğraf kaydedilemedi")
         }
     }
 
@@ -330,6 +472,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setForeground(foreground: Boolean) {
         isForeground = foreground
+        AppState.foreground = foreground
         if (!foreground) return
         val myUid = sessionUid
         val current = _screen.value
@@ -347,16 +490,38 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun MessageDoc.toUi(myUid: String): UiMessage {
         val fromMe = senderId == myUid
+        val cacheKey = "$id:${content.hashCode()}"
+        val plain = synchronized(decryptCache) {
+            if (decryptCache.containsKey(cacheKey)) decryptCache[cacheKey]
+            else crypto.decryptMessage(content, senderKey, recipientKey).also { decryptCache[cacheKey] = it }
+        }
+        val image = if (messageType == "IMAGE") {
+            ImageMeta.parse(plain)?.let { meta ->
+                val local = media.hasLocal(meta.mediaId)
+                ImageAttachment(
+                    mediaId = meta.mediaId,
+                    chunks = meta.chunks,
+                    width = meta.width,
+                    height = meta.height,
+                    size = meta.size,
+                    thumbBase64 = meta.thumbBase64,
+                    localPath = if (local) media.localFile(meta.mediaId).absolutePath else null,
+                    state = if (local) ImageState.READY else _imageStates.value[meta.mediaId] ?: ImageState.DOWNLOADING
+                )
+            }
+        } else null
         return UiMessage(
             id = id,
-            text = crypto.decryptMessage(content, senderKey, recipientKey),
+            text = if (messageType == "IMAGE") null else plain,
             isFromMe = fromMe,
             timestamp = createdAt,
             status = when {
                 isPending -> MessageStatus.PENDING
                 deliveryStatus == "READ" -> MessageStatus.READ
                 else -> MessageStatus.SENT
-            }
+            },
+            image = image,
+            isAssistant = isAssistant
         )
     }
 
@@ -386,37 +551,67 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     fun sendMessage(peerUid: String, rawText: String): Boolean {
         val text = rawText.trim()
         if (text.isEmpty()) return false
+        if (text.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES) {
+            _events.tryEmit("Mesaj çok uzun. Lütfen daha kısa parçalar halinde gönderin.")
+            return false
+        }
+        val sent = sendEncrypted(peerUid, text, previewOf(text), "TEXT", isAssistant = false)
+        if (sent && isAssistantMention(text) && _config.value.assistantEnabled) {
+            askAssistantInChat(peerUid, AssistantMention.question(text))
+        }
+        return sent
+    }
+
+    /** Mesaj "@dakk" ile başlıyorsa asistan sohbete katılır. */
+    fun isAssistantMention(text: String): Boolean = AssistantMention.isMention(text)
+
+    /**
+     * Ortak gönderim yolu: içeriği şifreler, Firestore'a yazar ve sunucu varsa
+     * karşı tarafa anlık bildirim gönderilmesini ister.
+     */
+    private fun sendEncrypted(
+        peerUid: String,
+        plain: String,
+        preview: String,
+        messageType: String,
+        isAssistant: Boolean
+    ): Boolean {
         val myUid = sessionUid ?: return false
         val peer = _profiles.value[peerUid]
         if (peer == null || peer.publicKey.isBlank()) {
             _events.tryEmit("Bu kişi henüz Dakk'ın güncel sürümüne giriş yapmamış. Şifreli mesaj gönderilemiyor.")
             return false
         }
-        if (text.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES) {
-            _events.tryEmit("Mesaj çok uzun. Lütfen daha kısa parçalar halinde gönderin.")
-            return false
-        }
         val myName = _profiles.value[myUid]?.displayName?.ifBlank { null }
             ?: _user.value?.displayName ?: "Dakk Kullanıcısı"
+        val chatId = ChatIds.of(myUid, peerUid)
 
         viewModelScope.launch {
             try {
-                val (content, preview, myKey) = withContext(Dispatchers.Default) {
+                val (content, encPreview, myKey) = withContext(Dispatchers.Default) {
                     Triple(
-                        crypto.encrypt(text, peer.publicKey),
-                        crypto.encrypt(previewOf(text), peer.publicKey),
+                        crypto.encrypt(plain, peer.publicKey),
+                        crypto.encrypt(preview, peer.publicKey),
                         crypto.publicKeyBase64()
                     )
                 }
                 repo.sendMessage(
-                    chatId = ChatIds.of(myUid, peerUid),
+                    chatId = chatId,
                     myUid = myUid,
                     peerUid = peerUid,
                     senderName = myName,
                     encryptedContent = content,
-                    encryptedPreview = preview,
+                    encryptedPreview = encPreview,
                     senderKey = myKey,
-                    recipientKey = peer.publicKey
+                    recipientKey = peer.publicKey,
+                    messageType = messageType,
+                    isAssistant = isAssistant,
+                    onSent = { messageId ->
+                        val server = _config.value.serverUrl
+                        if (server.isNotBlank()) {
+                            viewModelScope.launch { push.notifyMessage(server, chatId, messageId) }
+                        }
+                    }
                 ) { _events.tryEmit("Mesaj gönderilemedi. Lütfen tekrar deneyin.") }
             } catch (e: Exception) {
                 Log.e(TAG, "Şifreleme hatası", e)
@@ -426,13 +621,215 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
+    /** Galeriden seçilen fotoğrafı sıkıştırır, şifreler ve gönderir. */
+    fun sendImage(peerUid: String, uri: Uri) {
+        val myUid = sessionUid ?: return
+        if (!_config.value.imagesEnabled) {
+            _events.tryEmit("Fotoğraf gönderimi şu an kapalı.")
+            return
+        }
+        val peer = _profiles.value[peerUid]
+        if (peer == null || peer.publicKey.isBlank()) {
+            _events.tryEmit("Bu kişi henüz Dakk'ın güncel sürümüne giriş yapmamış. Şifreli mesaj gönderilemiyor.")
+            return
+        }
+        val chatId = ChatIds.of(myUid, peerUid)
+        val mediaId = media.newMediaId()
+        val placeholderId = "upload_$mediaId"
+        viewModelScope.launch {
+            try {
+                val prepared = media.prepare(uri)
+                val placeholder = UiMessage(
+                    id = placeholderId,
+                    text = null,
+                    isFromMe = true,
+                    timestamp = System.currentTimeMillis(),
+                    status = MessageStatus.PENDING,
+                    image = ImageAttachment(
+                        mediaId, 1, prepared.width, prepared.height, prepared.jpeg.size.toLong(),
+                        prepared.thumbBase64, null, ImageState.UPLOADING
+                    )
+                )
+                _uploads.update { it + (peerUid to (it[peerUid].orEmpty() + placeholder)) }
+                repo.ensureChat(chatId, myUid, peerUid)
+                val meta = media.upload(chatId, myUid, peer.publicKey, mediaId, prepared)
+                sendEncrypted(peerUid, meta.toJson(), "📷 Fotoğraf", "IMAGE", isAssistant = false)
+            } catch (e: Exception) {
+                Log.e(TAG, "Fotoğraf gönderilemedi", e)
+                _events.tryEmit("Fotoğraf gönderilemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.")
+            } finally {
+                _uploads.update { map ->
+                    val rest = map[peerUid].orEmpty().filterNot { it.id == placeholderId }
+                    if (rest.isEmpty()) map - peerUid else map + (peerUid to rest)
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ Dakk Asistan
+
+    fun hasAiConsent(scope: String): Boolean = prefs.getBoolean(PREFIX_AI_CONSENT + scope, false)
+
+    fun giveAiConsent(scope: String) {
+        prefs.edit().putBoolean(PREFIX_AI_CONSENT + scope, true).apply()
+    }
+
+    /** Günlük asistan hakkını kullanır; hak kalmadıysa false. Kurucular sınırsızdır. */
+    private fun consumeAssistantQuota(): Boolean {
+        val limit = _config.value.assistantDailyLimit
+        if (limit <= 0 || _isFounder.value) return true
+        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+        val key = PREFIX_AI_COUNT + day
+        val used = prefs.getInt(key, 0)
+        if (used >= limit) {
+            _events.tryEmit("Bugünkü asistan kullanım hakkınız doldu ($limit). Yarın tekrar deneyebilirsiniz.")
+            return false
+        }
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(PREFIX_AI_COUNT) && it != key }.forEach { editor.remove(it) }
+        editor.putInt(key, used + 1).apply()
+        return true
+    }
+
+    fun openAssistant() {
+        if (!assistantHistoryLoaded) {
+            assistantHistoryLoaded = true
+            viewModelScope.launch {
+                _assistantTurns.value = withContext(Dispatchers.IO) { assistant.loadHistory() }
+            }
+        }
+        _screen.value = Screen.Assistant
+    }
+
+    fun sendToAssistant(rawText: String): Boolean {
+        val text = rawText.trim()
+        if (text.isEmpty() || _assistantBusy.value) return false
+        if (!_config.value.assistantEnabled) {
+            _events.tryEmit("Dakk Asistan şu an kullanılamıyor.")
+            return false
+        }
+        if (!consumeAssistantQuota()) return false
+        val history = _assistantTurns.value
+        _assistantTurns.value = history + AssistantTurn("user", text, System.currentTimeMillis())
+        _assistantBusy.value = true
+        viewModelScope.launch {
+            try {
+                val reply = assistant.reply(_config.value, privateConfig, history, text)
+                _assistantTurns.update { it + AssistantTurn("model", reply, System.currentTimeMillis()) }
+            } catch (e: Exception) {
+                _events.tryEmit((e as? AssistantException)?.message ?: "Asistan şu an yanıt veremiyor.")
+                _assistantTurns.update { list -> if (list.lastOrNull()?.role == "user") list.dropLast(1) else list }
+            } finally {
+                _assistantBusy.value = false
+                val snapshot = _assistantTurns.value
+                withContext(Dispatchers.IO) { assistant.saveHistory(snapshot) }
+            }
+        }
+        return true
+    }
+
+    fun clearAssistant() {
+        _assistantTurns.value = emptyList()
+        viewModelScope.launch(Dispatchers.IO) { assistant.clearHistory() }
+    }
+
+    /** @dakk ile çağrıldığında sohbetin son mesajlarını bağlam olarak kullanıp yanıtı sohbete ekler. */
+    private fun askAssistantInChat(peerUid: String, question: String) {
+        if (_chatAssistantBusy.value != null) {
+            _events.tryEmit("Dakk Asistan başka bir yanıt hazırlıyor, biraz bekleyin.")
+            return
+        }
+        if (!consumeAssistantQuota()) return
+        val myUid = sessionUid ?: return
+        val myName = _profiles.value[myUid]?.displayName?.ifBlank { null } ?: "Ben"
+        val peerName = _profiles.value[peerUid]?.displayName?.ifBlank { null } ?: "Karşı taraf"
+        val transcript = _activeMessages.value.takeLast(CHAT_CONTEXT_MESSAGES).joinToString("\n") { m ->
+            val who = when {
+                m.isAssistant -> "Dakk Asistan"
+                m.isFromMe -> myName
+                else -> peerName
+            }
+            val body = when {
+                m.image != null -> "[fotoğraf]"
+                m.text == null -> "[okunamayan mesaj]"
+                else -> m.text
+            }
+            "$who: $body"
+        }
+        val prompt = buildString {
+            append("Sohbetin son mesajları:\n")
+            append(transcript.ifBlank { "(henüz mesaj yok)" })
+            append("\n\n$myName seni çağırdı ve şunu soruyor: ")
+            append(question.ifBlank { "Bu sohbete katkı yap." })
+        }
+        _chatAssistantBusy.value = peerUid
+        viewModelScope.launch {
+            try {
+                val reply = assistant.reply(
+                    _config.value, privateConfig, emptyList(), prompt,
+                    extraInstruction = "Şu an $myName ile $peerName arasındaki bir sohbete @dakk yazılarak çağrıldın. " +
+                        "Yanıtın sohbete eklenecek ve iki kişi de görecek. Kısa ve doğal yaz, kendini tanıtma."
+                )
+                val fitted = fitBytes(reply, MAX_MESSAGE_BYTES)
+                sendEncrypted(peerUid, fitted, previewOf("🤖 $fitted"), "TEXT", isAssistant = true)
+            } catch (e: Exception) {
+                _events.tryEmit((e as? AssistantException)?.message ?: "Asistan şu an yanıt veremiyor.")
+            } finally {
+                _chatAssistantBusy.value = null
+            }
+        }
+    }
+
+    private fun fitBytes(text: String, maxBytes: Int): String {
+        if (text.toByteArray(Charsets.UTF_8).size <= maxBytes) return text
+        var end = text.length
+        while (end > 0 && text.substring(0, end).toByteArray(Charsets.UTF_8).size > maxBytes - 4) end -= 50
+        return text.substring(0, end.coerceAtLeast(0)).trimEnd() + "…"
+    }
+
+    // ------------------------------------------------------------------ Duyurular & Kurucu paneli
+
+    fun dismissAnnouncement(announcement: Announcement) {
+        if (_previewAnnouncement.value != null) {
+            _previewAnnouncement.value = null
+            return
+        }
+        val seen = (_seenAnnouncements.value + announcement.id).toList().takeLast(30).toSet()
+        _seenAnnouncements.value = seen
+        prefs.edit().putString(PREF_SEEN_ANNOUNCEMENTS, seen.joinToString("\n")).apply()
+    }
+
+    fun previewAnnouncement(announcement: Announcement) {
+        _previewAnnouncement.value = announcement.copy(id = announcement.id.ifBlank { "preview" })
+    }
+
+    private fun loadSeenAnnouncements(): Set<String> =
+        prefs.getString(PREF_SEEN_ANNOUNCEMENTS, "").orEmpty().split('\n').filter { it.isNotBlank() }.toSet()
+
+    fun openFounderPanel() {
+        if (_isFounder.value) _screen.value = Screen.FounderPanel
+    }
+
+    /** Panelde ayarlar kaydedilince kurucu tarafında da hemen geçerli olsun. */
+    fun onFounderConfigSaved() {
+        viewModelScope.launch { refreshFounderStatus() }
+    }
+
+    fun closeSecondaryScreen() {
+        _screen.value = Screen.Home
+    }
+
     fun deleteMessage(peerUid: String, messageId: String) {
         val myUid = sessionUid ?: return
         val chatId = ChatIds.of(myUid, peerUid)
         val wasLast = _activeMessages.value.lastOrNull()?.id == messageId
+        val image = _activeMessages.value.firstOrNull { it.id == messageId }?.image
         viewModelScope.launch {
             try {
                 repo.deleteMessage(chatId, messageId)
+                if (image != null) {
+                    media.deleteMedia(chatId, ImageMeta(image.mediaId, image.chunks, 0, 0, 0, null))
+                }
                 if (wasLast) {
                     val peer = _profiles.value[peerUid] ?: return@launch
                     if (peer.publicKey.isBlank()) return@launch
@@ -578,6 +975,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     fun signOut() {
         viewModelScope.launch {
+            sessionUid?.let { uid -> withContext(Dispatchers.IO) { push.unregister(uid) } }
             GoogleAuth.signOut(getApplication())
         }
     }
@@ -614,6 +1012,23 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openReleasePage() {
         _update.value.release?.let { updater.openReleasePage(it) }
+    }
+
+    /** Zorunlu güncelleme ekranı: sürüm bilgisi alınamadıysa son sürüm sayfasını açar. */
+    fun openReleasesPage() {
+        val release = _update.value.release
+        if (release != null) {
+            updater.openReleasePage(release)
+        } else {
+            runCatching {
+                getApplication<Application>().startActivity(
+                    android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/${BuildConfig.GITHUB_REPO}/releases/latest")
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        }
     }
 
     fun dismissUpdateDialog() {
@@ -700,6 +1115,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             if (peerUid in blocked) return@forEach
             val viewing = isForeground && (_screen.value as? Screen.Chat)?.peerUid == peerUid
             if (viewing) return@forEach
+            // Uygulama arka plandaysa ve anlık bildirim etkinse bildirimi sunucu gönderir (çift bildirim olmasın).
+            if (!isForeground && AppState.pushActive) return@forEach
 
             viewModelScope.launch {
                 val text = withContext(Dispatchers.Default) {
@@ -731,6 +1148,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         private const val PREFIX_READ = "read_"
         private const val PREFIX_CLEARED = "cleared_"
         private const val PREFIX_NOTIFIED = "notified_"
+        private const val PREFIX_AI_CONSENT = "ai_consent_"
+        private const val PREFIX_AI_COUNT = "ai_count_"
+        private const val PREF_SEEN_ANNOUNCEMENTS = "seen_announcements"
+        private const val CHAT_CONTEXT_MESSAGES = 30
         const val MAX_MESSAGE_BYTES = 3_500
         const val MAX_MESSAGE_CHARS = 2_000
     }

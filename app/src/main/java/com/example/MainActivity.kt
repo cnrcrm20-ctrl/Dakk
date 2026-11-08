@@ -37,9 +37,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.notification.NotificationHelper
 import com.example.ui.DakkViewModel
 import com.example.ui.Screen
+import com.example.ui.components.AnnouncementScreen
 import com.example.ui.components.DakkSplashAnimation
+import com.example.ui.components.ForceUpdateScreen
+import com.example.ui.components.MaintenanceScreen
 import com.example.ui.components.UpdateDialog
+import com.example.ui.screens.AssistantScreen
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.FounderPanelScreen
 import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.FoundContactDialog
 import com.example.ui.screens.HomeScreen
@@ -114,11 +119,36 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
     val user by viewModel.user.collectAsStateWithLifecycle()
     val screen by viewModel.screen.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
+    val config by viewModel.config.collectAsStateWithLifecycle()
+    val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
+    val announcement by viewModel.announcement.collectAsStateWithLifecycle()
+    val preview by viewModel.previewAnnouncement.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
+    }
+
+    // Öncelik: bakım > zorunlu güncelleme > duyuru > güncelleme penceresi
+    val maintenance = user != null && config.maintenanceEnabled && !isFounder
+    val forceUpdate = user != null && !maintenance && config.requiresUpdate(viewModel.appVersion)
+
+    if (maintenance) {
+        MaintenanceScreen(config.maintenanceMessage)
+        return
+    }
+    if (forceUpdate) {
+        ForceUpdateScreen(
+            message = config.forceUpdateMessage,
+            latestVersion = update.release?.version,
+            downloading = update.downloading,
+            progress = update.progress,
+            signatureMismatch = update.signatureMismatch,
+            onUpdate = { viewModel.startUpdate() },
+            onOpenReleasePage = { viewModel.openReleasesPage() }
+        )
+        return
     }
 
     if (user == null) {
@@ -128,7 +158,7 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
         AnimatedContent(
             targetState = screen,
             transitionSpec = {
-                if (targetState is Screen.Chat) {
+                if (targetState != Screen.Home) {
                     (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
                         .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
                 } else {
@@ -141,9 +171,21 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
             when (target) {
                 Screen.Home -> HomeScreen(viewModel)
                 is Screen.Chat -> ChatScreen(target.peerUid, viewModel)
+                Screen.Assistant -> AssistantScreen(viewModel)
+                Screen.FounderPanel -> FounderPanelScreen(viewModel)
             }
         }
         if (dialogsAllowed) FoundContactDialog(viewModel)
+    }
+
+    val pendingAnnouncement = announcement
+    if (dialogsAllowed && user != null && pendingAnnouncement != null) {
+        AnnouncementScreen(
+            announcement = pendingAnnouncement,
+            isPreview = preview != null,
+            onDone = { viewModel.dismissAnnouncement(pendingAnnouncement) }
+        )
+        return
     }
 
     val release = update.release

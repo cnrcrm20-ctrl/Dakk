@@ -13,12 +13,13 @@
 <div style="height:16px;"></div>
 <!-- Bu sayfa PRIVACY_POLICY.md dosyasından üretilmiştir; değişiklikleri önce oraya yapın. -->
 <h1 style="color:#FFC107;font-size:30px;margin:0 0 8px;">Dakk Gizlilik Politikası</h1>
-<p style="color:#C8C8C8;margin:8px 0;"><b>Son güncelleme:</b> 8 Kasım 2026 • <b>Geçerli sürüm:</b> Dakk 2.0 ve sonrası</p>
-<p style="color:#C8C8C8;margin:8px 0;">Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır; burada yazanları <a href="https://github.com/cnrcrm20-ctrl/Dakk" style="color:#FFC107;">GitHub deposunda</a> doğrulayabilirsin.</p>
+<p style="color:#C8C8C8;margin:8px 0;"><b>Son güncelleme:</b> 8 Kasım 2026 • <b>Geçerli sürüm:</b> Dakk 2.1 ve sonrası</p>
+<p style="color:#C8C8C8;margin:8px 0;">Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları <a href="https://github.com/cnrcrm20-ctrl/Dakk" style="color:#FFC107;">GitHub deposunda</a> doğrulayabilirsin.</p>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Kısaca</h2>
 <ul style="padding-left:20px;color:#C8C8C8;">
-<li style="margin:4px 0;">Mesajlarının <b>içeriğini</b> biz dahil kimse okuyamaz; cihazında şifrelenir.</li>
-<li style="margin:4px 0;">Telefon numarası, rehber, konum, mikrofon veya fotoğraf erişimi <b>istemeyiz</b>.</li>
+<li style="margin:4px 0;">Mesajlarının ve fotoğraflarının <b>içeriğini</b> biz dahil kimse okuyamaz, çünkü cihazında şifrelenirler.</li>
+<li style="margin:4px 0;"><b>Dakk Asistan</b> ile yaptığın sohbetler ve bir sohbette <b>@dakk</b> yazarak asistanı çağırdığın mesajlar yapay zekâ tarafından işlenir. Bu sohbetler uçtan uca şifreli değildir. Ayrıntılar aşağıda.</li>
+<li style="margin:4px 0;">Şunlara erişim <b>istemeyiz</b>: telefon numarası, rehber, konum, mikrofon. Fotoğraflarına yalnızca gönderdiğin fotoğrafı kendin seçtiğinde erişilir.</li>
 <li style="margin:4px 0;">Reklam, analiz veya izleme aracı <b>kullanmayız</b>. Verilerini satmayız, paylaşmayız.</li>
 </ul>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Topladığımız veriler</h2>
@@ -28,35 +29,98 @@
 <li style="margin:4px 0;">Ad (görünen ad), e-posta adresi ve profil fotoğrafı bağlantısı</li>
 <li style="margin:4px 0;">Firebase tarafından üretilen kullanıcı kimliği (UID)</li>
 </ul>
-<p style="color:#C8C8C8;margin:8px 0;">Bu bilgiler Cloud Firestore'daki <b>profilinde</b> saklanır ve Dakk'a giriş yapmış diğer kullanıcılar tarafından görülebilir. Bunun nedeni, arkadaşlarının seni e-posta adresinle veya davet bağlantınla bulabilmesidir. Görünen adını Ayarlar'dan değiştirebilirsin.</p>
+<p style="color:#C8C8C8;margin:8px 0;">Bu bilgiler Cloud Firestore'daki <b>profilinde</b> saklanır. Dakk'a giriş yapmış diğer kullanıcılar bunları görebilir, böylece arkadaşların seni e-posta adresinle veya davet bağlantınla bulabilir. Görünen adını Ayarlar'dan değiştirebilirsin.</p>
 <h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">2. Şifreleme açık anahtarı</h3>
-<p style="color:#C8C8C8;margin:8px 0;">Cihazın bir anahtar çifti üretir. <b>Açık anahtar</b> profilinde yayınlanır (başkalarının sana şifreli mesaj gönderebilmesi için gereklidir). <b>Özel anahtar</b> cihazından hiç çıkmaz ve Android Keystore ile korunur.</p>
+<p style="color:#C8C8C8;margin:8px 0;">Cihazın bir anahtar çifti üretir:</p>
+<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;"><b>Açık anahtar</b> profilinde yayınlanır. Başkalarının sana şifreli mesaj gönderebilmesi için gereklidir.</li>
+<li style="margin:4px 0;"><b>Özel anahtar</b> cihazından hiç çıkmaz ve Android Keystore ile korunur.</li>
+</ul>
 <h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">3. Mesajlar</h3>
 <ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">Mesaj içeriği ve sohbet listesinde görünen son mesaj önizlemesi <b>uçtan uca şifreli</b> olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.</li>
-<li style="margin:4px 0;">Mesajın iletilebilmesi için şu bilgiler <b>şifrelenmeden</b> saklanır: gönderen ve alıcı kimliği, gönderim zamanı, iletim/okundu durumu ve gönderenin görünen adı.</li>
+<li style="margin:4px 0;">Mesajın iletilebilmesi için bazı bilgiler <b>şifrelenmeden</b> saklanır:<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">gönderen ve alıcı kimliği,</li>
+<li style="margin:4px 0;">gönderim zamanı,</li>
+<li style="margin:4px 0;">iletim ve okundu durumu,</li>
+<li style="margin:4px 0;">gönderenin görünen adı,</li>
+<li style="margin:4px 0;">mesaj türü (yazı veya fotoğraf).</li>
+</ul></li>
 </ul>
-<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">4. Kişi listesi</h3>
-<p style="color:#C8C8C8;margin:8px 0;">Eklediğin kişiler (kimlik, ad, e-posta, fotoğraf bağlantısı, engelli olup olmadığı) yalnızca senin okuyabildiğin bir alanda saklanır.</p>
-<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">5. Cihazda tutulanlar</h3>
-<p style="color:#C8C8C8;margin:8px 0;">Ayarların (ör. otomatik güncelleme açık/kapalı) ve şifreli özel anahtarın yalnızca cihazında durur. Uygulama yedeklemeye kapalıdır; bu veriler Google yedeğine aktarılmaz.</p>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">4. Fotoğraflar</h3>
+<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">Gönderdiğin fotoğraf önce telefonunda küçültülür, sonra <b>uçtan uca şifrelenir</b>.</li>
+<li style="margin:4px 0;">Şifreli hali parçalar halinde Firestore'a geçici olarak yüklenir.</li>
+<li style="margin:4px 0;">Alıcı fotoğrafı açtığında fotoğraf onun cihazına kaydedilir ve sunucudaki şifreli kopya <b>hemen silinir</b>.</li>
+<li style="margin:4px 0;">Hiç açılmayan fotoğraflar <b>7 gün</b> sonra sunucudan silinir.</li>
+<li style="margin:4px 0;">Fotoğraflar, gönderen ve alan cihazlarda uygulamanın kendi alanında saklanır. Galeriye yalnızca sen <i>Kaydet</i> dersen kopyalanır.</li>
+</ul>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">5. Kişi listesi</h3>
+<p style="color:#C8C8C8;margin:8px 0;">Eklediğin kişilerle ilgili şu bilgiler, yalnızca senin okuyabildiğin bir alanda saklanır:</p>
+<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">kimlik,</li>
+<li style="margin:4px 0;">ad,</li>
+<li style="margin:4px 0;">e-posta,</li>
+<li style="margin:4px 0;">fotoğraf bağlantısı,</li>
+<li style="margin:4px 0;">engelli olup olmadığı.</li>
+</ul>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">6. Bildirim jetonu</h3>
+<p style="color:#C8C8C8;margin:8px 0;">Uygulama kapalıyken yeni mesajları haber verebilmek için cihazına özel bir Firebase Cloud Messaging jetonu üretilir ve hesabınla birlikte saklanır. Bu jetonu kimse okuyamaz, yalnızca Dakk sunucusu kullanır. Çıkış yaptığında jeton silinir.</p>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">7. Cihazda tutulanlar</h3>
+<p style="color:#C8C8C8;margin:8px 0;">Şunlar yalnızca cihazında durur:</p>
+<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">ayarların,</li>
+<li style="margin:4px 0;">şifreli özel anahtarın,</li>
+<li style="margin:4px 0;">aldığın ve gönderdiğin fotoğraflar,</li>
+<li style="margin:4px 0;">Dakk Asistan sohbet geçmişin.</li>
+</ul>
+<p style="color:#C8C8C8;margin:8px 0;">Uygulama yedeklemeye kapalıdır, bu veriler Google yedeğine aktarılmaz.</p>
+<h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Dakk Asistan (yapay zekâ)</h2>
+<p style="color:#C8C8C8;margin:8px 0;">Dakk Asistan isteğe bağlıdır ve ilk kullanımda seni uyarır.</p>
+<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;"><b>Asistan sohbeti:</b> Asistana yazdığın mesajlar yanıt üretebilmesi için yapay zekâ hizmetine gönderilir. Asistanın konuşmayı hatırlayabilmesi için önceki mesajların da gönderilir. Geçmiş yalnızca cihazında saklanır ve <i>Sohbeti temizle</i> ile silebilirsin.</li>
+<li style="margin:4px 0;"><b>Sohbette @dakk:</b> Bir sohbette mesajına @dakk ile başladığında iki şey olur:<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">O sohbetin <b>son 30 mesajı</b> yanıt üretmek için yapay zekâ hizmetine gönderilir.</li>
+<li style="margin:4px 0;">Asistanın yanıtı sohbete şifreli bir mesaj olarak eklenir ve karşı taraf da görür.</li>
+</ul><p style="color:#C8C8C8;margin:8px 0;">Bu mesajlar, yapay zekâya gönderildikleri için uçtan uca şifreleme kapsamı dışında kalır. Karşı tarafın da bunu bilmesi için asistan yanıtları sohbette "Dakk Asistan" etiketiyle görünür.</p></li>
+<li style="margin:4px 0;"><b>Hizmet sağlayıcı:</b> Varsayılan olarak Google'ın <b>Gemini</b> modelleri <b>Firebase AI Logic</b> üzerinden kullanılır. Google'ın Gemini API koşulları ve gizlilik politikası geçerlidir. Ücretsiz katmanda Google, gönderilen içeriği hizmetlerini geliştirmek için kullanabilir. Dakk yöneticileri, OpenAI uyumlu başka bir yapay zekâ hizmeti de seçebilir. Bu durumda istekler Dakk sunucusu üzerinden o hizmete iletilir.</li>
+<li style="margin:4px 0;">Yapay zekâya kişisel, gizli veya hassas bilgi gönderme. Yapay zekâ yanıtları hatalı olabilir.</li>
+</ul>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">İzinler</h2>
-<table style="width:100%;border-collapse:collapse;margin:12px 0;"><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #2A2D35;color:#FFFFFF;">İzin</th><th style="text-align:left;padding:8px;border-bottom:1px solid #2A2D35;color:#FFFFFF;">Neden</th></tr><tr><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">İnternet / ağ durumu</td><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Mesaj göndermek ve almak</td></tr><tr><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Kamera</td><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Yalnızca QR kod tararken; görüntü kaydedilmez veya gönderilmez</td></tr><tr><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Bildirimler</td><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Yeni mesajları haber vermek</td></tr><tr><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Uygulama yükleme</td><td style="padding:8px;border-bottom:1px solid #1E2128;color:#C8C8C8;">Uygulama içi güncellemeyi kurmak (yalnızca sen onaylarsan)</td></tr></table>
+<table style="border-collapse:collapse;width:100%;color:#C8C8C8;font-size:15px;">
+<tr><th style="text-align:left;border-bottom:1px solid #333;padding:6px;">İzin</th><th style="text-align:left;border-bottom:1px solid #333;padding:6px;">Neden</th></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">İnternet / ağ durumu</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Mesaj göndermek ve almak</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Kamera</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yalnızca QR kod tararken. Görüntü kaydedilmez veya gönderilmez.</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Fotoğraf seçici</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yalnızca gönderdiğin fotoğrafı seçerken. Galerinin geri kalanına erişilmez.</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Depolama (yalnızca Android 9 ve öncesi)</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Bir fotoğrafı galeriye kaydetmek istediğinde</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Bildirimler</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yeni mesajları haber vermek</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Uygulama yükleme</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Uygulama içi güncellemeyi kurmak (yalnızca sen onaylarsan)</td></tr>
+</table>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Üçüncü taraf hizmetler</h2>
 <ul style="padding-left:20px;color:#C8C8C8;">
-<li style="margin:4px 0;"><b>Google Firebase</b> (Authentication, Cloud Firestore) — hesap ve şifreli mesajların saklanması. Google'ın gizlilik politikası: <a href="https://policies.google.com/privacy" style="color:#FFC107;">https://policies.google.com/privacy</a></li>
+<li style="margin:4px 0;"><b>Google Firebase</b> — hesap, şifreli mesajlar ve şifreli fotoğrafların geçici olarak saklanması, bildirim iletimi ve Dakk Asistan için kullanılır:<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">Authentication</li>
+<li style="margin:4px 0;">Cloud Firestore</li>
+<li style="margin:4px 0;">Cloud Messaging</li>
+<li style="margin:4px 0;">AI Logic</li>
+</ul><p style="color:#C8C8C8;margin:8px 0;">Google'ın gizlilik politikası: <a href="https://policies.google.com/privacy" style="color:#FFC107;">https://policies.google.com/privacy</a></p></li>
+<li style="margin:4px 0;"><b>Cloudflare Workers</b> — Dakk sunucusu burada çalışır. Görevleri:<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">uygulama kapalıyken bildirim iletmek,</li>
+<li style="margin:4px 0;">yöneticiler özel bir yapay zekâ hizmeti seçtiyse asistan isteklerini o hizmete aktarmak.</li>
+</ul><p style="color:#C8C8C8;margin:8px 0;">Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir. Cloudflare'in gizlilik politikası: <a href="https://www.cloudflare.com/privacypolicy/" style="color:#FFC107;">https://www.cloudflare.com/privacypolicy/</a></p></li>
 <li style="margin:4px 0;"><b>GitHub</b> — güncelleme denetimi için GitHub Releases'a anonim bir istek gönderilir ve APK buradan indirilir. GitHub'ın gizlilik politikası: <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" style="color:#FFC107;">https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement</a></li>
 </ul>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Verilerini silmek</h2>
 <ul style="padding-left:20px;color:#C8C8C8;">
-<li style="margin:4px 0;"><b>Mesaj:</b> Gönderdiğin bir mesaja uzun basıp *Herkesten sil* diyerek sunucudan kaldırabilirsin.</li>
-<li style="margin:4px 0;"><b>Sohbet:</b> *Sohbeti temizle* mesajları yalnızca kendi cihazındaki görünümden kaldırır.</li>
-<li style="margin:4px 0;"><b>Hesap:</b> Hesabının ve tüm verilerinin silinmesini istiyorsan GitHub deposunda "Hesap silme talebi" başlıklı bir issue aç (e-posta adresini issue'ya <b>yazma</b>); seninle iletişime geçilerek talebin işleme alınır.</li>
+<li style="margin:4px 0;"><b>Mesaj veya fotoğraf:</b> Gönderdiğin bir mesaja uzun basıp <i>Herkesten sil</i> dersen mesaj sunucudan kaldırılır.</li>
+<li style="margin:4px 0;"><b>Sohbet:</b> <i>Sohbeti temizle</i> mesajları yalnızca kendi cihazındaki görünümden kaldırır.</li>
+<li style="margin:4px 0;"><b>Asistan geçmişi:</b> Dakk Asistan ekranındaki <i>Sohbeti temizle</i> düğmesiyle silinir.</li>
+<li style="margin:4px 0;"><b>Hesap:</b> Hesabının ve tüm verilerinin silinmesini istiyorsan GitHub deposunda "Hesap silme talebi" başlıklı bir issue aç. E-posta adresini issue'ya <b>yazma</b>. Seninle iletişime geçilerek talebin işleme alınır.</li>
 </ul>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Çocuklar</h2>
 <p style="color:#C8C8C8;margin:8px 0;">Dakk 13 yaşından küçük çocuklara yönelik değildir.</p>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Değişiklikler</h2>
-<p style="color:#C8C8C8;margin:8px 0;">Bu politika güncellendiğinde değişiklikler bu sayfada ve <a href="https://github.com/cnrcrm20-ctrl/Dakk/blob/main/CHANGELOG.md" style="color:#FFC107;">CHANGELOG.md</a>'de yer alır.</p>
+<p style="color:#C8C8C8;margin:8px 0;">Bu politika güncellendiğinde değişiklikler bu dosyada ve <a href="https://github.com/cnrcrm20-ctrl/Dakk/blob/main/CHANGELOG.md" style="color:#FFC107;">CHANGELOG.md</a>'de yer alır.</p>
 </div>
 </body>
 </html>

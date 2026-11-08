@@ -34,8 +34,11 @@ mesajı sadece sen ve karşındaki kişi açabilir.
 - 📷 **Kolay arkadaş ekleme** — QR kod tara, galeriden QR seç, davet bağlantısı paylaş veya e-postayla ara.
 - 🛡️ **Güvenlik numarası** — Sohbetin gerçekten doğru kişiyle olduğunu yüz yüze doğrula.
 - 🚫 **Engelleme** — İstemediğin kişilerden gelen mesajları durdur.
+- 🖼️ **Fotoğraf gönderme** — Fotoğraflar telefonda küçültülür ve uçtan uca şifrelenir. Alıcı açınca sunucudaki kopya silinir.
+- ✨ **Dakk Asistan** — Uygulama içi yapay zekâ asistanı. Bir sohbette `@dakk` yazarak onu sohbete çağırabilirsin. Yapay zekâ tarafından işlenir; ilk kullanımda uyarı gösterilir.
 - 🗑️ **Herkesten sil** — Gönderdiğin mesajı iki taraftan da kaldır.
-- 🔔 **Bildirimler** — Yeni mesaj geldiğinde haber verir; bildirime dokununca sohbet açılır.
+- 🔔 **Bildirimler** — Yeni mesaj geldiğinde, uygulama kapalıyken bile haber verir. Bildirime dokununca sohbet açılır.
+- 📣 **Duyurular** — Önemli haberler açılışta tam ekran gösterilir.
 - ⬆️ **Otomatik güncelleme** — Yeni sürüm çıktığında uygulama içinden tek dokunuşla güncelle.
 - 🌙 **Koyu tema** — Göz yormayan, OLED dostu tasarım.
 
@@ -61,16 +64,20 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 | Sohbeti doğrulamak | Sohbet → ⋮ → *Güvenlik numarası* — iki telefonda aynı sayılar görünmeli |
 | Bir kişiyi engellemek | Sohbet → ⋮ → *Engelle* |
 | Mesajı silmek | Mesaja uzun bas → *Herkesten sil* |
+| Fotoğraf göndermek | Sohbet → mesaj kutusunun solundaki 🖼️ simgesi |
+| Asistanla konuşmak | Sohbetler listesinin en üstündeki *Dakk Asistan* |
+| Asistanı sohbete çağırmak | Mesajına `@dakk` ile başla, ör. `@dakk bu akşam ne yesek?` |
 | Adını değiştirmek | Ayarlar → *Görünen ad* → *Adı düzenle* |
 | Güncellemeyi elle kontrol etmek | Ayarlar → *Güncellemeleri denetle* |
 
 ## Bilinen sınırlamalar
 
-- Bildirimler uygulama açıkken veya arka planda çalışırken gelir; uygulama tamamen kapatıldığında
-  bildirim gelmez.
+- Uygulama kapalıyken bildirim için Dakk sunucusunun kurulu olması gerekir ([cloud/worker](cloud/worker/README.md)).
+  Xiaomi/Redmi/POCO gibi telefonlarda Dakk için **Otomatik başlatma** açık olmalıdır.
 - Bir hesap aynı anda tek cihazda kullanılabilir. Yeni bir cihazda giriş yapıldığında eski cihazdaki
   mesajlar o cihazda okunamaz hale gelir (anahtarlar cihazdan dışarı çıkmaz).
-- Şimdilik yalnızca metin mesajları desteklenir.
+- Şimdilik yazı ve fotoğraf gönderilebilir. Video, sesli mesaj ve grup sohbeti yoktur.
+- Dakk Asistan ile yapılan sohbetler ve `@dakk` ile asistana gönderilen mesajlar uçtan uca şifreli değildir.
 
 ## Gizlilik ve güvenlik
 
@@ -87,7 +94,9 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 | --- | --- |
 | Dil / UI | Kotlin, Jetpack Compose, Material 3 |
 | Kimlik | Firebase Authentication + Credential Manager (Google ile giriş) |
-| Veri | Cloud Firestore (yalnızca şifreli mesaj ve herkese açık profil) |
+| Veri | Cloud Firestore (şifreli mesajlar, şifreli fotoğraf parçaları, herkese açık profil, uygulama ayarları) |
+| Bildirim | Firebase Cloud Messaging + Cloudflare Worker ([cloud/worker](cloud/worker/README.md)) |
+| Yapay zekâ | Firebase AI Logic (Gemini) veya kurucu panelinden OpenAI uyumlu özel API |
 | Şifreleme | EC P-256 ECDH + SHA-256 + AES-256-GCM, özel anahtar Android Keystore ile sarılı |
 | QR | ZXing (üretme + çözme), CameraX (tarama) |
 | Güncelleme | GitHub Releases API + `PackageInstaller` |
@@ -96,13 +105,24 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 
 ```
 app/src/main/java/com/example/
+├── assistant/     Dakk Asistan (Gemini / OpenAI uyumlu API)
 ├── auth/          Google ile giriş (Credential Manager)
+├── config/        Uzak ayarlar, duyurular, Kurucu paneli verisi
 ├── crypto/        Uçtan uca şifreleme motoru
 ├── data/          Modeller ve Firestore deposu
+├── media/         Fotoğraf sıkıştırma, şifreli yükleme/indirme
 ├── notification/  Bildirim kanalları ve gösterimi
+├── push/          FCM bildirim servisi ve sunucu istemcisi
 ├── update/        GitHub Releases tabanlı otomatik güncelleme
 ├── util/          Davet bağlantıları, QR, sürüm karşılaştırma, imza bilgisi
 └── ui/            ViewModel, ekranlar ve bileşenler
+```
+
+```
+cloud/
+├── admin_panel.json   Kurucu panelinin tanımı (uygulama bu dosyayı çizer)
+└── worker/            Dakk sunucusu: bildirimler + özel API vekili (Cloudflare Worker)
+firestore.rules        Firestore güvenlik kuralları (kurucu listesi burada)
 ```
 
 Proje hafızası ve kararların tamamı için [brain.md](brain.md) dosyasına bak.

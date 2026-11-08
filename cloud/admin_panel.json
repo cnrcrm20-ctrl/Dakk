@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "title": "Kurucu Paneli",
+  "subtitle": "Bu panel yalnızca kurucu hesaplarına görünür. Kaydettiğiniz ayarlar tüm kullanıcılara birkaç saniye içinde ulaşır.",
+  "sections": [
+    {
+      "title": "Dakk Asistan",
+      "description": "Uygulama içindeki yapay zekâ asistanı ve sohbetlerde @dakk ile çağırma.",
+      "fields": [
+        { "key": "assistant_enabled", "doc": "public", "type": "switch", "label": "Asistan açık", "help": "Kapatırsanız asistan ve @dakk herkes için devre dışı kalır.", "default": true },
+        {
+          "key": "assistant_provider", "doc": "public", "type": "select", "label": "Yapay zekâ sağlayıcısı", "default": "gemini",
+          "options": [
+            { "value": "gemini", "label": "Firebase Gemini (ücretsiz)" },
+            { "value": "custom", "label": "Özel API (OpenAI uyumlu)" }
+          ],
+          "help": "Özel API, kullanıcılar için yalnızca Dakk sunucusu adresi girilmişse çalışır; aksi halde Gemini kullanılır."
+        },
+        { "key": "assistant_model", "doc": "public", "type": "text", "label": "Gemini modeli", "placeholder": "gemini-2.5-flash", "default": "gemini-2.5-flash", "help": "Ücretsiz katmanda gemini-2.5-flash veya gemini-2.5-flash-lite önerilir." },
+        { "key": "assistant_daily_limit", "doc": "public", "type": "number", "label": "Kişi başı günlük mesaj sınırı", "default": 40, "help": "0 = sınırsız. Kurucular sınırdan muaftır." },
+        { "key": "assistant_system_prompt", "doc": "public", "type": "multiline", "label": "Asistan kişiliği (sistem talimatı)", "placeholder": "Boş bırakılırsa varsayılan Dakk Asistan kişiliği kullanılır.", "default": "" }
+      ]
+    },
+    {
+      "title": "Özel API (OpenAI uyumlu)",
+      "description": "OpenRouter, Groq, Together, kendi sunucunuz gibi OpenAI uyumlu bir uç nokta. Bu bilgiler yalnızca kuruculara açık belgede saklanır, kullanıcılara asla gönderilmez.",
+      "fields": [
+        { "key": "custom_api_base_url", "doc": "private", "type": "url", "label": "Temel adres (base URL)", "placeholder": "https://api.ornek.com/v1", "help": "Sonuna /chat/completions eklenerek çağrılır." },
+        { "key": "custom_api_key", "doc": "private", "type": "secret", "label": "API anahtarı" },
+        { "key": "custom_api_model", "doc": "private", "type": "text", "label": "Model adı", "placeholder": "ör. llama-3.3-70b-versatile" }
+      ]
+    },
+    {
+      "title": "Duyuru",
+      "description": "Uygulama açılışında tam ekran gösterilir. Her duyuru her kullanıcıya bir kez gösterilir.",
+      "fields": [
+        { "key": "announcement", "doc": "public", "type": "announcement", "label": "Duyuru", "help": "Önce Önizle ile kendi ekranınızda deneyin, sonra Yayınla'ya basın." }
+      ]
+    },
+    {
+      "title": "Sürüm",
+      "description": "Eski sürümleri kullanmaya devam etmeyi engellemek için.",
+      "fields": [
+        { "key": "min_supported_version", "doc": "public", "type": "version", "label": "En düşük desteklenen sürüm", "placeholder": "ör. 2.1.0", "help": "Bundan eski sürümler 'Güncelleme gerekli' ekranında kalır. Boş = kapalı." },
+        { "key": "force_update_message", "doc": "public", "type": "multiline", "label": "Zorunlu güncelleme mesajı", "placeholder": "Boş bırakılırsa varsayılan metin gösterilir." }
+      ]
+    },
+    {
+      "title": "Bakım modu",
+      "description": "Açıkken kurucular dışında kimse uygulamayı kullanamaz.",
+      "fields": [
+        { "key": "maintenance_enabled", "doc": "public", "type": "switch", "label": "Bakım modu", "default": false },
+        { "key": "maintenance_message", "doc": "public", "type": "multiline", "label": "Bakım mesajı", "placeholder": "Kısa bir bakım çalışması yapıyoruz…" }
+      ]
+    },
+    {
+      "title": "Özellikler",
+      "fields": [
+        { "key": "images_enabled", "doc": "public", "type": "switch", "label": "Fotoğraf gönderme", "help": "Firestore ücretsiz kotası dolmak üzereyse geçici olarak kapatabilirsiniz.", "default": true }
+      ]
+    },
+    {
+      "title": "Dakk sunucusu",
+      "description": "Uygulama kapalıyken mesaj bildirimleri ve özel API için gereken ücretsiz Cloudflare Worker. Kurulum: depodaki cloud/worker/README.md",
+      "fields": [
+        { "key": "server_url", "doc": "public", "type": "url", "label": "Sunucu adresi", "placeholder": "https://dakk-push.kullaniciadi.workers.dev", "help": "Boş bırakılırsa bildirimler yalnızca uygulama açıkken çalışır." }
+      ]
+    },
+    {
+      "title": "İstatistik",
+      "fields": [
+        { "key": "user_count", "type": "stat", "label": "Kayıtlı kullanıcı sayısı", "help": "Saymak için dokunun (1 okuma kullanır)." }
+      ]
+    }
+  ]
+}

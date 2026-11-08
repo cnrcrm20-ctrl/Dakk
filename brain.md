@@ -86,16 +86,23 @@ MainActivity ── DakkApp (Compose)
    ├─ AuthScreen            Google ile giriş (Credential Manager + Firebase Auth)
    ├─ HomeScreen            Sohbetler / Kişiler / Ayarlar sekmeleri
    │    └─ AddContactSheet  QR tara · galeriden QR · QR kodum · davet bağlantısı · e-posta ile ara
-   └─ ChatScreen            Mesajlar, okundu bilgisi, güvenlik numarası, engelle/temizle
-DakkViewModel               Oturum, Firestore dinleyicileri, bildirimler, güncelleme
+   ├─ ChatScreen            Mesajlar, fotoğraflar, @dakk, okundu bilgisi, güvenlik numarası
+   ├─ AssistantScreen       Dakk Asistan sohbeti
+   ├─ FounderPanelScreen    Kurucu paneli (şema buluttan gelir)
+   └─ Tam ekran uyarılar    Bakım > Zorunlu güncelleme > Duyuru > Güncelleme penceresi
+DakkViewModel               Oturum, Firestore dinleyicileri, bildirimler, güncelleme, asistan, fotoğraf
 FirestoreRepository         Tüm Firestore okuma/yazmaları
+ConfigRepository            app_config/* (public, private, admin_panel)
+MediaManager                Fotoğraf sıkıştırma + şifreli parça yükleme/indirme + 7 gün temizliği
+AssistantEngine             Gemini (Firebase AI Logic) / özel API / sunucu vekili; yerel geçmiş
+PushClient, DakkMessagingService   FCM jetonu, sunucuya bildirim isteği, kapalı uygulamada bildirim
 CryptoEngine                P-256 ECDH + AES-256-GCM, özel anahtar Android Keystore ile sarılı
 GitHubUpdateManager         Uygulama içi güncelleme (GitHub Releases)
 NotificationHelper          Mesaj bildirimleri
 util/                       InviteLinks, VersionUtils (birim testli), QrCodeHelper, AppSignature
 ```
 
-### Firestore veri modeli (mevcut `firestore.rules` ile uyumlu — kural dağıtımı gerekmez)
+### Firestore veri modeli (`firestore.rules` 2.1.0'da güncellendi — Firebase Console'a elle yapıştırılır)
 
 - `users/{uid}`: `userId, displayName, email (küçük harf), photoUrl, status, publicKey, createdAt, updatedAt`
 - `users/{uid}/contacts/{contactUid}`: `contactUserId, alias, email, photoUrl, isBlocked, createdAt, updatedAt`
@@ -103,7 +110,16 @@ util/                       InviteLinks, VersionUtils (birim testli), QrCodeHelp
   `memberUids, lastMessage (şifreli önizleme), lastMessageSenderId, lastMessageSenderKey,
   lastMessageRecipientKey, lastMessageTimestamp, createdAt, updatedAt`
 - `chats/{chatId}/messages/{id}`: `chatId, senderId, senderName, content (şifreli), senderKey,
-  recipientKey, deliveryStatus (SENT/READ), messageType (TEXT), createdAt`
+  recipientKey, deliveryStatus (SENT/READ), messageType (TEXT/IMAGE), isAssistant?, createdAt`
+  - IMAGE mesajında `content` = şifreli JSON `{v,type:"image",mediaId,chunks,mime,w,h,size,thumb}`
+- `chats/{chatId}/blobs/{mediaId}_{i}`: `mediaId, index, total (≤4), senderId, data (şifreli, Base64, ≤950k), createdAt`
+  — alıcı indirince siler; gönderici 7 gün sonra siler (yerel liste: prefs `dakk_media/uploads`).
+- `app_config/public` (herkes okur, kurucu yazar): `assistant_*`, `images_enabled`, `min_supported_version`,
+  `force_update_message`, `maintenance_*`, `server_url`, `announcement{id,active,title,body,image_url,button_text,
+  button_url,start_at,end_at,min_version,dismissible}`
+- `app_config/private` (yalnızca kurucu): `custom_api_base_url, custom_api_key, custom_api_model`
+- `app_config/admin_panel` (yalnızca kurucu): `schema` (cloud/admin_panel.json metni)
+- `push_tokens/{uid}` (yalnızca sahibi yazar, kimse okumaz): `token, platform, updatedAt`
 
 Önemli kural ayrıntıları:
 - Mesaj yazmadan **önce** sohbet belgesi yazılmalı (kural `get(chat).memberUids` kontrol eder).
@@ -121,11 +137,38 @@ util/                       InviteLinks, VersionUtils (birim testli), QrCodeHelp
   o cihazda "çözülemedi" olarak görünür (bilinçli tasarım — sunucu anahtarları asla görmez).
 - Güvenlik numarası: iki açık anahtarın SHA-512 özetinden 60 haneli sayı.
 
+## Kurucu paneli, duyurular, asistan, fotoğraf, bildirim (2.1.0)
+
+- **Kurucular:** thecukulataa@gmail.com ve cnrcrm20@gmail.com. Liste YALNIZCA `firestore.rules` → `isFounder()`
+  içindedir (email_verified şart). Uygulama, `app_config/private` okunabiliyorsa kullanıcıyı kurucu sayar.
+  Kurucu eklemek/çıkarmak = kuralları değiştirip Firebase Console'da yayınlamak.
+- **Panel buluttan gelir:** `cloud/admin_panel.json` → panelde "Paneli kur / GitHub'dan güncelle" ile
+  `app_config/admin_panel.schema` alanına yazılır. Alan türleri: switch, text, multiline, secret, number,
+  select, url, version, announcement, stat (`user_count`), note. Yeni ayar = JSON'a alan ekle +
+  `PublicConfig.fromMap`'te oku (uygulamanın kullanması için sürüm gerekir; yalnızca panelde görünmesi için gerekmez).
+- **Öncelik:** Bakım (kurucular muaf) > Zorunlu güncelleme (`min_supported_version`) > Duyuru > Güncelleme penceresi.
+  Duyuru her `id` için bir kez gösterilir (prefs `seen_announcements`); "Yayınla" her basışta yeni id üretir.
+- **Dakk Asistan:** Varsayılan Firebase AI Logic + Gemini Developer API (ücretsiz, uygulamada anahtar yok).
+  Firebase Console › AI Logic › Gemini Developer API etkinleştirilmiş olmalı. Arayüzde "Google" yazmaz;
+  uyarı metni "Bu mesaj ve sohbet yapay zekâ tarafından işlenecek" + Ayrıntılar (gizlilik politikası sağlayıcıyı adlandırır).
+  Özel API (OpenAI uyumlu): anahtar `app_config/private`'ta; kullanıcılar için Worker `/assistant` vekil olur,
+  kurucular doğrudan çağırır. Günlük sınır istemci tarafında (kurucular muaf).
+  `@dakk` → son 30 mesaj bağlam olarak gider; yanıt `isAssistant:true` TEXT mesajı olarak çağıranın hesabından yazılır.
+  Gelecek: seçenek C — amiral gemisi telefon/tabletlerde Gemini Nano (cihaz içi).
+- **Fotoğraf:** Firebase Storage Blaze ister → fotoğraflar Firestore'da şifreli parçalar (≤700 KB ham/parça).
+  1600 px, JPEG q80 (≤1.2 MB), 40 px bulanık önizleme mesajın içinde. Video yok (kullanıcı kararı).
+- **Kapalı uygulamada bildirim:** Gönderen cihaz, mesaj sunucuya ulaşınca `server_url/notify`'a
+  {chatId, messageId} + Firebase ID token yollar. Worker (`cloud/worker/dakk-worker.js`) üyeliği, göndereni ve
+  engeli doğrular, `push_tokens/{alıcı}` ile FCM v1 data mesajı (şifreli içerik) gönderir. Telefonda
+  `DakkMessagingService` çözer. Uygulama ön plandaysa servis bildirim göstermez; arka plandaysa ve push etkinse
+  ViewModel yerel bildirimi atlar (çift bildirim olmasın). Worker, sahte Google servisleriyle uçtan uca test edildi.
+  Kurulum: `cloud/worker/README.md` (Cloudflare ücretsiz; secret `FIREBASE_SERVICE_ACCOUNT`).
+- Kritik duyurular için push şimdilik YOK (kullanıcı kararı).
+
 ## Bilinen sınırlamalar / gelecek işler
 
-- Push bildirimleri (FCM) yok; bildirimler uygulama süreci çalışırken gelir. FCM için Cloud Functions gerekir.
 - Çoklu cihaz desteği yok (son giriş yapılan cihazın anahtarı geçerlidir).
-- Medya (fotoğraf/ses) gönderimi yok — v1'deki sahte/yarım özellikler v2'de kaldırıldı.
+- Video, sesli mesaj ve grup sohbeti yok.
 - Davet bağlantısı sayfası için GitHub Pages'in `main` dalı `/docs` klasöründen yayınlanması gerekir
   (Settings › Pages). Pages kapalıyken bile QR kod ve e-posta ile ekleme çalışır.
 
@@ -133,5 +176,5 @@ util/                       InviteLinks, VersionUtils (birim testli), QrCodeHelp
 
 WebRTC P2P el sıkışma ekranı, PIN/ntfy.sh rendezvous, sahte sesli/görüntülü arama, sahte
 fotoğraf/belge/konum gönderimi, yerel ses kaydı, sahte grup sohbeti, "Türkiye Operatör Test
-Laboratuvarı" ağ teşhis ekranı, Gemini "Dakk Asistanı" botu, App Check (debug/reCAPTCHA),
+Laboratuvarı" ağ teşhis ekranı, v1'in sahte Gemini botu (2.1.0'da gerçek Dakk Asistan olarak yeniden yazıldı), App Check (debug/reCAPTCHA),
 Room veritabanı, 512 karakterlik rastgele kimlik.

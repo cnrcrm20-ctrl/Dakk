@@ -5,20 +5,24 @@ Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik 
 ## [2.1.0] - 2026-11-08
 
 ### Yeni
-- Açılış animasyonu: Dakk ördeği artık her açılışta seni karşılıyor. Ekrana dokunarak geçebilirsin.
-- Güncelleme penceresi yenilendi: yalnızca yenilikler, başlıklar ve maddeler halinde düzgün görünüyor.
+- **Dakk Asistan:** Uygulamanın içinde bir yapay zekâ asistanı. Sohbet listesinin en üstünde duruyor; soru sorabilir, mesaj yazdırabilir, fikir alabilirsin. Konuşmayı hatırlıyor; geçmiş yalnızca telefonunda saklanıyor.
+- **Sohbette @dakk:** Bir sohbette mesajına @dakk ile başlarsan asistan sohbetin son mesajlarını okuyup yanıtını sohbete ekliyor. Yanıtı karşı taraf da görüyor ve "Dakk Asistan" etiketiyle ayırt ediliyor. İlk kullanımda yapay zekâ uyarısı çıkıyor.
+- **Fotoğraf gönderme:** Sohbetlerde fotoğraf gönderebilirsin. Fotoğraflar telefonunda küçültülüp uçtan uca şifreleniyor. Karşı taraf fotoğrafı açtığında sunucudaki şifreli kopya siliniyor. Fotoğrafa dokununca tam ekran açılıyor; iki parmakla yakınlaştırabilir ve galeriye kaydedebilirsin.
+- **Uygulama kapalıyken bildirim:** Dakk sunucusu kuruluysa uygulama kapalıyken de yeni mesaj bildirimi geliyor. Bildirimde gönderenin adı ve mesaj görünüyor, fotoğraflar için "📷 Fotoğraf" yazıyor. Mesaj telefonunda çözülüyor; sunucu içeriği göremiyor.
+- **Duyurular:** Önemli haberler açılışta tam ekran bir duyuru olarak gösteriliyor. Her duyuru bir kez çıkıyor.
+- **Açılış animasyonu:** Dakk ördeği her açılışta seni karşılıyor. Geçmek için ekrana dokunabilirsin.
+- **Güncelleme penceresi yenilendi:** Artık yalnızca yenilikler, başlıklar ve maddeler halinde düzgün görünüyor.
+- Desteği biten sürümler için "Güncelleme gerekli" ekranı, kısa bakım çalışmaları için bakım ekranı.
 - Web sitesinde gizlilik politikası sayfası.
 
 ### Güvenlik
-- Uygulama yeni, gizli tutulan bir imza anahtarıyla imzalanıyor. Eski anahtar herkese açık olduğu için
-  emekliye ayrıldı; artık kimse resmi Dakk imzasıyla sahte bir sürüm üretemez.
-- Uygulama içi güncelleyici, indirdiği APK'nın imzasını kurmadan önce kontrol ediyor. İmza farklıysa
-  ne yapılacağını adım adım anlatıyor.
+- Uygulama yeni, gizli tutulan bir imza anahtarıyla imzalanıyor. Eski anahtar herkese açık olduğu için emekliye ayrıldı. Artık kimse resmi Dakk imzasıyla sahte bir sürüm üretemez.
+- Uygulama içi güncelleyici, indirdiği APK'nın imzasını kurmadan önce kontrol ediyor. İmza farklıysa ne yapılacağını adım adım anlatıyor.
+- Uygulama ayarları yalnızca kurucu hesapları tarafından değiştirilebiliyor. Bu yetki uygulamanın içinde değil, sunucu kurallarında tanımlı.
 
 ### Önemli
-- 2.0.x sürümünden geçiş: imza anahtarı değiştiği için **eski sürümü bir kez silip** bu sürümü kurman
-  gerekiyor. Kişilerin hesabında saklı kalır; şifreleme anahtarları cihazda yenilendiği için eski
-  mesajlar yeni kurulumda okunamaz.
+- 2.0.x sürümünden geçiş: İmza anahtarı değiştiği için **eski sürümü bir kez silip** bu sürümü kurman gerekiyor. Kişilerin hesabında saklı kalır. Şifreleme anahtarları cihazda yenilendiği için eski mesajlar yeni kurulumda okunamaz.
+- Gizlilik politikası güncellendi: Dakk Asistan, fotoğraflar ve bildirimlerle ilgili bölümler eklendi.
 
 ## [2.0.1] - 2026-11-08
 

@@ -1,6 +1,13 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +36,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -79,7 +88,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.MessageStatus
 import com.example.data.UiMessage
 import com.example.ui.DakkViewModel
+import com.example.ui.components.AiConsentDialog
 import com.example.ui.components.Avatar
+import com.example.ui.components.ImageMessageContent
+import com.example.ui.components.ImageViewerDialog
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkDarkSurface
 import com.example.ui.theme.DakkDarkSurfaceVariant
@@ -94,6 +106,7 @@ import java.util.Locale
 
 private val BubbleMine = Color(0xFF3D3410)
 private val BubbleTheirs = Color(0xFF1E2028)
+private val BubbleAssistant = Color(0xFF26233A)
 private val turkish: Locale = Locale.forLanguageTag("tr-TR")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -103,6 +116,9 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val messages by viewModel.activeMessages.collectAsStateWithLifecycle()
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
+    val uploads by viewModel.uploads.collectAsStateWithLifecycle()
+    val config by viewModel.config.collectAsStateWithLifecycle()
+    val assistantBusyFor by viewModel.chatAssistantBusy.collectAsStateWithLifecycle()
 
     val peer = profiles[peerUid]
     val contact = contacts.firstOrNull { it.uid == peerUid }
@@ -117,16 +133,39 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     var confirmClear by remember { mutableStateOf(false) }
     var confirmBlock by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<UiMessage?>(null) }
+    var viewingImage by remember { mutableStateOf<String?>(null) }
+    var pendingMention by remember { mutableStateOf<String?>(null) }
 
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) viewModel.sendImage(peerUid, uri)
+    }
+    val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val id = viewingImage
+        if (granted && id != null) viewModel.saveImageToGallery(id)
+    }
+
+    fun submit() {
+        val text = draft
+        if (viewModel.isAssistantMention(text) && config.assistantEnabled && !viewModel.hasAiConsent("chat_$peerUid")) {
+            pendingMention = text
+        } else if (viewModel.sendMessage(peerUid, text)) {
+            draft = ""
+        }
+    }
+
+    val myUploads = uploads[peerUid].orEmpty()
+    val allMessages = remember(messages, myUploads) { messages + myUploads }
+    val assistantTyping = assistantBusyFor == peerUid
     val listState = rememberLazyListState()
-    val chatItems = remember(messages) { buildChatItems(messages) }
+    val chatItems = remember(allMessages) { buildChatItems(allMessages) }
 
     BackHandler { viewModel.closeChat() }
 
     val showUnknownBanner = !isContact && peer != null && messages.any { !it.isFromMe }
-    LaunchedEffect(chatItems.size) {
+    LaunchedEffect(chatItems.size, assistantTyping) {
         val headerCount = if (showUnknownBanner) 2 else 1
-        if (chatItems.isNotEmpty()) listState.animateScrollToItem(headerCount + chatItems.size - 1)
+        val extra = if (assistantTyping) 1 else 0
+        if (chatItems.isNotEmpty()) listState.animateScrollToItem(headerCount + chatItems.size - 1 + extra)
     }
 
     Scaffold(
@@ -223,10 +262,25 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
+                    if (config.imagesEnabled) {
+                        IconButton(
+                            onClick = {
+                                pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            enabled = canSend,
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.AddPhotoAlternate,
+                                contentDescription = "Fotoğraf gönder",
+                                tint = if (canSend) DakkYellow else DakkTextTertiaryDark
+                            )
+                        }
+                    }
                     TextField(
                         value = draft,
                         onValueChange = { if (it.length <= DakkViewModel.MAX_MESSAGE_CHARS) draft = it },
-                        placeholder = { Text("Mesaj") },
+                        placeholder = { Text(if (config.assistantEnabled) "Mesaj (asistan için @dakk)" else "Mesaj") },
                         enabled = canSend,
                         maxLines = 6,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -244,7 +298,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                     Spacer(Modifier.width(8.dp))
                     val sendEnabled = canSend && draft.isNotBlank()
                     IconButton(
-                        onClick = { if (viewModel.sendMessage(peerUid, draft)) draft = "" },
+                        onClick = { submit() },
                         enabled = sendEnabled,
                         modifier = Modifier
                             .size(52.dp)
@@ -310,9 +364,14 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                     is ChatItem.DateHeader -> DateChip(item.label)
                     is ChatItem.Message -> MessageBubble(
                         message = item.message,
-                        onLongPress = { selected = item.message }
+                        onLongPress = { if (!item.message.id.startsWith("upload_")) selected = item.message },
+                        onOpenImage = { id -> viewingImage = id },
+                        onRetryImage = { id -> viewModel.retryImage(peerUid, id) }
                     )
                 }
+            }
+            if (assistantTyping) {
+                item(key = "assistant_typing") { AssistantTypingRow() }
             }
         }
     }
@@ -346,6 +405,32 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                 }
             },
             confirmButton = { TextButton(onClick = { selected = null }) { Text("Kapat") } }
+        )
+    }
+
+    viewingImage?.let { mediaId ->
+        ImageViewerDialog(
+            file = viewModel.imageFile(mediaId),
+            onSave = {
+                val needsPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+                    PackageManager.PERMISSION_GRANTED
+                if (needsPermission) storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                else viewModel.saveImageToGallery(mediaId)
+            },
+            onDismiss = { viewingImage = null }
+        )
+    }
+
+    pendingMention?.let { text ->
+        AiConsentDialog(
+            inChat = true,
+            onAccept = {
+                viewModel.giveAiConsent("chat_$peerUid")
+                pendingMention = null
+                if (viewModel.sendMessage(peerUid, text)) draft = ""
+            },
+            onDismiss = { pendingMention = null }
         )
     }
 
@@ -460,10 +545,31 @@ private fun DateChip(label: String) {
     }
 }
 
+@Composable
+private fun AssistantTypingRow() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.AutoAwesome, null, tint = DakkYellow, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Dakk Asistan yazıyor…", color = DakkTextSecondaryDark, fontSize = 13.sp, fontStyle = FontStyle.Italic)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
+private fun MessageBubble(
+    message: UiMessage,
+    onLongPress: () -> Unit,
+    onOpenImage: (String) -> Unit,
+    onRetryImage: (String) -> Unit
+) {
     val mine = message.isFromMe
+    val image = message.image
     Box(
         Modifier.fillMaxWidth(),
         contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart
@@ -479,14 +585,32 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                         bottomEnd = if (mine) 4.dp else 18.dp
                     )
                 )
-                .background(if (mine) BubbleMine else BubbleTheirs)
+                .background(
+                    when {
+                        message.isAssistant -> BubbleAssistant
+                        mine -> BubbleMine
+                        else -> BubbleTheirs
+                    }
+                )
                 .combinedClickable(onClick = {}, onLongClick = onLongPress)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = if (image != null) 4.dp else 12.dp, vertical = if (image != null) 4.dp else 8.dp)
         ) {
-            if (message.text != null) {
-                Text(message.text, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp)
-            } else {
-                Text(
+            if (message.isAssistant) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                    Icon(Icons.Default.AutoAwesome, null, tint = DakkYellow, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Dakk Asistan", color = DakkYellow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            when {
+                image != null -> ImageMessageContent(
+                    image = image,
+                    onOpen = { onOpenImage(image.mediaId) },
+                    onRetry = { onRetryImage(image.mediaId) },
+                    onLongPress = onLongPress
+                )
+                message.text != null -> Text(message.text, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp)
+                else -> Text(
                     "🔒 Bu mesaj bu cihazda çözülemedi (farklı bir cihazda veya eski bir kurulumda şifrelenmiş).",
                     color = DakkTextSecondaryDark,
                     fontStyle = FontStyle.Italic,
@@ -494,7 +618,9 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                 )
             }
             Row(
-                modifier = Modifier.align(Alignment.End),
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .padding(horizontal = if (image != null) 6.dp else 0.dp, vertical = if (image != null) 2.dp else 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(

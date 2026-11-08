@@ -92,6 +92,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
     val chats by viewModel.chats.collectAsStateWithLifecycle()
     val chatsLoaded by viewModel.chatsLoaded.collectAsStateWithLifecycle()
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
+    val config by viewModel.config.collectAsStateWithLifecycle()
 
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -248,13 +249,19 @@ fun HomeScreen(viewModel: DakkViewModel) {
                     }
                     when {
                         !chatsLoaded -> CenteredLoading()
+                        config.assistantEnabled && query.isBlank() -> ChatList(
+                            chats = filtered,
+                            showAssistant = true,
+                            onAssistant = { viewModel.openAssistant() },
+                            onAddContact = { showAddContact = true }
+                        ) { viewModel.openChat(it.peerUid) }
                         chats.isEmpty() -> EmptyState(
                             title = "Henüz sohbet yok",
                             message = "Bir arkadaşınızı ekleyin ve ilk şifreli mesajınızı gönderin.",
                             action = "Kişi ekle",
                             onAction = { showAddContact = true }
                         )
-                        else -> ChatList(filtered) { viewModel.openChat(it.peerUid) }
+                        else -> ChatList(filtered, showAssistant = false) { viewModel.openChat(it.peerUid) }
                     }
                 }
                 HomeTab.CONTACTS -> {
@@ -286,8 +293,71 @@ fun HomeScreen(viewModel: DakkViewModel) {
 }
 
 @Composable
-private fun ChatList(chats: List<ChatSummary>, onClick: (ChatSummary) -> Unit) {
+private fun ChatList(
+    chats: List<ChatSummary>,
+    showAssistant: Boolean,
+    onAssistant: () -> Unit = {},
+    onAddContact: () -> Unit = {},
+    onClick: (ChatSummary) -> Unit
+) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+        if (showAssistant) {
+            item(key = "dakk_assistant") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onAssistant)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AssistantAvatar(52)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Dakk Asistan", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "Yapay zekâ asistanınız — sorun, yazdırın, fikir alın",
+                            color = DakkTextSecondaryDark,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                HorizontalDivider(
+                    color = DakkDarkBorder.copy(alpha = 0.5f),
+                    thickness = 0.5.dp,
+                    modifier = Modifier.padding(start = 82.dp)
+                )
+            }
+            if (chats.isEmpty()) {
+                item(key = "no_chats") {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp, vertical = 48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("Henüz sohbet yok", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Bir arkadaşınızı ekleyin ve ilk şifreli mesajınızı gönderin.",
+                            color = DakkTextSecondaryDark,
+                            fontSize = 14.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        androidx.compose.material3.Button(
+                            onClick = onAddContact,
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = DakkYellow,
+                                contentColor = Color.Black
+                            )
+                        ) { Text("Kişi ekle") }
+                    }
+                }
+            }
+        }
         items(chats, key = { it.chatId }) { chat ->
             Row(
                 modifier = Modifier

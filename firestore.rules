@@ -10,6 +10,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Kurucular: Kurucu panelini ve uygulama ayarlarını yalnızca bu doğrulanmış Google hesapları yönetebilir.
+    // Kurucu listesi uygulama kodunda DEĞİL, yalnızca burada tutulur.
+    function isFounder() {
+      return isSignedIn() &&
+             request.auth.token.email_verified == true &&
+             request.auth.token.email in ['thecukulataa@gmail.com', 'cnrcrm20@gmail.com'];
+    }
+
+    function isChatMember(chatId) {
+      return isSignedIn() &&
+             request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids;
+    }
+
     function isValidUserProfile(data) {
       return data.userId == request.auth.uid &&
              data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
@@ -50,20 +63,18 @@ service cloud.firestore {
              data.deliveryStatus is string && (data.deliveryStatus in ['SENT', 'DELIVERED', 'READ']) &&
              data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE']) &&
              (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 2000)) &&
+             (!('isAssistant' in data) || data.isAssistant is bool) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
-    function isValidRendezvous(data) {
-      return data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 128 &&
-             (!('senderUid' in data) || data.senderUid is string) &&
-             (!('senderName' in data) || (data.senderName is string && data.senderName.size() <= 60)) &&
-             (!('recipientUid' in data) || data.recipientUid is string) &&
-             (!('status' in data) || (data.status in ['PENDING', 'ACCEPTED', 'REJECTED'])) &&
-             (!('signalOffer' in data) || (data.signalOffer is string && data.signalOffer.size() <= 100000)) &&
-             (!('signalAnswer' in data) || (data.signalAnswer is string && data.signalAnswer.size() <= 100000)) &&
-             (!('iceCandidates' in data) || (data.iceCandidates is string && data.iceCandidates.size() <= 100000)) &&
-             data.createdAt is timestamp && data.createdAt <= request.time &&
-             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    // Şifreli fotoğraf parçası: chats/{chatId}/blobs/{mediaId}_{index}
+    function isValidBlob(data) {
+      return data.senderId == request.auth.uid &&
+             data.mediaId is string && data.mediaId.size() >= 8 && data.mediaId.size() <= 64 &&
+             data.index is int && data.index >= 0 &&
+             data.total is int && data.total >= 1 && data.total <= 4 && data.index < data.total &&
+             data.data is string && data.data.size() <= 950000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
     // Users collection
@@ -100,14 +111,29 @@ service cloud.firestore {
                          (resource.data.senderId == request.auth.uid || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deliveryStatus']));
         allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
       }
+
+      // Şifreli fotoğraf parçaları — alıcı indirince siler, gönderici 7 gün sonra temizler.
+      match /blobs/{blobId} {
+        allow read, delete: if isChatMember(chatId);
+        allow create: if isChatMember(chatId) && isValidBlob(request.resource.data);
+      }
     }
 
-    // Rendezvous for P2P Signaling & QR Friend Discovery
-    match /rendezvous/{roomId} {
+    // Uygulama ayarları (Kurucu paneli)
+    match /app_config/public {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidRendezvous(request.resource.data);
-      allow update: if isSignedIn() && isValidRendezvous(request.resource.data);
-      allow delete: if isSignedIn() && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid);
+      allow write: if isFounder();
+    }
+    match /app_config/{docId} {
+      allow read, write: if isFounder();
+    }
+
+    // Anlık bildirim jetonları — yalnızca sahibi yazabilir, kimse okuyamaz (sunucu yönetici yetkisiyle okur).
+    match /push_tokens/{userId} {
+      allow create, update: if isOwner(userId) &&
+                               request.resource.data.token is string &&
+                               request.resource.data.token.size() <= 4096;
+      allow delete: if isOwner(userId);
     }
   }
 }
