@@ -14,7 +14,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.dakk.p2pchat"
+    applicationId = "dakk.android.co"
     minSdk = 24
     targetSdk = 36
     versionCode = 11

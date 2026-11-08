@@ -162,6 +162,10 @@ class DakkViewModel(application: Application) : AndroidViewModel(application) {
             ?: "Dakk Kullanıcısı 🐥"
         crypto.setUserAlias(displayName)
 
+        if (_currentScreen.value == Screen.Splash) {
+            _currentScreen.value = Screen.Home
+        }
+
         viewModelScope.launch {
             try {
                 firestoreRepository.saveUserProfile(
