@@ -1,80 +1,120 @@
 package com.example.ui.screens
 
-import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PeopleOutline
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
-import com.example.data.db.ContactEntity
+import com.example.data.ChatSummary
+import com.example.data.Contact
 import com.example.ui.DakkViewModel
-import com.example.ui.Screen
-import com.example.ui.theme.*
+import com.example.ui.HomeTab
+import com.example.ui.components.Avatar
+import com.example.ui.theme.DakkDarkBg
+import com.example.ui.theme.DakkDarkBorder
+import com.example.ui.theme.DakkDarkSurface
+import com.example.ui.theme.DakkTextSecondaryDark
+import com.example.ui.theme.DakkTextTertiaryDark
+import com.example.ui.theme.DakkYellow
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
-    viewModel: DakkViewModel,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    var selectedTab by remember { mutableStateOf(0) }
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearching by remember { mutableStateOf(false) }
-    var showNewChatSheet by remember { mutableStateOf(false) }
-    var showCreateGroupDialog by remember { mutableStateOf(false) }
-    var showMenu by remember { mutableStateOf(false) }
+fun HomeScreen(viewModel: DakkViewModel) {
+    val tab by viewModel.tab.collectAsStateWithLifecycle()
+    val chats by viewModel.chats.collectAsStateWithLifecycle()
+    val chatsLoaded by viewModel.chatsLoaded.collectAsStateWithLifecycle()
+    val contacts by viewModel.contacts.collectAsStateWithLifecycle()
 
-    val contacts by viewModel.activeContacts.collectAsStateWithLifecycle()
-    val filteredContacts = remember(contacts, searchQuery) {
-        if (searchQuery.isBlank()) contacts
-        else contacts.filter { it.alias.contains(searchQuery, ignoreCase = true) || it.lastMessage.contains(searchQuery, ignoreCase = true) }
-    }
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var showAddContact by rememberSaveable { mutableStateOf(false) }
+
+    val unreadCount = chats.count { it.isUnread }
 
     Scaffold(
-        modifier = modifier
-            .fillMaxSize()
-            .testTag("home_screen_root"),
         containerColor = DakkDarkBg,
         topBar = {
             TopAppBar(
                 title = {
-                    if (isSearching) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Sohbetlerde ara...", fontSize = 14.sp, color = DakkTextTertiaryDark) },
+                    if (searching && tab != HomeTab.SETTINGS) {
+                        TextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            placeholder = { Text("Ara…") },
                             singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -82,531 +122,364 @@ fun HomeScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(34.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White)
-                                    .padding(2.dp),
+                                    .background(Color.White),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
-                                    painter = painterResource(id = R.drawable.dakk_logo),
-                                    contentDescription = "Dakk Logo",
-                                    modifier = Modifier.fillMaxSize()
+                                    painter = painterResource(R.drawable.dakk_logo),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(Modifier.width(10.dp))
                             Text(
-                                text = "Dakk",
+                                when (tab) {
+                                    HomeTab.CHATS -> "Dakk"
+                                    HomeTab.CONTACTS -> "Kişiler"
+                                    HomeTab.SETTINGS -> "Ayarlar"
+                                },
                                 fontWeight = FontWeight.Black,
                                 fontSize = 22.sp,
-                                color = DakkYellow,
-                                letterSpacing = 0.5.sp
+                                color = if (tab == HomeTab.CHATS) DakkYellow else Color.White
                             )
                         }
                     }
                 },
                 actions = {
-                    IconButton(onClick = { isSearching = !isSearching; if (!isSearching) searchQuery = "" }) {
-                        Icon(
-                            imageVector = if (isSearching) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Ara",
-                            tint = Color.White
-                        )
-                    }
-
-                    IconButton(onClick = { showNewChatSheet = true }) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = "QR Tara", tint = Color.White)
-                    }
-
-                    IconButton(onClick = { showMenu = !showMenu }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Menü", tint = Color.White)
-                    }
-
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        modifier = Modifier.background(DakkDarkSurface)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Yeni Grup", color = Color.White) },
-                            leadingIcon = { Icon(Icons.Default.GroupAdd, contentDescription = null, tint = DakkYellow) },
-                            onClick = {
-                                showMenu = false
-                                showCreateGroupDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Yeni Sohbet", color = Color.White) },
-                            leadingIcon = { Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = DakkYellow) },
-                            onClick = {
-                                showMenu = false
-                                showNewChatSheet = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("WhatsApp'tan Davet Et", color = Color.White) },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF25D366)) },
-                            onClick = {
-                                showMenu = false
-                                viewModel.shareInviteLinkViaWhatsApp(context)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Ayarlar", color = Color.White) },
-                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null, tint = Color.LightGray) },
-                            onClick = {
-                                showMenu = false
-                                selectedTab = 2
-                            }
-                        )
+                    if (tab != HomeTab.SETTINGS) {
+                        IconButton(onClick = {
+                            searching = !searching
+                            if (!searching) query = ""
+                        }) {
+                            Icon(
+                                if (searching) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = if (searching) "Aramayı kapat" else "Ara"
+                            )
+                        }
+                        IconButton(onClick = { showAddContact = true }) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = "Kişi ekle")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DakkDarkSurface)
             )
         },
-        bottomBar = {
-            NavigationBar(
-                containerColor = DakkDarkSurface,
-                modifier = Modifier.testTag("home_bottom_nav")
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = {
-                        BadgedBox(
-                            badge = {
-                                if (contacts.isNotEmpty()) {
-                                    Badge(containerColor = DakkYellow, contentColor = Color.Black) {
-                                        Text("${contacts.size}")
-                                    }
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.ChatBubble, contentDescription = "Sohbetler")
-                        }
+        floatingActionButton = {
+            if (tab == HomeTab.CHATS) {
+                FloatingActionButton(
+                    onClick = {
+                        if (contacts.isEmpty()) showAddContact = true else viewModel.setTab(HomeTab.CONTACTS)
                     },
-                    label = { Text("Sohbetler", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.Black,
-                        selectedTextColor = DakkYellow,
-                        indicatorColor = DakkYellow,
-                        unselectedIconColor = DakkTextSecondaryDark,
-                        unselectedTextColor = DakkTextSecondaryDark
-                    )
-                )
-
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.PeopleAlt, contentDescription = "Kişiler") },
-                    label = { Text("Kişiler", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.Black,
-                        selectedTextColor = DakkYellow,
-                        indicatorColor = DakkYellow,
-                        unselectedIconColor = DakkTextSecondaryDark,
-                        unselectedTextColor = DakkTextSecondaryDark
-                    )
-                )
-
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Ayarlar") },
-                    label = { Text("Ayarlar", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.Black,
-                        selectedTextColor = DakkYellow,
-                        indicatorColor = DakkYellow,
-                        unselectedIconColor = DakkTextSecondaryDark,
-                        unselectedTextColor = DakkTextSecondaryDark
-                    )
-                )
+                    containerColor = DakkYellow,
+                    contentColor = Color.Black
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Yeni sohbet")
+                }
             }
         },
-        floatingActionButton = {
-            if (selectedTab == 0 || selectedTab == 1) {
-                FloatingActionButton(
-                    onClick = { showNewChatSheet = true },
-                    containerColor = DakkYellow,
-                    contentColor = Color.Black,
-                    shape = CircleShape,
-                    modifier = Modifier.testTag("fab_new_chat")
-                ) {
-                    Icon(Icons.Default.AddComment, contentDescription = "Yeni Sohbet")
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            AnimatedContent(
-                targetState = selectedTab,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(180)).togetherWith(
-                        fadeOut(animationSpec = tween(180))
-                    )
-                },
-                label = "TabTransition"
-            ) { tab ->
-                when (tab) {
-                    0 -> WhatsAppChatsContent(
-                        contacts = filteredContacts,
-                        onContactClick = { contact ->
-                            viewModel.navigateTo(Screen.ChatDetail(contact))
-                        },
-                        onNewChat = { showNewChatSheet = true }
-                    )
-                    1 -> ContactsTabContent(
-                        contacts = contacts,
-                        onContactClick = { contact ->
-                            viewModel.navigateTo(Screen.ChatDetail(contact))
-                        },
-                        onInviteWhatsApp = {
-                            viewModel.shareInviteLinkViaWhatsApp(context)
-                        },
-                        onScanQr = { showNewChatSheet = true }
-                    )
-                    2 -> ProfileScreen(viewModel = viewModel)
-                }
-            }
-        }
-    }
-
-    if (showNewChatSheet) {
-        NewChatBottomSheet(
-            viewModel = viewModel,
-            onCreateGroupClick = { showCreateGroupDialog = true },
-            onDismiss = { showNewChatSheet = false }
-        )
-    }
-
-    if (showCreateGroupDialog) {
-        CreateGroupDialog(
-            viewModel = viewModel,
-            onDismiss = { showCreateGroupDialog = false }
-        )
-    }
-}
-
-@Composable
-fun WhatsAppChatsContent(
-    contacts: List<ContactEntity>,
-    onContactClick: (ContactEntity) -> Unit,
-    onNewChat: () -> Unit
-) {
-    if (contacts.isEmpty()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DakkDarkSurface),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(90.dp)
-                            .clip(CircleShape)
-                            .background(Color.White)
-                            .padding(6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.dakk_logo),
-                            contentDescription = "Dakk Logo",
-                            modifier = Modifier.fillMaxSize()
+        bottomBar = {
+            NavigationBar(containerColor = DakkDarkSurface) {
+                val itemColors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Color.Black,
+                    selectedTextColor = DakkYellow,
+                    indicatorColor = DakkYellow,
+                    unselectedIconColor = DakkTextSecondaryDark,
+                    unselectedTextColor = DakkTextSecondaryDark
+                )
+                NavigationBarItem(
+                    selected = tab == HomeTab.CHATS,
+                    onClick = { viewModel.setTab(HomeTab.CHATS); searching = false; query = "" },
+                    icon = {
+                        BadgedBox(badge = {
+                            if (unreadCount > 0) Badge(containerColor = DakkYellow, contentColor = Color.Black) {
+                                Text("$unreadCount")
+                            }
+                        }) {
+                            Icon(
+                                if (tab == HomeTab.CHATS) Icons.Default.ChatBubble else Icons.Default.ChatBubbleOutline,
+                                contentDescription = null
+                            )
+                        }
+                    },
+                    label = { Text("Sohbetler") },
+                    colors = itemColors
+                )
+                NavigationBarItem(
+                    selected = tab == HomeTab.CONTACTS,
+                    onClick = { viewModel.setTab(HomeTab.CONTACTS); searching = false; query = "" },
+                    icon = {
+                        Icon(
+                            if (tab == HomeTab.CONTACTS) Icons.Default.People else Icons.Default.PeopleOutline,
+                            contentDescription = null
                         )
+                    },
+                    label = { Text("Kişiler") },
+                    colors = itemColors
+                )
+                NavigationBarItem(
+                    selected = tab == HomeTab.SETTINGS,
+                    onClick = { viewModel.setTab(HomeTab.SETTINGS); searching = false; query = "" },
+                    icon = {
+                        Icon(
+                            if (tab == HomeTab.SETTINGS) Icons.Default.Settings else Icons.Outlined.Settings,
+                            contentDescription = null
+                        )
+                    },
+                    label = { Text("Ayarlar") },
+                    colors = itemColors
+                )
+            }
+        }
+    ) { padding ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            when (tab) {
+                HomeTab.CHATS -> {
+                    val filtered = remember(chats, query) {
+                        if (query.isBlank()) chats
+                        else chats.filter {
+                            it.peerName.contains(query, ignoreCase = true) || it.preview.contains(query, ignoreCase = true)
+                        }
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Vak vak! Bir ördek yalnız yüzemez 🐥",
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Black,
-                        color = DakkYellow
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "Dedikodular bulut sunucularında değil aranızda kalsın! Bir arkadaşını davet et veya QR kodunu tara, %100 şifreli P2P sohbete başla.",
-                        fontSize = 13.sp,
-                        color = DakkTextSecondaryDark,
-                        lineHeight = 18.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Button(
-                        onClick = onNewChat,
-                        colors = ButtonDefaults.buttonColors(containerColor = DakkYellow),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Arkadaş Ekle / QR Tara 🐥", color = Color.Black, fontWeight = FontWeight.Bold)
+                    when {
+                        !chatsLoaded -> CenteredLoading()
+                        chats.isEmpty() -> EmptyState(
+                            title = "Henüz sohbet yok",
+                            message = "Bir arkadaşınızı ekleyin ve ilk şifreli mesajınızı gönderin.",
+                            action = "Kişi ekle",
+                            onAction = { showAddContact = true }
+                        )
+                        else -> ChatList(filtered) { viewModel.openChat(it.peerUid) }
                     }
                 }
+                HomeTab.CONTACTS -> {
+                    val filtered = remember(contacts, query) {
+                        if (query.isBlank()) contacts
+                        else contacts.filter {
+                            it.alias.contains(query, ignoreCase = true) || it.email.contains(query, ignoreCase = true)
+                        }
+                    }
+                    if (contacts.isEmpty()) {
+                        EmptyState(
+                            title = "Kişi listeniz boş",
+                            message = "QR kod, davet bağlantısı veya e-posta adresiyle arkadaşlarınızı ekleyin.",
+                            action = "Kişi ekle",
+                            onAction = { showAddContact = true }
+                        )
+                    } else {
+                        ContactList(filtered, onAdd = { showAddContact = true }) { viewModel.openChat(it.uid) }
+                    }
+                }
+                HomeTab.SETTINGS -> SettingsScreen(viewModel)
             }
         }
-    } else {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-            items(contacts, key = { it.userId }) { contact ->
-                WhatsAppChatRow(
-                    contact = contact,
-                    onClick = { onContactClick(contact) }
-                )
-                HorizontalDivider(
-                    color = DakkDarkBorder.copy(alpha = 0.5f),
-                    thickness = 0.5.dp,
-                    modifier = Modifier.padding(start = 74.dp)
-                )
-            }
-        }
+    }
+
+    if (showAddContact) {
+        AddContactSheet(viewModel = viewModel, onDismiss = { showAddContact = false })
     }
 }
 
 @Composable
-fun WhatsAppChatRow(
-    contact: ContactEntity,
-    onClick: () -> Unit
-) {
-    val isBot = contact.userId == "DAKK_BOT_OFFICIAL"
-    val avatarBg = remember(contact.userId, contact.isGroup) {
-        when {
-            contact.isGroup -> DakkYellow
-            isBot -> DakkYellow
-            else -> DakkOrange
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .testTag("chat_row_${contact.userId.take(8)}"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // WhatsApp Profil Fotoğrafı Dairesi
-        Box(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(avatarBg),
-            contentAlignment = Alignment.Center
-        ) {
-            if (contact.isGroup) {
-                Icon(
-                    imageVector = Icons.Default.Groups,
-                    contentDescription = "Grup",
-                    tint = Color.Black,
-                    modifier = Modifier.size(28.dp)
-                )
-            } else if (isBot) {
-                Image(
-                    painter = painterResource(id = R.drawable.dakk_logo),
-                    contentDescription = null,
-                    modifier = Modifier.size(36.dp)
-                )
-            } else {
-                Text(
-                    text = contact.alias.take(1).uppercase(),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
+private fun ChatList(chats: List<ChatSummary>, onClick: (ChatSummary) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+        items(chats, key = { it.chatId }) { chat ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onClick(chat) }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = contact.alias,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                if (contact.lastMessageTime > 0) {
-                    val sdf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-                    Text(
-                        text = sdf.format(Date(contact.lastMessageTime)),
-                        fontSize = 12.sp,
-                        color = DakkTextTertiaryDark
-                    )
+                Avatar(chat.peerName, chat.peerPhotoUrl, size = 52.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            chat.peerName,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            formatListTime(chat.lastMessageTime),
+                            color = if (chat.isUnread) DakkYellow else DakkTextTertiaryDark,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (chat.lastFromMe) {
+                            Icon(
+                                Icons.Default.DoneAll,
+                                contentDescription = null,
+                                tint = DakkTextTertiaryDark,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            chat.preview,
+                            color = if (chat.isUnread) Color.White else DakkTextSecondaryDark,
+                            fontWeight = if (chat.isUnread) FontWeight.Medium else FontWeight.Normal,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (chat.isUnread) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(DakkYellow)
+                            )
+                        }
+                    }
                 }
             }
+            HorizontalDivider(
+                color = DakkDarkBorder.copy(alpha = 0.5f),
+                thickness = 0.5.dp,
+                modifier = Modifier.padding(start = 82.dp)
+            )
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.DoneAll,
-                    contentDescription = null,
-                    tint = DakkYellow,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (contact.lastMessage.isNotBlank()) contact.lastMessage else "Sohbeti açın...",
-                    fontSize = 14.sp,
-                    color = DakkTextSecondaryDark,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+@Composable
+private fun ContactList(contacts: List<Contact>, onAdd: () -> Unit, onClick: (Contact) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onAdd)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(DakkYellow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null, tint = Color.Black)
+                }
+                Spacer(Modifier.width(14.dp))
+                Text("Yeni kişi ekle", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            }
+            Text(
+                "KİŞİLERİM (${contacts.size})",
+                color = DakkTextTertiaryDark,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+        items(contacts, key = { it.uid }) { contact ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onClick(contact) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Avatar(contact.alias, contact.photoUrl, size = 48.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        contact.alias,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (contact.email.isNotBlank()) {
+                        Text(
+                            contact.email,
+                            color = DakkTextSecondaryDark,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun ContactsTabContent(
-    contacts: List<ContactEntity>,
-    onContactClick: (ContactEntity) -> Unit,
-    onInviteWhatsApp: () -> Unit,
-    onScanQr: () -> Unit
-) {
-    LazyColumn(
+fun CenteredLoading() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(color = DakkYellow)
+    }
+}
+
+@Composable
+fun EmptyState(title: String, message: String, action: String? = null, onAction: () -> Unit = {}) {
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        item {
-            // WhatsApp İle Davet Butonu
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E3A2F)),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onInviteWhatsApp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF25D366)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = Color.White)
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "WhatsApp ile Arkadaşını Çağır",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Tek tıkla davet linki gönder, hemen konuşmaya başlayın",
-                            fontSize = 12.sp,
-                            color = Color(0xFFB4E3CD)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // QR Kod Tara Butonu
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DakkDarkSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onScanQr)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(DakkYellow),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = Color.Black)
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "QR Kod Tara veya Göster",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Yüz yüze iken anında arkadaş ekleyin",
-                            fontSize = 12.sp,
-                            color = DakkTextSecondaryDark
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = "DAKK KİŞİLERİM (${contacts.size})",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = DakkTextTertiaryDark,
-                letterSpacing = 1.sp
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(painterResource(R.drawable.dakk_logo), contentDescription = null, modifier = Modifier.size(76.dp))
         }
-
-        items(contacts, key = { it.userId }) { contact ->
-            WhatsAppChatRow(
-                contact = contact,
-                onClick = { onContactClick(contact) }
-            )
+        Spacer(Modifier.height(20.dp))
+        Text(title, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(message, color = DakkTextSecondaryDark, textAlign = TextAlign.Center)
+        if (action != null) {
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = onAction,
+                colors = ButtonDefaults.buttonColors(containerColor = DakkYellow, contentColor = Color.Black),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Default.PersonAdd, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(action, fontWeight = FontWeight.Bold)
+            }
         }
+    }
+}
+
+fun formatListTime(time: Long): String {
+    if (time <= 0L) return ""
+    val now = Calendar.getInstance()
+    val then = Calendar.getInstance().apply { timeInMillis = time }
+    val sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    val isYesterday = yesterday.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        yesterday.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    val locale = Locale.forLanguageTag("tr-TR")
+    return when {
+        sameDay -> SimpleDateFormat("HH:mm", locale).format(Date(time))
+        isYesterday -> "Dün"
+        now.get(Calendar.YEAR) == then.get(Calendar.YEAR) -> SimpleDateFormat("d MMM", locale).format(Date(time))
+        else -> SimpleDateFormat("dd.MM.yyyy", locale).format(Date(time))
     }
 }

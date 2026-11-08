@@ -1,145 +1,92 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dakk - P2P Güvenli Sohbet Daveti</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: #0E1013;
-            color: white;
-            text-align: center;
-            padding: 16px;
-            box-sizing: border-box;
-        }
-        .card {
-            background-color: #171A21;
-            border: 1px solid #232833;
-            border-radius: 24px;
-            padding: 32px 24px;
-            max-width: 420px;
-            width: 100%;
-            box-shadow: 0 12px 36px rgba(0,0,0,0.5);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .logo-wrap {
-            width: 88px;
-            height: 88px;
-            background: white;
-            border-radius: 50%;
-            padding: 6px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 16px rgba(255,193,7,0.3);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .logo-wrap img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-        h1 {
-            color: #FFC107;
-            margin: 0 0 8px 0;
-            font-size: 24px;
-            font-weight: 800;
-        }
-        .subtitle {
-            color: #8E95A5;
-            margin: 0 0 24px 0;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        .security-badge {
-            background-color: #0E1013;
-            border-radius: 12px;
-            padding: 10px 14px;
-            font-size: 12px;
-            color: #4CAF50;
-            margin-bottom: 24px;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .btn {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 14px 20px;
-            text-decoration: none;
-            border-radius: 14px;
-            font-weight: 700;
-            font-size: 15px;
-            display: block;
-            margin-bottom: 12px;
-            transition: transform 0.15s, opacity 0.15s;
-        }
-        .btn-primary {
-            background-color: #FFC107;
-            color: #000;
-        }
-        .btn-secondary {
-            background-color: #232833;
-            color: #FFF;
-        }
-        .btn:active {
-            transform: scale(0.97);
-            opacity: 0.9;
-        }
-        #status {
-            font-size: 13px;
-            color: #FFC107;
-            margin-top: 12px;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dakk — Uçtan Uca Şifreli Mesajlaşma</title>
+<meta name="description" content="Dakk: Google hesabınla gir, QR kodla arkadaş ekle, uçtan uca şifreli mesajlaş. Ücretsiz ve açık kaynak Android uygulaması.">
+<meta name="theme-color" content="#090A0D">
+<link rel="icon" href="logo.png">
+<meta property="og:title" content="Dakk — Uçtan Uca Şifreli Mesajlaşma">
+<meta property="og:description" content="Google hesabınla gir, QR kodla arkadaş ekle, mesajların yalnızca sizde okunsun.">
+<meta property="og:image" content="https://cnrcrm20-ctrl.github.io/Dakk/logo.png">
 </head>
-<body>
-    <div class="card">
-        <div class="logo-wrap">
-            <img src="https://raw.githubusercontent.com/cnrcrm20-ctrl/Dakk/main/app/src/main/res/drawable/dakk_logo.png" alt="Dakk">
-        </div>
-        <h1>Dakk P2P Daveti 🐥</h1>
-        <p class="subtitle">Arkadaşınız sizinle tamamen uçtan uca şifreli ve sunucusuz (0 TL maliyet) doğrudan sohbet başlatmak istiyor.</p>
-        
-        <div class="security-badge">
-            🛡️ Uçtan Uca Şifreli • Sıfır Sunucu • %100 Mahremiyet
-        </div>
+<body style="margin:0;background:#090A0D;color:#ECECEC;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.55;">
+<div style="max-width:880px;margin:0 auto;padding:48px 20px 32px;">
 
-        <a id="btn-open-app" href="#" class="btn btn-primary">Dakk Uygulamasında Aç 🚀</a>
-        <a href="https://github.com/cnrcrm20-ctrl/Dakk/releases/latest/download/Dakk.apk" class="btn btn-secondary">Dakk APK İndir (En Son Sürüm)</a>
-        
-        <p id="status">Dakk uygulaması açılmaya çalışılıyor...</p>
+  <header style="text-align:center;">
+    <img src="logo.png" alt="Dakk" width="112" height="112" style="border-radius:28px;">
+    <h1 style="font-size:42px;margin:16px 0 6px;color:#FFC107;letter-spacing:-0.5px;">Dakk</h1>
+    <p style="font-size:20px;margin:0 0 28px;color:#BDBDBD;">Arkadaşlarınla güvenle yazış. Mesajların yalnızca sizde okunur.</p>
+    <a id="download" href="https://github.com/cnrcrm20-ctrl/Dakk/releases/latest"
+       style="display:inline-block;background:#FFC107;color:#111;font-weight:700;font-size:18px;padding:14px 30px;border-radius:999px;text-decoration:none;">
+      Android için indir
+    </a>
+    <p id="version" style="margin:12px 0 0;color:#8A8A8A;font-size:14px;">Ücretsiz • Reklamsız • Açık kaynak • Android 7.0+</p>
+  </header>
+
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:56px 0;">
+    <div style="background:#15171C;border-radius:18px;padding:22px;">
+      <div style="font-size:28px;">🔐</div>
+      <h3 style="margin:8px 0 6px;color:#FFFFFF;">Uçtan uca şifreli</h3>
+      <p style="margin:0;color:#A8A8A8;">Mesajlar telefonunda şifrelenir. Sunucu dahil kimse içeriği okuyamaz.</p>
     </div>
+    <div style="background:#15171C;border-radius:18px;padding:22px;">
+      <div style="font-size:28px;">📷</div>
+      <h3 style="margin:8px 0 6px;color:#FFFFFF;">QR kodla ekle</h3>
+      <p style="margin:0;color:#A8A8A8;">Telefon numarası yok, rehber yok. Kodu tara ya da davet bağlantısı gönder.</p>
+    </div>
+    <div style="background:#15171C;border-radius:18px;padding:22px;">
+      <div style="font-size:28px;">📨</div>
+      <h3 style="margin:8px 0 6px;color:#FFFFFF;">Her zaman ulaşır</h3>
+      <p style="margin:0;color:#A8A8A8;">Arkadaşın çevrimdışıyken gönderdiğin mesaj, bağlandığında onu bekliyor olur.</p>
+    </div>
+    <div style="background:#15171C;border-radius:18px;padding:22px;">
+      <div style="font-size:28px;">✓✓</div>
+      <h3 style="margin:8px 0 6px;color:#FFFFFF;">Okundu bilgisi</h3>
+      <p style="margin:0;color:#A8A8A8;">Mesajının gönderildiğini ve okunduğunu anında gör.</p>
+    </div>
+    <div style="background:#15171C;border-radius:18px;padding:22px;">
+      <div style="font-size:28px;">🛡️</div>
+      <h3 style="margin:8px 0 6px;color:#FFFFFF;">Güvenlik numarası</h3>
+      <p style="margin:0;color:#A8A8A8;">Doğru kişiyle konuştuğundan emin olmak için numaraları karşılaştır.</p>
+    </div>
+    <div style="background:#15171C;border-radius:18px;padding:22px;">
+      <div style="font-size:28px;">⬆️</div>
+      <h3 style="margin:8px 0 6px;color:#FFFFFF;">Kendiliğinden güncellenir</h3>
+      <p style="margin:0;color:#A8A8A8;">Yeni sürüm çıktığında uygulama haber verir, tek dokunuşla kurulur.</p>
+    </div>
+  </section>
 
-    <script>
-        function getQueryParam(name) {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get(name);
-        }
+  <section style="background:#15171C;border-radius:18px;padding:24px 26px;">
+    <h2 style="margin:0 0 12px;color:#FFFFFF;font-size:22px;">Nasıl kurulur?</h2>
+    <ol style="margin:0;padding-left:20px;color:#C8C8C8;">
+      <li><b>Android için indir</b> düğmesiyle <code style="color:#FFC107;">Dakk-vX.Y.Z.apk</code> dosyasını indir.</li>
+      <li>Telefon sorarsa bu kaynaktan uygulama yüklemeye izin ver.</li>
+      <li>Dosyayı aç, <b>Yükle</b>'ye dokun ve Google hesabınla giriş yap.</li>
+    </ol>
+    <p style="margin:14px 0 0;color:#8A8A8A;font-size:14px;">Eski 1.x sürümü yüklüyse önce onu kaldır. Sonraki güncellemeler uygulamanın içinden gelir.</p>
+  </section>
 
-        const data = getQueryParam('data');
-        const inviteSchemeUrl = data ? `dakk://invite?data=${encodeURIComponent(data)}` : `dakk://invite`;
-        const openBtn = document.getElementById('btn-open-app');
-        openBtn.href = inviteSchemeUrl;
-
-        if (data) {
-            // Uygulamayı açmayı otomatik dene
-            window.location.href = inviteSchemeUrl;
-
-            setTimeout(() => {
-                document.getElementById('status').innerText = "Dakk yüklü değilse yukarıdaki butondan indirebilirsiniz. Vak vak!";
-            }, 2000);
-        } else {
-            document.getElementById('status').innerText = "Bağlantıda davet parametresi bulunamadı.";
-        }
-    </script>
+  <footer style="text-align:center;margin-top:48px;color:#6F6F6F;font-size:14px;">
+    <a href="https://github.com/cnrcrm20-ctrl/Dakk" style="color:#BDBDBD;">GitHub</a> •
+    <a href="https://github.com/cnrcrm20-ctrl/Dakk/blob/main/PRIVACY_POLICY.md" style="color:#BDBDBD;">Gizlilik</a> •
+    <a href="https://github.com/cnrcrm20-ctrl/Dakk/blob/main/SECURITY.md" style="color:#BDBDBD;">Güvenlik</a>
+    <div style="margin-top:8px;">AGPL-3.0 lisanslı açık kaynak yazılım</div>
+  </footer>
+</div>
+<script>
+  // Son sürümün APK'sına doğrudan bağlantı (başarısız olursa Releases sayfası kalır)
+  fetch('https://api.github.com/repos/cnrcrm20-ctrl/Dakk/releases/latest')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (rel) {
+      if (!rel) return;
+      var apk = (rel.assets || []).find(function (a) { return /\.apk$/i.test(a.name); });
+      if (apk) document.getElementById('download').href = apk.browser_download_url;
+      document.getElementById('version').textContent =
+        'Sürüm ' + rel.tag_name.replace(/^v/, '') + ' • Ücretsiz • Reklamsız • Açık kaynak • Android 7.0+';
+    })
+    .catch(function () {});
+</script>
 </body>
 </html>

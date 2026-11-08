@@ -12,29 +12,32 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.signaling.SignalingPayload
+import com.example.notification.NotificationHelper
 import com.example.ui.DakkViewModel
 import com.example.ui.Screen
-import com.example.ui.components.DakkUpdateDialog
-import com.example.ui.components.IncomingFriendRequestDialog
-import com.example.ui.components.PrivacyPolicyDialog
-import com.example.ui.screens.*
+import com.example.ui.components.UpdateDialog
+import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.ChatScreen
+import com.example.ui.screens.FoundContactDialog
+import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkTheme
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-
-import com.example.data.firebase.configureAppCheck
 
 class MainActivity : ComponentActivity() {
 
@@ -42,19 +45,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        configureAppCheck(this, intent)
         enableEdgeToEdge()
-
-        // Gelen dakk://invite veya https://cnrcrm20-ctrl.github.io/Dakk/invite deep link kontrolü
-        handleIncomingDeepLink(intent)
+        if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
             DakkTheme(darkTheme = true) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = DakkDarkBg
-                ) {
-                    DakkApp(viewModel = viewModel)
+                Surface(modifier = Modifier.fillMaxSize(), color = DakkDarkBg) {
+                    DakkApp(viewModel)
                 }
             }
         }
@@ -63,169 +60,93 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIncomingDeepLink(intent)
+        handleIntent(intent)
     }
 
-    private fun handleIncomingDeepLink(intent: Intent?) {
-        val data = intent?.data ?: return
-        val isDakkCustomScheme = data.scheme == "dakk" && data.host == "invite"
-        val isGithubPagesScheme = data.scheme == "https" &&
-                data.host == "cnrcrm20-ctrl.github.io" &&
-                (data.path?.contains("/invite") == true || data.path?.contains("/Dakk") == true)
+    override fun onResume() {
+        super.onResume()
+        viewModel.setForeground(true)
+    }
 
-        if (isDakkCustomScheme || isGithubPagesScheme) {
-            val raw = data.getQueryParameter("data")
-            if (!raw.isNullOrEmpty()) {
-                val payload = SignalingPayload.decodeFromCompactString(raw)
-                if (payload != null) {
-                    viewModel.onIncomingInviteReceived(payload)
-                }
-            }
+    override fun onPause() {
+        viewModel.setForeground(false)
+        super.onPause()
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        intent ?: return
+        intent.getStringExtra(NotificationHelper.EXTRA_OPEN_CHAT_UID)?.let { uid ->
+            intent.removeExtra(NotificationHelper.EXTRA_OPEN_CHAT_UID)
+            viewModel.openChatWhenReady(uid)
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        viewModel.webRtc.closePeerConnection()
+        intent.data?.toString()?.let { link -> viewModel.handleIncomingLink(link) }
     }
 }
 
 @Composable
 fun DakkApp(viewModel: DakkViewModel) {
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
-
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
-            auth.currentUser?.let { viewModel.onUserAuthenticated(it) }
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose {
-            Firebase.auth.removeAuthStateListener(listener)
-        }
-    }
-
-    if (currentUser == null) {
-        AuthScreen(
-            onAuthSuccess = {
-                val user = Firebase.auth.currentUser
-                currentUser = user
-                user?.let { viewModel.onUserAuthenticated(it) }
-            }
-        )
-    } else {
-        key(currentUser!!.uid) {
-            MainAppContent(viewModel = viewModel)
-        }
-    }
-}
-
-@Composable
-fun MainAppContent(viewModel: DakkViewModel) {
     val context = LocalContext.current
-    var isPrivacyAccepted by remember {
-        val prefs = context.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
-        mutableStateOf(prefs.getBoolean("is_privacy_accepted", false))
-    }
-
-    // Gerekli tüm izinleri (Mikrofon, Bildirim, Kamera) tek seferde ve kesintisiz talep et
-    val permissionsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // İzinler işlendi
-    }
+    val user by viewModel.user.collectAsStateWithLifecycle()
+    val screen by viewModel.screen.collectAsStateWithLifecycle()
+    val update by viewModel.update.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
-        val permissions = mutableListOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CAMERA
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        viewModel.events.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
-        permissionsLauncher.launch(permissions.toTypedArray())
     }
 
-    val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
-    val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
-    val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
-    val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
-    val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
-    val pendingInvite by viewModel.pendingIncomingInvite.collectAsStateWithLifecycle()
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (!isPrivacyAccepted) {
-            PrivacyPolicyDialog(
-                viewModel = viewModel,
-                onAccepted = { isPrivacyAccepted = true }
-            )
-        }
-
+    if (user == null) {
+        AuthScreen()
+    } else {
+        NotificationPermissionRequest()
         AnimatedContent(
-            targetState = currentScreen,
+            targetState = screen,
             transitionSpec = {
-                if (targetState is Screen.ChatDetail) {
-                    (slideInHorizontally(animationSpec = tween(220)) { it } + fadeIn()).togetherWith(
-                        slideOutHorizontally(animationSpec = tween(220)) { -it / 3 } + fadeOut()
-                    )
+                if (targetState is Screen.Chat) {
+                    (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
+                        .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
                 } else {
-                    (slideInHorizontally(animationSpec = tween(220)) { -it / 3 } + fadeIn()).togetherWith(
-                        slideOutHorizontally(animationSpec = tween(220)) { it } + fadeOut()
-                    )
+                    (slideInHorizontally(tween(220)) { -it / 4 } + fadeIn(tween(220)))
+                        .togetherWith(slideOutHorizontally(tween(220)) { it } + fadeOut(tween(220)))
                 }
             },
-            label = "ScreenTransition"
-        ) { screen ->
-            when (screen) {
-                is Screen.Splash -> {
-                    SplashScreen(
-                        onTimeout = { viewModel.navigateTo(Screen.Home) }
-                    )
-                }
-                is Screen.Home -> {
-                    HomeScreen(viewModel = viewModel)
-                }
-                is Screen.ChatDetail -> {
-                    ChatScreen(
-                        peer = screen.peer,
-                        viewModel = viewModel
-                    )
-                }
-                is Screen.Handshake -> {
-                    HandshakeScreen(viewModel = viewModel)
-                }
-                is Screen.Diagnostic -> {
-                    NetworkDiagnosticScreen(viewModel = viewModel)
-                }
-                is Screen.Profile -> {
-                    ProfileScreen(viewModel = viewModel)
-                }
+            label = "screen"
+        ) { target ->
+            when (target) {
+                Screen.Home -> HomeScreen(viewModel)
+                is Screen.Chat -> ChatScreen(target.peerUid, viewModel)
             }
         }
+        FoundContactDialog(viewModel)
+    }
 
-        // Gelen Arkadaşlık / El Sıkışma İsteği Modal Diyaloğu
-        pendingInvite?.let { invitePayload ->
-            IncomingFriendRequestDialog(
-                payload = invitePayload,
-                onAccept = {
-                    viewModel.acceptIncomingInvite(invitePayload)
-                },
-                onDismiss = {
-                    viewModel.dismissIncomingInvite()
-                }
-            )
-        }
-
-        // GitHub Release Güncelleme Bildirimi
-        if (showUpdateDialog && updateInfo != null) {
-            DakkUpdateDialog(
-                releaseInfo = updateInfo!!,
-                downloadProgress = downloadProgress,
-                isDownloading = isDownloading,
-                onDownloadClick = { viewModel.downloadAndInstallUpdate() },
-                onDismissClick = { viewModel.dismissUpdateDialog() }
-            )
-        }
+    val release = update.release
+    if (update.showDialog && release != null) {
+        UpdateDialog(
+            release = release,
+            currentVersion = viewModel.appVersion,
+            downloading = update.downloading,
+            progress = update.progress,
+            onUpdate = { viewModel.startUpdate() },
+            onDismiss = { viewModel.dismissUpdateDialog() }
+        )
     }
 }
 
+/** Android 13+ için bildirim iznini oturum açıldıktan sonra bir kez ister. */
+@Composable
+private fun NotificationPermissionRequest() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted && !prefs.getBoolean("notification_permission_asked", false)) {
+            prefs.edit().putBoolean("notification_permission_asked", true).apply()
+            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}

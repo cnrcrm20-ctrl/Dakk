@@ -1,395 +1,264 @@
 package com.example.ui.screens
 
-import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
-import android.util.Log
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.MarkChatRead
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.credentials.ClearCredentialStateRequest
-import androidx.credentials.CredentialManager
-import androidx.credentials.CustomCredential
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
-import com.example.ui.theme.*
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-import com.google.firebase.Firebase
-import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.auth
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.NonCancellable
+import com.example.auth.AuthFailure
+import com.example.auth.GoogleAuth
+import com.example.auth.SignInResult
+import com.example.ui.theme.DakkDarkBg
+import com.example.ui.theme.DakkDarkSurfaceVariant
+import com.example.ui.theme.DakkTextSecondaryDark
+import com.example.ui.theme.DakkYellow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
+
+const val PRIVACY_POLICY_URL = "https://github.com/cnrcrm20-ctrl/Dakk/blob/main/PRIVACY_POLICY.md"
 
 @Composable
-fun AuthScreen(
-    onAuthSuccess: () -> Unit
-) {
+fun AuthScreen() {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val credentialManager = remember { CredentialManager.create(context) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    // Otomatik sessiz giriş dene (eğer daha önceden yetkilendirilmiş hesap varsa)
-    LaunchedEffect(Unit) {
-        attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            onAuthSuccess = onAuthSuccess,
-            onUnauthenticated = { /* Kullanıcı etkileşimli butona basacak */ },
-            scope = coroutineScope
-        )
-    }
+    val scope = rememberCoroutineScope()
+    var loading by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<AuthFailure?>(null) }
+    var showDetails by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        DakkDarkBg,
-                        DakkDarkSurface,
-                        Color(0xFF13151B)
-                    )
-                )
-            )
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+            .background(DakkDarkBg)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
         contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 480.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .widthIn(max = 480.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Dakk Ördek Logosu
             Box(
                 modifier = Modifier
-                    .size(110.dp)
+                    .size(116.dp)
                     .clip(CircleShape)
-                    .background(DakkYellow.copy(alpha = 0.15f))
-                    .border(2.dp, DakkYellow.copy(alpha = 0.6f), CircleShape),
+                    .background(Color.White)
+                    .border(3.dp, DakkYellow, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.dakk_logo),
-                    contentDescription = "Dakk Logo",
-                    modifier = Modifier.size(80.dp)
+                    painter = painterResource(R.drawable.dakk_logo),
+                    contentDescription = "Dakk",
+                    modifier = Modifier.size(92.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
+            Spacer(Modifier.height(24.dp))
             Text(
-                text = "Dakk Messenger",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    letterSpacing = 0.5.sp
-                )
+                "Dakk",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Black,
+                color = DakkYellow
             )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = "Doğrudan Cihazdan Cihaza (P2P) & Bulut Destekli Güvenli İletişim",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = DakkTextSecondaryDark,
-                    textAlign = TextAlign.Center
-                ),
-                modifier = Modifier.padding(horizontal = 16.dp)
+                "Arkadaşlarınızla güvenle mesajlaşın.",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
+            Feature(Icons.Default.Lock, "Uçtan uca şifreli", "Mesajlarınızı yalnızca siz ve karşınızdaki kişi okuyabilir.")
+            Spacer(Modifier.height(10.dp))
+            Feature(Icons.Default.QrCode2, "Kolay kişi ekleme", "QR kod, davet bağlantısı veya e-posta ile saniyeler içinde ekleyin.")
+            Spacer(Modifier.height(10.dp))
+            Feature(Icons.Default.MarkChatRead, "Her yerde senkron", "Mesajlarınız çevrimdışıyken bile iletilmek üzere sıraya alınır.")
 
-            // Özellik Kartları
-            FeaturePill(
-                icon = Icons.Default.Lock,
-                title = "Uçtan Uca Şifreli (E2EE)",
-                subtitle = "Mesajlarınız cihazınızda şifrelenir"
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            FeaturePill(
-                icon = Icons.Default.Sync,
-                title = "Google Hesabıyla Oturum",
-                subtitle = "Profiliniz ve kişileriniz anında eşleşir"
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            FeaturePill(
-                icon = Icons.Default.QrCode,
-                title = "Hızlı QR & PIN Eşleşmesi",
-                subtitle = "Tek dokunuşla arkadaşlarını hemen ekle"
-            )
+            Spacer(Modifier.height(32.dp))
 
-            Spacer(modifier = Modifier.height(36.dp))
-
-            errorMessage?.let { err ->
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
-                ) {
-                    Text(
-                        text = err,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(12.dp),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            // Google Sign-In Butonu (MANDATORY & Enforced)
-            Button(
-                onClick = {
-                    isLoading = true
-                    errorMessage = null
-                    onGoogleSignInClicked(
-                        context = context,
-                        credentialManager = credentialManager,
-                        onAuthSuccess = {
-                            isLoading = false
-                            onAuthSuccess()
-                        },
-                        onAuthError = { err ->
-                            isLoading = false
-                            errorMessage = err
-                        },
-                        scope = coroutineScope,
-                        onAuthCancelled = {
-                            isLoading = false
-                        }
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DakkYellow,
-                    contentColor = DakkDarkBg
-                ),
-                enabled = !isLoading
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = DakkDarkBg,
-                        strokeWidth = 2.5.dp
-                    )
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+            AnimatedVisibility(visible = failure != null) {
+                val f = failure
+                if (f != null) {
+                    Surface(
+                        color = Color(0xFF3A1717),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
                     ) {
-                        Text(
-                            text = "Google ile Güvenli Giriş Yap 🐥",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = DakkDarkBg
-                            )
-                        )
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFFF8A80))
+                                Spacer(Modifier.width(10.dp))
+                                Text(f.message, color = Color(0xFFFFDAD6), style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (f.technicalDetails != null) {
+                                TextButton(onClick = { showDetails = !showDetails }) {
+                                    Text(
+                                        if (showDetails) "Teknik ayrıntıları gizle" else "Teknik ayrıntılar",
+                                        color = Color(0xFFFFB4AB)
+                                    )
+                                }
+                                if (showDetails) {
+                                    Text(
+                                        f.technicalDetails,
+                                        color = Color(0xFFFFDAD6),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.Black.copy(alpha = 0.3f))
+                                            .clickable { copyToClipboard(context, f.technicalDetails) }
+                                            .padding(10.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
+
+            Button(
+                onClick = {
+                    if (loading) return@Button
+                    loading = true
+                    failure = null
+                    showDetails = false
+                    scope.launch {
+                        when (val result = GoogleAuth.signIn(context)) {
+                            SignInResult.Success -> Unit // Oturum dinleyicisi ana ekrana geçirir.
+                            SignInResult.Cancelled -> Unit
+                            is SignInResult.Failed -> failure = result.failure
+                        }
+                        loading = false
+                    }
+                },
+                enabled = !loading,
+                colors = ButtonDefaults.buttonColors(containerColor = DakkYellow, contentColor = Color.Black),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        color = Color.Black,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text("Giriş yapılıyor…", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                } else {
+                    Text("Google ile devam et", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Devam ederek Gizlilik Politikası'nı kabul etmiş olursunuz.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DakkTextSecondaryDark,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.clickable {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL)))
+                    }
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun FeaturePill(
-    icon: ImageVector,
-    title: String,
-    subtitle: String
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = DakkDarkSurface,
-        tonalElevation = 2.dp
+private fun Feature(icon: ImageVector, title: String, subtitle: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(DakkDarkSurfaceVariant)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(DakkYellow.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(DakkYellow.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = DakkYellow,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = DakkTextSecondaryDark
-                    )
-                )
-            }
+            Icon(icon, contentDescription = null, tint = DakkYellow, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(subtitle, color = DakkTextSecondaryDark, fontSize = 13.sp, lineHeight = 17.sp)
         }
     }
 }
 
-private const val DEFAULT_FALLBACK_CLIENT_ID = "721295735056-2b9hjum4qc2t4pjm530cn31fahtdg31j.apps.googleusercontent.com"
-
-fun attemptAutoSignIn(
-    context: Context,
-    credentialManager: CredentialManager,
-    onAuthSuccess: () -> Unit,
-    onUnauthenticated: () -> Unit,
-    scope: CoroutineScope
-) {
-    if (Firebase.auth.currentUser != null) {
-        onAuthSuccess()
-        return
-    }
-    val clientId = try {
-        val id = context.getString(R.string.default_web_client_id)
-        if (id.isBlank()) DEFAULT_FALLBACK_CLIENT_ID else id
-    } catch (e: Exception) {
-        DEFAULT_FALLBACK_CLIENT_ID
-    }
-
-    val googleIdOption = GetGoogleIdOption.Builder()
-        .setFilterByAuthorizedAccounts(true)
-        .setServerClientId(clientId)
-        .setAutoSelectEnabled(true)
-        .build()
-
-    val request = GetCredentialRequest.Builder().addCredentialOption(googleIdOption).build()
-
-    scope.launch {
-        try {
-            val result = credentialManager.getCredential(context, request)
-            val credential = result.credential
-            if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
-                val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                Firebase.auth.signInWithCredential(authCredential).await()
-                onAuthSuccess()
-            } else {
-                onUnauthenticated()
-            }
-        } catch (e: Exception) {
-            onUnauthenticated()
-        }
-    }
-}
-
-fun onGoogleSignInClicked(
-    context: Context,
-    credentialManager: CredentialManager,
-    onAuthSuccess: () -> Unit,
-    onAuthError: (String) -> Unit,
-    scope: CoroutineScope,
-    onAuthCancelled: () -> Unit = {}
-) {
-    val clientId = try {
-        val id = context.getString(R.string.default_web_client_id)
-        if (id.isBlank()) DEFAULT_FALLBACK_CLIENT_ID else id
-    } catch (e: Exception) {
-        DEFAULT_FALLBACK_CLIENT_ID
-    }
-
-    // setFilterByAuthorizedAccounts(false) allows any account on device to sign in (not just pre-authorized)
-    val googleIdOption = GetGoogleIdOption.Builder()
-        .setFilterByAuthorizedAccounts(false)
-        .setServerClientId(clientId)
-        .setAutoSelectEnabled(false)
-        .build()
-
-    val request = GetCredentialRequest.Builder()
-        .addCredentialOption(googleIdOption)
-        .build()
-
-    scope.launch {
-        try {
-            val result = credentialManager.getCredential(context as Activity, request)
-            val credential = result.credential
-            if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
-                val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                val authResult = Firebase.auth.signInWithCredential(authCredential).await()
-                if (authResult.user != null) {
-                    Log.d("Auth", "Firebase auth succeeded: ${authResult.user?.uid}")
-                    onAuthSuccess()
-                } else {
-                    onAuthError("Kullanıcı doğrulaması tamamlanamadı.")
-                }
-            } else {
-                onAuthError("Beklenmeyen kimlik türü: ${credential.type}")
-            }
-        } catch (e: GetCredentialCancellationException) {
-            Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-            onAuthCancelled()
-        } catch (e: Exception) {
-            Log.e("Auth", "Google Sign-In failed: ${e.message}", e)
-            onAuthError(e.localizedMessage ?: "Giriş işlemi sırasında hata oluştu.")
-        }
-    }
-}
-
-fun signOut(
-    credentialManager: CredentialManager,
-    scope: CoroutineScope,
-    onSignOutComplete: () -> Unit = {}
-) {
-    scope.launch {
-        withContext(NonCancellable) {
-            try {
-                credentialManager.clearCredentialState(ClearCredentialStateRequest())
-            } catch (e: Exception) {
-                Log.w("Auth", "Failed to clear credential state: ${e.message}")
-            } finally {
-                Firebase.auth.signOut()
-                onSignOutComplete()
-            }
-        }
-    }
+fun copyToClipboard(context: Context, text: String, label: String = "Dakk") {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText(label, text))
+    Toast.makeText(context, "Panoya kopyalandı", Toast.LENGTH_SHORT).show()
 }
