@@ -22,15 +22,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Sabit imza anahtarının beklenen SHA-1 parmak izi (Firebase'e kayıtlı olan değer).
-  EXPECTED_SHA1: "05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21"
+  # Resmi imza anahtarının beklenen SHA-1 parmak izi (Firebase'e kayıtlı olan değer).
+  EXPECTED_SHA1: "1B:8A:A6:D1:88:69:43:31:9A:70:65:4F:A6:DA:DC:7D:F9:E3:5A:E1"
 
 jobs:
   build:
     name: Derle, test et ve yayınla
     runs-on: ubuntu-latest
-    env:
-      DAKK_KEYSTORE_BASE64: ${{ secrets.DAKK_KEYSTORE_BASE64 }}
 
     steps:
       - name: Kodu al
@@ -56,19 +54,31 @@ jobs:
           echo "tag=v$NAME" >> "$GITHUB_OUTPUT"
           echo "Sürüm: $NAME ($CODE)"
 
-      - name: İmza anahtarını secrets'tan yükle (isteğe bağlı)
-        if: env.DAKK_KEYSTORE_BASE64 != ''
+      - name: İmza anahtarını çöz
+        id: signing
         env:
-          DAKK_KEYSTORE_PASSWORD: ${{ secrets.DAKK_KEYSTORE_PASSWORD }}
-          DAKK_KEY_ALIAS: ${{ secrets.DAKK_KEY_ALIAS }}
-          DAKK_KEY_PASSWORD: ${{ secrets.DAKK_KEY_PASSWORD }}
+          DAKK_SIGNING_PASSPHRASE: ${{ secrets.DAKK_SIGNING_PASSPHRASE }}
         run: |
-          echo "$DAKK_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/dakk-release.p12"
-          echo "DAKK_KEYSTORE_PATH=$RUNNER_TEMP/dakk-release.p12" >> "$GITHUB_ENV"
-          [ -n "$DAKK_KEYSTORE_PASSWORD" ] && echo "DAKK_KEYSTORE_PASSWORD=$DAKK_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-          [ -n "$DAKK_KEY_ALIAS" ] && echo "DAKK_KEY_ALIAS=$DAKK_KEY_ALIAS" >> "$GITHUB_ENV"
-          [ -n "$DAKK_KEY_PASSWORD" ] && echo "DAKK_KEY_PASSWORD=$DAKK_KEY_PASSWORD" >> "$GITHUB_ENV"
-          true
+          if [ -z "$DAKK_SIGNING_PASSPHRASE" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::DAKK_SIGNING_PASSPHRASE secret'ı yok — APK debug anahtarıyla imzalanacak, imza kontrolü atlanacak."
+              echo "official=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::DAKK_SIGNING_PASSPHRASE secret'ı tanımlı değil. Settings › Secrets and variables › Actions bölümünden ekleyin."
+            exit 1
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+            -in signing/dakk-release.p12.enc \
+            -out "$RUNNER_TEMP/dakk-release.p12" \
+            -pass env:DAKK_SIGNING_PASSPHRASE
+          {
+            echo "DAKK_KEYSTORE_PATH=$RUNNER_TEMP/dakk-release.p12"
+            echo "DAKK_KEYSTORE_PASSWORD=$DAKK_SIGNING_PASSPHRASE"
+            echo "DAKK_KEY_PASSWORD=$DAKK_SIGNING_PASSPHRASE"
+            echo "DAKK_KEY_ALIAS=dakk"
+          } >> "$GITHUB_ENV"
+          echo "official=true" >> "$GITHUB_OUTPUT"
 
       - name: Gradle wrapper'ı çalıştırılabilir yap
         run: chmod +x gradlew
@@ -101,7 +111,7 @@ jobs:
           SHA256=$(echo "$CERTS" | grep -m1 'SHA-256 digest' | awk '{print $NF}' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
           echo "SHA-1  : $SHA1"
           echo "SHA-256: $SHA256"
-          if [ "$SHA1" != "$EXPECTED_SHA1" ]; then
+          if [ "${{ steps.signing.outputs.official }}" = "true" ] && [ "$SHA1" != "$EXPECTED_SHA1" ]; then
             echo "::error::İmza SHA-1 değeri beklenenden farklı! ($SHA1) Google ile Giriş çalışmaz."
             exit 1
           fi
@@ -127,7 +137,7 @@ jobs:
           if-no-files-found: error
 
       - name: GitHub Release oluştur
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.signing.outputs.official == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}

@@ -2,6 +2,24 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.1.0] - 2026-11-08
+
+### Yeni
+- Açılış animasyonu: Dakk ördeği artık her açılışta seni karşılıyor. Ekrana dokunarak geçebilirsin.
+- Güncelleme penceresi yenilendi: yalnızca yenilikler, başlıklar ve maddeler halinde düzgün görünüyor.
+- Web sitesinde gizlilik politikası sayfası.
+
+### Güvenlik
+- Uygulama yeni, gizli tutulan bir imza anahtarıyla imzalanıyor. Eski anahtar herkese açık olduğu için
+  emekliye ayrıldı; artık kimse resmi Dakk imzasıyla sahte bir sürüm üretemez.
+- Uygulama içi güncelleyici, indirdiği APK'nın imzasını kurmadan önce kontrol ediyor. İmza farklıysa
+  ne yapılacağını adım adım anlatıyor.
+
+### Önemli
+- 2.0.x sürümünden geçiş: imza anahtarı değiştiği için **eski sürümü bir kez silip** bu sürümü kurman
+  gerekiyor. Kişilerin hesabında saklı kalır; şifreleme anahtarları cihazda yenilendiği için eski
+  mesajlar yeni kurulumda okunamaz.
+
 ## [2.0.1] - 2026-11-08
 
 ### Düzeltildi

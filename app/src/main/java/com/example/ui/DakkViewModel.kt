@@ -68,7 +68,9 @@ data class UpdateUiState(
     val checking: Boolean = false,
     val downloading: Boolean = false,
     val progress: Int = 0,
-    val statusMessage: String? = null
+    val statusMessage: String? = null,
+    /** İndirilen sürüm farklı bir anahtarla imzalanmış; yeniden kurulum gerekiyor. */
+    val signatureMismatch: Boolean = false
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -610,6 +612,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         if (_update.value.release != null) _update.update { it.copy(showDialog = true) }
     }
 
+    fun openReleasePage() {
+        _update.value.release?.let { updater.openReleasePage(it) }
+    }
+
     fun dismissUpdateDialog() {
         if (!_update.value.downloading) _update.update { it.copy(showDialog = false) }
     }
@@ -621,6 +627,12 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val apk = updater.download(release) { p -> _update.update { it.copy(progress = p) } }
+                if (updater.hasSameSignature(apk) == false) {
+                    // Android farklı imzalı APK'yı mevcut kurulumun üzerine yüklemez.
+                    updater.deleteDownloads()
+                    _update.update { it.copy(downloading = false, progress = 0, showDialog = true, signatureMismatch = true) }
+                    return@launch
+                }
                 _update.update { it.copy(downloading = false, progress = 100, showDialog = false) }
                 if (updater.canInstallPackages()) {
                     updater.install(apk)

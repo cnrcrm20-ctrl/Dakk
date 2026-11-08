@@ -119,17 +119,23 @@ JDK 17 ve Android SDK gerekir.
 ### İmza anahtarı (SHA-1) — önemli
 
 Google ile girişin çalışması için APK'nın imza parmak izinin Firebase Console'da kayıtlı olması gerekir.
-Bu yüzden tüm derlemeler (debug + release, yerel + CI) **aynı sabit anahtarla** imzalanır:
-`signing/dakk-release.p12`.
+Bu yüzden resmi sürümlerin hepsi **aynı anahtarla** imzalanır. Anahtar repoda yalnızca **şifreli** durur
+(`signing/dakk-release.p12.enc`). Şifre, GitHub'da `DAKK_SIGNING_PASSPHRASE` secret'ı olarak saklanır;
+GitHub Actions anahtarı derleme sırasında çözer.
 
 | | Değer |
 | --- | --- |
-| SHA-1 | `05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21` |
-| SHA-256 | `A1:31:5B:56:6C:73:7F:46:3E:27:D8:01:36:03:47:F9:C0:80:06:85:5F:E7:66:E7:B9:6F:E1:FB:35:23:FC:D9` |
+| SHA-1 | `1B:8A:A6:D1:88:69:43:31:9A:70:65:4F:A6:DA:DC:7D:F9:E3:5A:E1` |
+| SHA-256 | `A1:E4:F4:6F:E3:DE:83:B8:C7:B9:DF:3F:C9:92:EC:F8:EE:17:91:6B:DE:EB:85:C1:C5:FB:41:8E:56:FB:F6:BC` |
 
-CI her derlemede APK imzasını kontrol eder; SHA-1 farklıysa derleme başarısız olur.
-Anahtarı istersen repo secret'larına taşıyabilirsin (`DAKK_KEYSTORE_BASE64`, `DAKK_KEYSTORE_PASSWORD`,
-`DAKK_KEY_ALIAS`, `DAKK_KEY_PASSWORD`); aynı anahtar olduğu sürece SHA-1 değişmez.
+- CI her derlemede APK imzasını kontrol eder; SHA-1 farklıysa derleme başarısız olur.
+- Secret'a erişimi olmayan derlemeler (yerel geliştirme, fork'lardan gelen PR'lar) Android debug anahtarıyla
+  imzalanır. Bu APK'lar çalışır ama Google ile giriş hata verir.
+- Yerelde resmi anahtarla derlemek için (yalnızca bakımcılar):
+  ```bash
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing/dakk-release.p12.enc -out /tmp/dakk.p12
+  DAKK_KEYSTORE_PATH=/tmp/dakk.p12 DAKK_KEYSTORE_PASSWORD='<parola>' ./gradlew assembleRelease
+  ```
 
 ### Yeni sürüm yayınlamak
 

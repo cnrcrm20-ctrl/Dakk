@@ -10,9 +10,10 @@
 | Uygulama | Dakk — uçtan uca şifreli mesajlaşma (Android) |
 | Paket adı (applicationId) | `dakk.android.co` — **değiştirmeyin** (Firebase'e kayıtlı) |
 | Kod namespace'i | `com.example` (yalnızca iç paket adı, kullanıcıya görünmez) |
-| Mevcut sürüm | `2.0.0` (versionCode `20`) |
+| Mevcut sürüm | `2.1.0` (versionCode `22`) |
 | Depo | https://github.com/cnrcrm20-ctrl/Dakk |
-| Firebase proje ID | `gen-lang-client-0161098568` |
+| Firebase proje ID | `gen-lang-client-0161098568` (Cloud Console'daki adı: "dakk messanger") |
+| Firebase Android uygulaması | `1:721295735056:android:f275568d4fe640156a8d95` (`dakk.android.co`) |
 | Firestore veritabanı ID | `ai-studio-android-e2d067e8-8aba-4fce-a486-b836129f76c1` |
 | Web istemci ID (Google Sign-In) | `721295735056-2b9hjum4qc2t4pjm530cn31fahtdg31j.apps.googleusercontent.com` |
 
@@ -22,22 +23,50 @@ Google ile Giriş, APK'yı imzalayan sertifikanın SHA-1 parmak izine bağlıdı
 **rastgele yeni bir debug.keystore** ürettiği için SHA-1 her sürümde değişiyor ve giriş
 `10: [28444] Developer console is not set up correctly` hatası veriyordu.
 
-Artık **tek, sabit** bir anahtar kullanılıyor:
+Artık **tek, sabit** bir resmi anahtar kullanılıyor (2.1.0'dan itibaren):
 
-- Dosya: `signing/dakk-release.p12` (PKCS12, alias `dakk`, parola `dakk-android-2026`)
-- **SHA-1:** `05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21`
-- **SHA-256:** `A1:31:5B:56:6C:73:7F:46:3E:27:D8:01:36:03:47:F9:C0:80:06:85:5F:E7:66:E7:B9:6F:E1:FB:35:23:FC:D9`
-- Hem `debug` hem `release` derlemeleri bu anahtarla imzalanır (`app/build.gradle.kts`).
+- Depoda yalnızca şifreli hali var: `signing/dakk-release.p12.enc`
+  (OpenSSL `aes-256-cbc -pbkdf2 -iter 600000`; içi PKCS12, alias `dakk`).
+- Şifre = GitHub secret **`DAKK_SIGNING_PASSPHRASE`** (aynı zamanda keystore ve anahtar parolası).
+  Bu şifre kaybolursa resmi anahtar da kaybolur → kullanıcılar bir daha güncelleme alamaz. Şifre bakımcıda
+  güvenli bir yerde yedekli durmalıdır.
+- **SHA-1:** `1B:8A:A6:D1:88:69:43:31:9A:70:65:4F:A6:DA:DC:7D:F9:E3:5A:E1`
+- **SHA-256:** `A1:E4:F4:6F:E3:DE:83:B8:C7:B9:DF:3F:C9:92:EC:F8:EE:17:91:6B:DE:EB:85:C1:C5:FB:41:8E:56:FB:F6:BC`
+- CI, "İmza anahtarını çöz" adımında anahtarı `$RUNNER_TEMP`'e çözer ve `DAKK_KEYSTORE_PATH`,
+  `DAKK_KEYSTORE_PASSWORD`, `DAKK_KEY_ALIAS`, `DAKK_KEY_PASSWORD` ortam değişkenlerini verir.
+  `app/build.gradle.kts` bu değişkenler varsa resmi anahtarla, yoksa debug anahtarıyla imzalar.
 - CI, üretilen APK'nın SHA-1'ini `EXPECTED_SHA1` ile karşılaştırır; farklıysa derlemeyi **durdurur**.
+  Secret yoksa PR derlemeleri debug imzalı olur ve Release oluşturulmaz; `main` derlemesi hata verir.
 
 Bu SHA-1 ve SHA-256 değerleri Firebase Console › Proje ayarları › `dakk.android.co` Android uygulaması
-bölümüne eklenmiş olmalıdır. Anahtar değişirse: tüm kullanıcılar uygulamayı silip yeniden kurmak
-zorunda kalır ve Google girişi yeni SHA-1 eklenene kadar çalışmaz. **Anahtarı değiştirmeyin, silmeyin.**
+bölümüne eklenmiş olmalıdır. Anahtar değişirse tüm kullanıcılar uygulamayı silip yeniden kurmak zorunda
+kalır ve Google girişi yeni SHA-1 eklenene kadar çalışmaz. **Anahtarı değiştirmeyin, silmeyin.**
 
-Güvenlik notu: Anahtar depo içinde olduğu için depoya erişen herkes aynı imzayla APK üretebilir.
-Daha sıkı güvenlik için aynı dosya `DAKK_KEYSTORE_BASE64` (+ `DAKK_KEYSTORE_PASSWORD`, `DAKK_KEY_ALIAS`,
-`DAKK_KEY_PASSWORD`) GitHub Secrets'a konup depodan kaldırılabilir — iş akışı bunu otomatik destekler.
-SHA-1 aynı kalır çünkü anahtar aynıdır.
+Geçmiş: 2.0.0–2.0.1 sürümleri depoda açık duran `signing/dakk-release.p12` ile imzalanmıştı
+(SHA-1 `05:8B:B2:98:…:A1:56:21`). Bu anahtar 2.1.0'da emekliye ayrıldı; Firebase'den de kaldırılmalı.
+Uygulama içi güncelleyici, imzası farklı bir APK indirirse kurmayı denemez, "Yeniden kurulum gerekiyor"
+penceresini gösterir.
+
+## Google ile Giriş yapılandırması (çalışır durumda — bozmayın)
+
+- Google Cloud › Google Auth Platform › **Audience: In production**, User type: External.
+  Testing moduna dönülürse yalnızca test kullanıcıları giriş yapabilir (diğerleri hesap seçtikten sonra
+  giriş ekranına geri atılır: `[16] Account reauth failed`).
+- Branding: uygulama adı Dakk; ana sayfa / gizlilik / koşullar bağlantıları github.com'u gösterir;
+  yetkili alan adları: `gen-lang-client-0161098568.firebaseapp.com`, `github.com`. **Logo yüklemeyin**
+  (Google doğrulaması gerektirir).
+- Data Access: yalnızca `openid`, `userinfo.email`, `userinfo.profile` (hassas olmayan; doğrulama gerekmez).
+- `default_web_client_id`: `721295735056-2b9hjum4qc2t4pjm530cn31fahtdg31j.apps.googleusercontent.com`
+- `GoogleAuth.signIn` önce "Google ile oturum aç" düğme akışını, başarısız olursa `GetGoogleIdOption`
+  akışını dener; yapılandırma hatalarını (`AuthErrorClassifier`) ekranda SHA-1 ile birlikte gösterir.
+
+## Açılış animasyonu
+
+- 30 kare (`res/drawable-nodpi/dakk_splash_00..29.webp`, 360×640, zemin `#FFFEFE`), 100 ms/kare.
+- `ui/components/DakkSplashAnimation.kt`; `MainActivity` yalnızca normal açılışta oynatır
+  (bildirim/davet bağlantısıyla açılışta atlanır), dokununca geçilir. Animasyon sırasında diyaloglar ertelenir.
+- Manifest teması `Theme.Dakk.Launch` (beyaz pencere, Android 12+ simgesiz sistem açılış ekranı);
+  `onCreate` içinde `Theme.Dakk`'a geçilir.
 
 ## Sürüm yayınlama (Release) akışı
 
