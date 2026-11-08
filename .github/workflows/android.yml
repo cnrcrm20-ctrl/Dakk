@@ -1,0 +1,71 @@
+name: Dakk Android CI & Release
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x ./gradlew
+
+    - name: Generate Debug Keystore
+      run: |
+        if [ ! -f debug.keystore ]; then
+          keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        fi
+
+    - name: Run Unit Tests
+      run: ./gradlew testDebugUnitTest
+
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug
+
+    - name: Prepare Release APK Name
+      run: |
+        TAG_NAME="${{ github.ref_name }}"
+        if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "main" ]; then
+          TAG_NAME="v1.0.10"
+        fi
+        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dakk-${TAG_NAME}.apk
+        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dakk.apk
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dakk-apk
+        path: app/build/outputs/apk/debug/Dakk*.apk
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          app/build/outputs/apk/debug/Dakk-${{ github.ref_name }}.apk
+          app/build/outputs/apk/debug/Dakk.apk
+        name: Dakk Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
