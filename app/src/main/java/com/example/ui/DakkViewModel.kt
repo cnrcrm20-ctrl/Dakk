@@ -1,680 +1,725 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
+import com.example.auth.GoogleAuth
 import com.example.crypto.CryptoEngine
-import com.example.data.db.ContactEntity
-import com.example.data.db.MessageEntity
-import com.example.data.db.NetworkLogEntity
-import com.example.data.repository.DakkRepository
-import com.example.github.GitHubUpdateManager
-import com.example.github.ReleaseInfo
-import com.example.signaling.IceCandidateDto
-import com.example.signaling.SignalingPayload
-import com.example.signaling.ZeroCostRendezvous
-import com.example.webrtc.WebRtcManager
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import org.webrtc.DataChannel
-import org.webrtc.PeerConnection
-import java.util.UUID
-import com.example.data.firebase.FirestoreRepository
+import com.example.data.ChatDoc
+import com.example.data.ChatIds
+import com.example.data.ChatSummary
+import com.example.data.Contact
+import com.example.data.FirestoreRepository
+import com.example.data.MessageDoc
+import com.example.data.MessageStatus
+import com.example.data.UiMessage
+import com.example.data.UserProfile
+import com.example.notification.NotificationHelper
+import com.example.update.GitHubUpdateManager
+import com.example.update.ReleaseInfo
+import com.example.update.UpdateCheckResult
+import com.example.util.InviteLinks
 import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 sealed class Screen {
-    object Splash : Screen()
     object Home : Screen()
-    data class ChatDetail(val peer: ContactEntity) : Screen()
-    object Handshake : Screen()
-    object Diagnostic : Screen()
-    object Profile : Screen()
+    data class Chat(val peerUid: String) : Screen()
 }
 
-class DakkViewModel(application: Application) : AndroidViewModel(application) {
+enum class HomeTab { CHATS, CONTACTS, SETTINGS }
 
-    val crypto = CryptoEngine(application)
-    val repository = DakkRepository(application)
-    val firestoreRepository = FirestoreRepository(application)
-    val aiManager = com.example.data.firebase.DakkAiManager()
-    val webRtc = WebRtcManager(application)
-    val updateManager = GitHubUpdateManager(application)
-    val rendezvous = ZeroCostRendezvous()
-    val notificationHelper = com.example.notification.NotificationHelper(application)
+data class AddContactState(
+    val loading: Boolean = false,
+    val found: UserProfile? = null,
+    val error: String? = null
+)
 
-    private val _firebaseUser = MutableStateFlow<FirebaseUser?>(Firebase.auth.currentUser)
-    val firebaseUser: StateFlow<FirebaseUser?> = _firebaseUser
+data class UpdateUiState(
+    val release: ReleaseInfo? = null,
+    val showDialog: Boolean = false,
+    val checking: Boolean = false,
+    val downloading: Boolean = false,
+    val progress: Int = 0,
+    val statusMessage: String? = null
+)
 
-    private val _currentScreen = MutableStateFlow<Screen>(Screen.Splash)
-    val currentScreen: StateFlow<Screen> = _currentScreen
+@OptIn(ExperimentalCoroutinesApi::class)
+class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
-    val activeContacts = repository.activeContacts.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        emptyList()
-    )
+    private val auth = Firebase.auth
+    val crypto = CryptoEngine(app)
+    private val repo = FirestoreRepository(app)
+    private val notifications = NotificationHelper(app)
+    private val updater = GitHubUpdateManager(app)
+    private val prefs = app.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
 
-    val blockedContacts = repository.blockedContacts.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        emptyList()
-    )
+    val appVersion: String = BuildConfig.VERSION_NAME
 
-    val networkLogs = repository.networkLogs.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        emptyList()
-    )
+    // ------------------------------------------------------------------ Durum
 
-    // Aktif Sohbet
-    private val _activeChatPeer = MutableStateFlow<ContactEntity?>(null)
-    val activeChatPeer: StateFlow<ContactEntity?> = _activeChatPeer
+    private val _user = MutableStateFlow<FirebaseUser?>(auth.currentUser)
+    val user: StateFlow<FirebaseUser?> = _user
 
-    private val _chatMessages = MutableStateFlow<List<MessageEntity>>(emptyList())
-    val chatMessages: StateFlow<List<MessageEntity>> = _chatMessages
+    private val _screen = MutableStateFlow<Screen>(Screen.Home)
+    val screen: StateFlow<Screen> = _screen
 
-    // Handshake & Sinyalleşme State'leri
-    private val _myOfferPayload = MutableStateFlow<SignalingPayload?>(null)
-    val myOfferPayload: StateFlow<SignalingPayload?> = _myOfferPayload
+    private val _tab = MutableStateFlow(HomeTab.CHATS)
+    val tab: StateFlow<HomeTab> = _tab
 
-    private val _myAnswerPayload = MutableStateFlow<SignalingPayload?>(null)
-    val myAnswerPayload: StateFlow<SignalingPayload?> = _myAnswerPayload
+    private val _profiles = MutableStateFlow<Map<String, UserProfile>>(emptyMap())
+    val profiles: StateFlow<Map<String, UserProfile>> = _profiles
 
-    private val _handshakeStatus = MutableStateFlow<String>("Hazır")
-    val handshakeStatus: StateFlow<String> = _handshakeStatus
+    private val _chatDocs = MutableStateFlow<List<ChatDoc>>(emptyList())
+    private val _rawContacts = MutableStateFlow<List<Contact>>(emptyList())
+    private val _readMarks = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val _clearMarks = MutableStateFlow<Map<String, Long>>(emptyMap())
 
-    private val _isGeneratingOffer = MutableStateFlow(false)
-    val isGeneratingOffer: StateFlow<Boolean> = _isGeneratingOffer
+    private val _chatsLoaded = MutableStateFlow(false)
+    val chatsLoaded: StateFlow<Boolean> = _chatsLoaded
 
-    // Gelen Arkadaşlık / El Sıkışma İsteği
-    private val _pendingIncomingInvite = MutableStateFlow<SignalingPayload?>(null)
-    val pendingIncomingInvite: StateFlow<SignalingPayload?> = _pendingIncomingInvite
+    private val _activeMessages = MutableStateFlow<List<UiMessage>>(emptyList())
+    val activeMessages: StateFlow<List<UiMessage>> = _activeMessages
 
-    // GitHub Güncelleme State
-    private val _updateInfo = MutableStateFlow<ReleaseInfo?>(null)
-    val updateInfo: StateFlow<ReleaseInfo?> = _updateInfo
+    private val _addContact = MutableStateFlow(AddContactState())
+    val addContact: StateFlow<AddContactState> = _addContact
 
-    private val _updateChecking = MutableStateFlow(false)
-    val updateChecking: StateFlow<Boolean> = _updateChecking
+    private val _update = MutableStateFlow(UpdateUiState())
+    val update: StateFlow<UpdateUiState> = _update
 
-    private val _updateStatusMessage = MutableStateFlow<String?>(null)
-    val updateStatusMessage: StateFlow<String?> = _updateStatusMessage
+    private val _autoUpdate = MutableStateFlow(prefs.getBoolean(PREF_AUTO_UPDATE, true))
+    val autoUpdate: StateFlow<Boolean> = _autoUpdate
 
-    private val _showUpdateDialog = MutableStateFlow(false)
-    val showUpdateDialog: StateFlow<Boolean> = _showUpdateDialog
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val events: SharedFlow<String> = _events
 
-    private val _downloadProgress = MutableStateFlow<Int?>(null)
-    val downloadProgress: StateFlow<Int?> = _downloadProgress
+    private val contactsWithProfiles: Flow<List<Contact>> =
+        combine(_rawContacts, _profiles) { contacts, profiles ->
+            contacts.map { c ->
+                val p = profiles[c.uid]
+                c.copy(
+                    alias = p?.displayName?.ifBlank { null } ?: c.alias.ifBlank { "Dakk Kullanıcısı" },
+                    photoUrl = p?.photoUrl?.ifBlank { null } ?: c.photoUrl,
+                    email = p?.email?.ifBlank { null } ?: c.email
+                )
+            }.sortedBy { it.alias.lowercase() }
+        }
 
-    private val _isDownloading = MutableStateFlow(false)
-    val isDownloading: StateFlow<Boolean> = _isDownloading
+    val contacts: StateFlow<List<Contact>> = contactsWithProfiles
+        .map { list -> list.filterNot { it.isBlocked } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private var currentSequenceNumber = 0L
+    val blockedContacts: StateFlow<List<Contact>> = contactsWithProfiles
+        .map { list -> list.filter { it.isBlocked } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val myProfile: StateFlow<UserProfile?> = combine(_user, _profiles) { u, p -> u?.uid?.let { p[it] } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val chats: StateFlow<List<ChatSummary>> =
+        combine(_chatDocs, _profiles, _rawContacts, _readMarks, _clearMarks) { docs, profiles, contacts, reads, clears ->
+            buildChatSummaries(docs, profiles, contacts, reads, clears)
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ------------------------------------------------------------------ Oturum
+
+    private var sessionUid: String? = null
+    private var sessionJob: Job? = null
+    private val profileJobs = mutableMapOf<String, Job>()
+    private var activeChatJob: Job? = null
+    private var lastActiveDocs: List<MessageDoc> = emptyList()
+    private val readRequested = mutableSetOf<String>()
+    private var notificationsPrimed = false
+    private var isForeground = false
+    private var pendingInvite: String? = null
+    private var pendingChatUid: String? = null
+    private var pendingApk: File? = null
+
+    private val authListener = FirebaseAuth.AuthStateListener { a -> onAuthChanged(a.currentUser) }
 
     init {
-        // Gelen P2P DataChannel mesaj dinleyicisi
-        webRtc.onMessageReceived = { senderId, encryptedContent, msgId, seq ->
-            handleIncomingP2pMessage(senderId, encryptedContent, msgId, seq)
-        }
-
-        // Teslim edildi ACK dinleyicisi
-        webRtc.onDeliveryAckReceived = { ackMsgId ->
-            viewModelScope.launch {
-                repository.updateMessageStatus(ackMsgId, "DELIVERED")
-            }
-        }
-
-        // İlk açılışta kullanıcıyı karşılayan Dakk Asistanı
-        viewModelScope.launch {
-            val existing = repository.getContact("DAKK_BOT_OFFICIAL")
-            if (existing == null) {
-                val botContact = ContactEntity(
-                    userId = "DAKK_BOT_OFFICIAL",
-                    alias = "Dakk Asistanı 🐥",
-                    publicKey = crypto.getPublicKeyBase64(),
-                    lastMessage = "Selam! Dakk'a hoş geldin. WhatsApp yerine özgürce mesajlaşabilirsin!",
-                    lastMessageTime = System.currentTimeMillis()
-                )
-                repository.saveContact(botContact)
-
-                val welcomeMsg = MessageEntity(
-                    id = UUID.randomUUID().toString(),
-                    peerId = "DAKK_BOT_OFFICIAL",
-                    content = "Selam! Dakk'a hoş geldin 🐥\n\nBurası WhatsApp gibi çalışan ama hiçbir sunucuda mesajlarını tutmayan doğrudan cihazdan cihaza (P2P) mesajlaşma alanın.\n\nArkadaşlarını eklemek için 'Kişiler' sekmesinden WhatsApp ile davet bağlantısı atabilir veya QR kodunu taratabilirsin!",
-                    timestamp = System.currentTimeMillis(),
-                    isFromMe = false,
-                    status = "DELIVERED",
-                    sequenceNumber = 1L
-                )
-                repository.saveMessage(welcomeMsg)
-            }
-        }
-
-        checkGitHubUpdatesOnLaunch()
+        auth.addAuthStateListener(authListener)
+        if (_autoUpdate.value) checkForUpdates(manual = false)
     }
 
-    fun onUserAuthenticated(user: FirebaseUser) {
-        _firebaseUser.value = user
-        val displayName = user.displayName?.ifBlank { null }
-            ?: user.email?.substringBefore("@")
-            ?: "Dakk Kullanıcısı 🐥"
-        crypto.setUserAlias(displayName)
+    override fun onCleared() {
+        auth.removeAuthStateListener(authListener)
+        super.onCleared()
+    }
 
-        _currentScreen.value = Screen.Home
-
-        viewModelScope.launch {
-            try {
-                firestoreRepository.saveUserProfile(
-                    displayName = displayName,
-                    email = user.email ?: "",
-                    photoUrl = user.photoUrl?.toString() ?: ""
-                )
-            } catch (e: Exception) {
-                // Logged via handleFirestoreError
-            }
+    private fun onAuthChanged(user: FirebaseUser?) {
+        _user.value = user
+        if (user == null) {
+            stopSession()
+        } else if (sessionUid != user.uid) {
+            startSession(user)
         }
+    }
 
-        // Buluttaki kişileri gözlemle ve yerel veritabanı ile senkronize et
-        viewModelScope.launch {
-            try {
-                firestoreRepository.observeContacts().collect { cloudContacts ->
-                    cloudContacts.forEach { cc ->
-                        val existing = repository.getContact(cc.contactUserId)
-                        val updated = ContactEntity(
-                            userId = cc.contactUserId,
-                            alias = cc.alias,
-                            publicKey = existing?.publicKey ?: "",
-                            lastMessage = cc.lastMessage.ifBlank { existing?.lastMessage ?: "" },
-                            lastMessageTime = cc.lastMessageTime?.toDate()?.time ?: existing?.lastMessageTime ?: System.currentTimeMillis(),
-                            isBlocked = cc.isBlocked
-                        )
-                        repository.saveContact(updated)
-                    }
+    private fun <T> Flow<T>.retrying(label: String, uid: String): Flow<T> = retryWhen { cause, attempt ->
+        Log.w(TAG, "$label dinleyicisi hata verdi (deneme ${attempt + 1})", cause)
+        delay((attempt + 1).coerceAtMost(8) * 1_500L)
+        auth.currentUser?.uid == uid
+    }
+
+    private fun startSession(user: FirebaseUser) {
+        stopSession()
+        val uid = user.uid
+        sessionUid = uid
+        _readMarks.value = loadMarks(PREFIX_READ)
+        _clearMarks.value = loadMarks(PREFIX_CLEARED)
+        notificationsPrimed = false
+
+        sessionJob = viewModelScope.launch {
+            launch { publishMyProfile(user) }
+            launch {
+                repo.observeContacts(uid).retrying("Kişiler", uid).collect { list ->
+                    _rawContacts.value = list
+                    list.forEach { ensureProfile(it.uid) }
                 }
-            } catch (e: Exception) {
-                // Handled
             }
+            launch {
+                repo.observeChats(uid).retrying("Sohbetler", uid).collect { docs ->
+                    _chatDocs.value = docs
+                    _chatsLoaded.value = true
+                    docs.forEach { doc -> peerOf(doc, uid)?.let { ensureProfile(it) } }
+                    handleNotifications(docs, uid)
+                }
+            }
+        }
+        ensureProfile(uid)
+        pendingInvite?.let { link ->
+            pendingInvite = null
+            lookupContact(link, fromLink = true)
+        }
+        pendingChatUid?.let { peer ->
+            pendingChatUid = null
+            openChat(peer)
         }
     }
 
-    fun navigateTo(screen: Screen) {
-        _currentScreen.value = screen
-        if (screen is Screen.ChatDetail) {
-            _activeChatPeer.value = screen.peer
-            observeChatMessages(screen.peer.userId)
-        }
+    private fun stopSession() {
+        sessionJob?.cancel()
+        sessionJob = null
+        profileJobs.values.forEach { it.cancel() }
+        profileJobs.clear()
+        activeChatJob?.cancel()
+        activeChatJob = null
+        sessionUid = null
+        _profiles.value = emptyMap()
+        _chatDocs.value = emptyList()
+        _rawContacts.value = emptyList()
+        _activeMessages.value = emptyList()
+        _chatsLoaded.value = false
+        _screen.value = Screen.Home
+        _tab.value = HomeTab.CHATS
+        _addContact.value = AddContactState()
+        readRequested.clear()
     }
 
-    private fun observeChatMessages(peerId: String) {
-        viewModelScope.launch {
-            repository.getMessagesForPeer(peerId).collect { msgs ->
-                _chatMessages.value = msgs
-            }
-        }
-    }
-
-    /**
-     * P2P üzerinden şifreli mesaj gönderir ve veritabanına kaydeder
-     */
-    fun sendMessageToActivePeer(text: String) {
-        val peer = _activeChatPeer.value ?: return
-        if (text.isBlank()) return
-
-        val msgId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
-        val seq = ++currentSequenceNumber
-
-        viewModelScope.launch {
-            // Uçtan uca AES-256-GCM ile şifrele
-            val encrypted = try {
-                crypto.encrypt(text, peer.publicKey)
-            } catch (e: Exception) {
-                text // fallback
-            }
-
-            // WebRTC DataChannel üzerinden doğrudan gönder
-            val isChannelOpen = webRtc.dataChannelState.value == DataChannel.State.OPEN
-            val sent = if (isChannelOpen) {
-                webRtc.sendMessage(msgId, crypto.getOrCreateUserId(), encrypted, seq)
-            } else {
-                false
-            }
-
-            val isBot = peer.userId == "DAKK_BOT_OFFICIAL"
-            val status = if (sent || isBot) "DELIVERED" else "FAILED"
-
-            val messageEntity = MessageEntity(
-                id = msgId,
-                peerId = peer.userId,
-                content = text,
-                timestamp = timestamp,
-                isFromMe = true,
-                status = status,
-                sequenceNumber = seq
+    private suspend fun publishMyProfile(user: FirebaseUser) {
+        try {
+            val publicKey = withContext(Dispatchers.Default) { crypto.publicKeyBase64() }
+            val name = prefs.getString(PREF_NAME_PREFIX + user.uid, null)
+                ?: user.displayName?.ifBlank { null }
+                ?: user.email?.substringBefore("@")
+                ?: "Dakk Kullanıcısı"
+            repo.publishProfile(
+                uid = user.uid,
+                displayName = name,
+                email = user.email.orEmpty(),
+                photoUrl = user.photoUrl?.toString().orEmpty(),
+                publicKey = publicKey
             )
+        } catch (e: Exception) {
+            Log.e(TAG, "Profil yayınlanamadı", e)
+        }
+    }
 
-            repository.saveMessage(messageEntity)
-
-            // Dakk Bot otomatik Firebase AI Logic (Gemini) yanıtı
-            if (isBot) {
-                val replyText = aiManager.askDakkAi(text)
-                val botReply = MessageEntity(
-                    id = UUID.randomUUID().toString(),
-                    peerId = "DAKK_BOT_OFFICIAL",
-                    content = replyText,
-                    timestamp = System.currentTimeMillis(),
-                    isFromMe = false,
-                    status = "DELIVERED",
-                    sequenceNumber = ++currentSequenceNumber
-                )
-                repository.saveMessage(botReply)
-            } else if (peer.isGroup) {
-                // Grup sohbetinde bot yanıtı simülasyonu
-                kotlinx.coroutines.delay(800)
-                val botReply = MessageEntity(
-                    id = UUID.randomUUID().toString(),
-                    peerId = peer.userId,
-                    content = "Grup mesajı tüm katılımcılara güvenle iletildi 🐥",
-                    timestamp = System.currentTimeMillis(),
-                    isFromMe = false,
-                    status = "DELIVERED",
-                    sequenceNumber = ++currentSequenceNumber,
-                    senderAlias = "Dakk Asistanı"
-                )
-                repository.saveMessage(botReply)
+    private fun ensureProfile(uid: String) {
+        if (profileJobs.containsKey(uid)) return
+        val myUid = sessionUid ?: return
+        profileJobs[uid] = viewModelScope.launch {
+            repo.observeProfile(uid).retrying("Profil", myUid).collect { profile ->
+                if (profile != null) _profiles.update { it + (uid to profile) }
             }
         }
     }
 
-    /**
-     * Yeni bir Dakk P2P Grubu oluşturur
-     */
-    fun createGroup(groupName: String, selectedMembers: List<ContactEntity>, onCreated: (ContactEntity) -> Unit) {
-        val groupId = "GROUP_${UUID.randomUUID().toString().take(12)}"
-        val membersList = (selectedMembers.map { it.alias } + crypto.getUserAlias()).joinToString(", ")
-        val groupContact = ContactEntity(
-            userId = groupId,
-            alias = groupName.ifBlank { "Yeni Grup 🐥" },
-            publicKey = crypto.getPublicKeyBase64(),
-            lastMessage = "Grup oluşturuldu",
-            lastMessageTime = System.currentTimeMillis(),
-            isGroup = true,
-            groupMembers = membersList
+    // ------------------------------------------------------------------ Gezinme
+
+    fun setTab(tab: HomeTab) {
+        _tab.value = tab
+    }
+
+    fun openChat(peerUid: String) {
+        val myUid = sessionUid ?: return
+        ensureProfile(peerUid)
+        notifications.cancelFor(peerUid)
+        _screen.value = Screen.Chat(peerUid)
+
+        val chatId = ChatIds.of(myUid, peerUid)
+        activeChatJob?.cancel()
+        _activeMessages.value = emptyList()
+        lastActiveDocs = emptyList()
+        markChatRead(chatId, 0L)
+
+        activeChatJob = viewModelScope.launch {
+            _chatDocs
+                .map { docs -> docs.any { it.chatId == chatId } }
+                .distinctUntilChanged()
+                .flatMapLatest { exists ->
+                    if (exists) repo.observeMessages(chatId).retrying("Mesajlar", myUid)
+                    else flowOf(emptyList())
+                }
+                .collect { docs ->
+                    lastActiveDocs = docs
+                    val cleared = _clearMarks.value[chatId] ?: 0L
+                    val ui = withContext(Dispatchers.Default) {
+                        docs.filter { it.createdAt > cleared }.map { it.toUi(myUid) }
+                    }
+                    _activeMessages.value = ui
+                    if (isForeground) markIncomingAsRead(chatId, myUid, docs)
+                }
+        }
+    }
+
+    /** Bildirime dokunulduğunda ilgili sohbeti açar (oturum henüz hazır değilse bekletir). */
+    fun openChatWhenReady(peerUid: String) {
+        if (sessionUid == null) pendingChatUid = peerUid else openChat(peerUid)
+    }
+
+    fun closeChat() {
+        activeChatJob?.cancel()
+        activeChatJob = null
+        _activeMessages.value = emptyList()
+        lastActiveDocs = emptyList()
+        _screen.value = Screen.Home
+    }
+
+    fun setForeground(foreground: Boolean) {
+        isForeground = foreground
+        if (!foreground) return
+        val myUid = sessionUid
+        val current = _screen.value
+        if (myUid != null && current is Screen.Chat) {
+            notifications.cancelFor(current.peerUid)
+            markIncomingAsRead(ChatIds.of(myUid, current.peerUid), myUid, lastActiveDocs)
+        }
+        pendingApk?.let { apk ->
+            if (updater.canInstallPackages()) {
+                pendingApk = null
+                runCatching { updater.install(apk) }
+            }
+        }
+    }
+
+    private fun MessageDoc.toUi(myUid: String): UiMessage {
+        val fromMe = senderId == myUid
+        return UiMessage(
+            id = id,
+            text = crypto.decryptMessage(content, senderKey, recipientKey),
+            isFromMe = fromMe,
+            timestamp = createdAt,
+            status = when {
+                isPending -> MessageStatus.PENDING
+                deliveryStatus == "READ" -> MessageStatus.READ
+                else -> MessageStatus.SENT
+            }
         )
+    }
+
+    private fun markIncomingAsRead(chatId: String, myUid: String, docs: List<MessageDoc>) {
+        val latest = docs.maxOfOrNull { it.createdAt } ?: 0L
+        markChatRead(chatId, latest)
+        val ids = docs.filter {
+            it.senderId != myUid && it.deliveryStatus != "READ" && !it.isPending && it.id !in readRequested
+        }.map { it.id }
+        if (ids.isNotEmpty()) {
+            readRequested.addAll(ids)
+            repo.markRead(chatId, ids)
+        }
+    }
+
+    private fun markChatRead(chatId: String, latestMessageTime: Long) {
+        val docTime = _chatDocs.value.firstOrNull { it.chatId == chatId }?.lastMessageTime ?: 0L
+        val mark = maxOf(latestMessageTime, docTime, _readMarks.value[chatId] ?: 0L)
+        if (mark <= (_readMarks.value[chatId] ?: 0L)) return
+        _readMarks.update { it + (chatId to mark) }
+        prefs.edit().putLong(PREFIX_READ + chatId, mark).apply()
+    }
+
+    // ------------------------------------------------------------------ Mesajlaşma
+
+    /** Gönderim kuyruğa alındıysa true döner (giriş alanı temizlenebilir). */
+    fun sendMessage(peerUid: String, rawText: String): Boolean {
+        val text = rawText.trim()
+        if (text.isEmpty()) return false
+        val myUid = sessionUid ?: return false
+        val peer = _profiles.value[peerUid]
+        if (peer == null || peer.publicKey.isBlank()) {
+            _events.tryEmit("Bu kişi henüz Dakk'ın güncel sürümüne giriş yapmamış. Şifreli mesaj gönderilemiyor.")
+            return false
+        }
+        if (text.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES) {
+            _events.tryEmit("Mesaj çok uzun. Lütfen daha kısa parçalar halinde gönderin.")
+            return false
+        }
+        val myName = _profiles.value[myUid]?.displayName?.ifBlank { null }
+            ?: _user.value?.displayName ?: "Dakk Kullanıcısı"
 
         viewModelScope.launch {
-            repository.saveContact(groupContact)
-
-            val sysMsg = MessageEntity(
-                id = UUID.randomUUID().toString(),
-                peerId = groupId,
-                content = "🎉 '$groupName' grubu oluşturuldu!\nKatılımcılar: $membersList\nWhatsApp davet linkiyle yeni arkadaşlarını gruba davet edebilirsin.",
-                timestamp = System.currentTimeMillis(),
-                isFromMe = false,
-                status = "DELIVERED",
-                sequenceNumber = 1L,
-                senderAlias = "Sistem"
-            )
-            repository.saveMessage(sysMsg)
-
-            onCreated(groupContact)
-        }
-    }
-
-    private fun handleIncomingP2pMessage(senderId: String, encryptedPayload: String, msgId: String, seq: Long) {
-        viewModelScope.launch {
-            val contact = repository.getContact(senderId)
-            val decrypted = if (contact != null) {
-                try {
-                    crypto.decrypt(encryptedPayload, contact.publicKey)
-                } catch (e: Exception) {
-                    "[Şifre Çözülemedi - Doğrulama Hatası]"
-                }
-            } else {
-                encryptedPayload
-            }
-
-            val messageEntity = MessageEntity(
-                id = msgId,
-                peerId = senderId,
-                content = decrypted,
-                timestamp = System.currentTimeMillis(),
-                isFromMe = false,
-                status = "DELIVERED",
-                sequenceNumber = seq
-            )
-            repository.saveMessage(messageEntity)
-
-            // Bildirim Gönder
-            notificationHelper.showMessageNotification(
-                senderAlias = contact?.alias ?: "Dakk Kullanıcısı",
-                messageText = decrypted
-            )
-        }
-    }
-
-    /**
-     * Yeni bir P2P Offer (Teklif) oluşturur ve otomatik iki yönlü el sıkışma odasını dinlemeye başlar
-     */
-    fun createOfferForHandshake(onReady: ((SignalingPayload) -> Unit)? = null) {
-        _isGeneratingOffer.value = true
-        _handshakeStatus.value = "STUN sunucularından ICE adayları toplanıyor..."
-
-        // Otomatik 2 yönlü eşleşme için benzersiz geçici oda ID'si
-        val autoRoomId = "dk_" + UUID.randomUUID().toString().replace("-", "").take(10)
-
-        webRtc.createOffer { sdp, candidates ->
-            _isGeneratingOffer.value = false
-            if (sdp != null) {
-                val candidateDtos = candidates.map {
-                    IceCandidateDto(it.sdpMid, it.sdpMLineIndex, it.sdp)
-                }
-                val payload = SignalingPayload(
-                    type = "OFFER",
-                    userId = crypto.getOrCreateUserId(),
-                    alias = crypto.getUserAlias(),
-                    publicKey = crypto.getPublicKeyBase64(),
-                    sdp = sdp.description,
-                    candidates = candidateDtos,
-                    roomId = autoRoomId
-                )
-                _myOfferPayload.value = payload
-                _handshakeStatus.value = "Teklif hazır! QR kodu gösterin veya bağlantıyı paylaşın."
-
-                // Karşı taraf bağlantıyı açıp kabul ettiğinde otomatik cevabı dinle (2 tarafa da veri gitmesi için)
-                rendezvous.subscribeToRoom(autoRoomId) { answerCompact ->
-                    val answerPayload = SignalingPayload.decodeFromCompactString(answerCompact)
-                    if (answerPayload != null && answerPayload.type == "ANSWER") {
-                        rendezvous.stopListening()
-                        applyRemoteAnswer(answerPayload)
-                        notificationHelper.showFriendConnectedNotification(answerPayload.alias)
-                    }
-                }
-
-                onReady?.invoke(payload)
-            } else {
-                _handshakeStatus.value = "Teklif oluşturulamadı. Lütfen tekrar deneyin."
-            }
-        }
-    }
-
-    /**
-     * WhatsApp ve diğer mesajlaşma uygulamaları için otomatik P2P teklif bağlantısı paylaşır
-     */
-    fun shareInviteLinkViaWhatsApp(context: android.content.Context) {
-        val sendShareIntent: (SignalingPayload) -> Unit = { payload ->
-            val link = payload.toInvitationLink()
-            val text = "👋 Selam! Dakk ile WhatsApp yerine doğrudan cihazdan cihaza (P2P), uçtan uca şifreli mesajlaşalım! 🐥\n\nBeni eklemek için linke tıkla:\n$link"
-            val sendIntent = android.content.Intent().apply {
-                action = android.content.Intent.ACTION_SEND
-                putExtra(android.content.Intent.EXTRA_TEXT, text)
-                type = "text/plain"
-            }
-            context.startActivity(android.content.Intent.createChooser(sendIntent, "Dakk'a Davet Et"))
-        }
-
-        val existingOffer = _myOfferPayload.value
-        if (existingOffer != null) {
-            sendShareIntent(existingOffer)
-        } else {
-            createOfferForHandshake { payload ->
-                sendShareIntent(payload)
-            }
-        }
-    }
-
-    /**
-     * Gelen davet linki veya QR okutulduğunda tetiklenir
-     */
-    fun onIncomingInviteReceived(payload: SignalingPayload) {
-        if (payload.type == "OFFER") {
-            _pendingIncomingInvite.value = payload
-        } else if (payload.type == "ANSWER") {
-            applyRemoteAnswer(payload)
-            notificationHelper.showFriendConnectedNotification(payload.alias)
-        }
-    }
-
-    fun dismissIncomingInvite() {
-        _pendingIncomingInvite.value = null
-    }
-
-    /**
-     * Kullanıcı gelen arkadaşlık teklifini kabul ettiğinde çalışır
-     */
-    fun acceptIncomingInvite(payload: SignalingPayload, onConnected: ((ContactEntity) -> Unit)? = null) {
-        _pendingIncomingInvite.value = null
-        processRemoteOfferAndCreateAnswer(payload) { answerPayload ->
-            // Karşı tarafın dinlediği geçici rendezvous odasına cevabı anında yayınla
-            if (payload.roomId.isNotBlank()) {
-                rendezvous.publishOfferOrAnswer(payload.roomId, answerPayload.encodeToCompactString()) { success ->
-                    // 2. tarafa da veri iletildi!
-                }
-            }
-
-            viewModelScope.launch {
-                val contact = repository.getContact(payload.userId) ?: ContactEntity(
-                    userId = payload.userId,
-                    alias = payload.alias,
-                    publicKey = payload.publicKey,
-                    lastMessage = "Bağlantı kuruldu! Vak vak 🐥"
-                )
-                repository.saveContact(contact)
-                try {
-                    firestoreRepository.saveContact(contactUserId = payload.userId, alias = payload.alias)
-                } catch (e: Exception) {
-                    // Handled
-                }
-                notificationHelper.showFriendConnectedNotification(payload.alias)
-                onConnected?.invoke(contact)
-                _activeChatPeer.value = contact
-                _currentScreen.value = Screen.ChatDetail(contact)
-            }
-        }
-    }
-
-    /**
-     * Gelen Offer'ı işler ve Answer üretir
-     */
-    fun processRemoteOfferAndCreateAnswer(remotePayload: SignalingPayload, onAnswerReady: (SignalingPayload) -> Unit) {
-        _handshakeStatus.value = "Karşı tarafın teklifi işleniyor ve cevap oluşturuluyor..."
-
-        val remoteCandidates = remotePayload.candidates.map { it.toWebRtc() }
-        webRtc.createAnswer(remotePayload.sdp, remoteCandidates) { answerSdp, myCandidates ->
-            if (answerSdp != null) {
-                val candidateDtos = myCandidates.map {
-                    IceCandidateDto(it.sdpMid, it.sdpMLineIndex, it.sdp)
-                }
-                val answerPayload = SignalingPayload(
-                    type = "ANSWER",
-                    userId = crypto.getOrCreateUserId(),
-                    alias = crypto.getUserAlias(),
-                    publicKey = crypto.getPublicKeyBase64(),
-                    sdp = answerSdp.description,
-                    candidates = candidateDtos,
-                    roomId = remotePayload.roomId
-                )
-                _myAnswerPayload.value = answerPayload
-                _handshakeStatus.value = "Cevap üretildi! P2P bağlantısı başlatılıyor..."
-
-                // Karşı tarafı arkadaş olarak kaydet
-                viewModelScope.launch {
-                    val contact = ContactEntity(
-                        userId = remotePayload.userId,
-                        alias = remotePayload.alias,
-                        publicKey = remotePayload.publicKey,
-                        lastMessage = "P2P El sıkışması sağlandı"
+            try {
+                val (content, preview, myKey) = withContext(Dispatchers.Default) {
+                    Triple(
+                        crypto.encrypt(text, peer.publicKey),
+                        crypto.encrypt(previewOf(text), peer.publicKey),
+                        crypto.publicKeyBase64()
                     )
-                    repository.saveContact(contact)
                 }
-
-                onAnswerReady(answerPayload)
-            } else {
-                _handshakeStatus.value = "Cevap SDP oluşturulamadı!"
+                repo.sendMessage(
+                    chatId = ChatIds.of(myUid, peerUid),
+                    myUid = myUid,
+                    peerUid = peerUid,
+                    senderName = myName,
+                    encryptedContent = content,
+                    encryptedPreview = preview,
+                    senderKey = myKey,
+                    recipientKey = peer.publicKey
+                ) { _events.tryEmit("Mesaj gönderilemedi. Lütfen tekrar deneyin.") }
+            } catch (e: Exception) {
+                Log.e(TAG, "Şifreleme hatası", e)
+                _events.tryEmit("Mesaj şifrelenemedi.")
             }
         }
+        return true
     }
 
-    /**
-     * Initiator tarafında karşıdan gelen Answer'ı uygular ve doğrudan bağlantıyı açar
-     */
-    fun applyRemoteAnswer(answerPayload: SignalingPayload) {
-        _handshakeStatus.value = "Cevap uygulanıyor, ICE doğrulaması başlatıldı..."
-        val candidates = answerPayload.candidates.map { it.toWebRtc() }
-
-        webRtc.setRemoteAnswer(answerPayload.sdp, candidates) {
-            _handshakeStatus.value = "ICE Kontrolü Başladı! Karşı cihaz ile P2P kuruluyor..."
-
-            viewModelScope.launch {
-                val contact = ContactEntity(
-                    userId = answerPayload.userId,
-                    alias = answerPayload.alias,
-                    publicKey = answerPayload.publicKey,
-                    lastMessage = "P2P El sıkışması tamamlandı"
-                )
-                repository.saveContact(contact)
-                notificationHelper.showFriendConnectedNotification(answerPayload.alias)
-            }
-        }
-    }
-
-    /**
-     * 6 Haneli PIN ile İki Yönlü Anında Eşleşme
-     */
-    fun startPinRoomMatch(pin: String, onConnected: () -> Unit) {
-        val cleanPin = pin.trim()
-        if (cleanPin.length < 4) return
-
-        _handshakeStatus.value = "PIN odasına bağlanılıyor ($cleanPin)..."
-
-        createOfferForHandshake { myOffer ->
-            publishToPinRoom(cleanPin, myOffer) {
-                listenToPinRoom(cleanPin) { remotePayload ->
-                    if (remotePayload.userId != crypto.getOrCreateUserId()) {
-                        if (remotePayload.type == "OFFER") {
-                            processRemoteOfferAndCreateAnswer(remotePayload) { myAnswer ->
-                                publishToPinRoom(cleanPin, myAnswer) {
-                                    notificationHelper.showFriendConnectedNotification(remotePayload.alias)
-                                    onConnected()
-                                }
-                            }
-                        } else if (remotePayload.type == "ANSWER") {
-                            applyRemoteAnswer(remotePayload)
-                            notificationHelper.showFriendConnectedNotification(remotePayload.alias)
-                            onConnected()
-                        }
+    fun deleteMessage(peerUid: String, messageId: String) {
+        val myUid = sessionUid ?: return
+        val chatId = ChatIds.of(myUid, peerUid)
+        val wasLast = _activeMessages.value.lastOrNull()?.id == messageId
+        viewModelScope.launch {
+            try {
+                repo.deleteMessage(chatId, messageId)
+                if (wasLast) {
+                    val peer = _profiles.value[peerUid] ?: return@launch
+                    if (peer.publicKey.isBlank()) return@launch
+                    val myKey = withContext(Dispatchers.Default) { crypto.publicKeyBase64() }
+                    val preview = withContext(Dispatchers.Default) {
+                        crypto.encrypt("Bu mesaj silindi", peer.publicKey)
                     }
+                    repo.sendPreviewOnly(chatId, myUid, peerUid, preview, myKey, peer.publicKey)
+                }
+            } catch (e: Exception) {
+                _events.tryEmit("Mesaj silinemedi.")
+            }
+        }
+    }
+
+    fun clearChat(peerUid: String) {
+        val myUid = sessionUid ?: return
+        val chatId = ChatIds.of(myUid, peerUid)
+        val latest = maxOf(
+            System.currentTimeMillis(),
+            _activeMessages.value.maxOfOrNull { it.timestamp } ?: 0L,
+            _chatDocs.value.firstOrNull { it.chatId == chatId }?.lastMessageTime ?: 0L
+        )
+        _clearMarks.update { it + (chatId to latest) }
+        prefs.edit().putLong(PREFIX_CLEARED + chatId, latest).apply()
+        _activeMessages.value = emptyList()
+        _events.tryEmit("Sohbet bu cihazdan temizlendi")
+    }
+
+    fun setBlocked(peerUid: String, blocked: Boolean) {
+        val myUid = sessionUid ?: return
+        val peer = _profiles.value[peerUid]
+            ?: UserProfile(peerUid, _rawContacts.value.firstOrNull { it.uid == peerUid }?.alias.orEmpty(), "", "", "")
+        viewModelScope.launch {
+            try {
+                repo.setBlocked(myUid, peer, blocked)
+                _events.tryEmit(if (blocked) "${peer.displayName.ifBlank { "Kişi" }} engellendi" else "Engel kaldırıldı")
+                if (blocked && (_screen.value as? Screen.Chat)?.peerUid == peerUid) closeChat()
+            } catch (e: Exception) {
+                _events.tryEmit("İşlem tamamlanamadı. İnternet bağlantınızı kontrol edin.")
+            }
+        }
+    }
+
+    fun removeContact(peerUid: String) {
+        val myUid = sessionUid ?: return
+        viewModelScope.launch {
+            try {
+                repo.deleteContact(myUid, peerUid)
+                _events.tryEmit("Kişi silindi")
+            } catch (e: Exception) {
+                _events.tryEmit("Kişi silinemedi.")
+            }
+        }
+    }
+
+    fun isContact(peerUid: String): Boolean = _rawContacts.value.any { it.uid == peerUid && !it.isBlocked }
+
+    fun safetyNumberFor(peerUid: String): String? {
+        val key = _profiles.value[peerUid]?.publicKey?.ifBlank { null } ?: return null
+        return runCatching { crypto.safetyNumber(key) }.getOrNull()
+    }
+
+    // ------------------------------------------------------------------ Kişi ekleme
+
+    fun myInviteLink(): String? = sessionUid?.let { InviteLinks.build(BuildConfig.INVITE_BASE_URL, it) }
+
+    fun handleIncomingLink(link: String) {
+        if (InviteLinks.parseUid(link) == null) return
+        if (sessionUid == null) pendingInvite = link else lookupContact(link, fromLink = true)
+    }
+
+    fun lookupContact(input: String, fromLink: Boolean = false) {
+        val text = input.trim()
+        val myUid = sessionUid ?: return
+        if (text.isEmpty()) return
+        viewModelScope.launch {
+            _addContact.value = AddContactState(loading = true)
+            try {
+                val profile = if (text.contains("@") && !text.contains("://")) {
+                    repo.findProfileByEmail(text)
+                } else {
+                    InviteLinks.parseUid(text)?.let { repo.getProfile(it) }
+                }
+                val error = when {
+                    profile == null -> "Bu bilgilerle kayıtlı bir Dakk kullanıcısı bulunamadı."
+                    profile.uid == myUid -> "Bu sizin kendi hesabınız."
+                    else -> null
+                }
+                if (error == null && profile != null) {
+                    _addContact.value = AddContactState(found = profile)
+                } else {
+                    reportLookupError(error ?: "", fromLink)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Kişi araması başarısız", e)
+                reportLookupError("Arama yapılamadı. İnternet bağlantınızı kontrol edin.", fromLink)
+            }
+        }
+    }
+
+    private fun reportLookupError(message: String, fromLink: Boolean) {
+        if (fromLink) {
+            _addContact.value = AddContactState()
+            _events.tryEmit(message)
+        } else {
+            _addContact.value = AddContactState(error = message)
+        }
+    }
+
+    fun confirmAddContact(profile: UserProfile) {
+        val myUid = sessionUid ?: return
+        viewModelScope.launch {
+            try {
+                _addContact.value = AddContactState(loading = true, found = profile)
+                repo.saveContact(myUid, profile)
+                _profiles.update { it + (profile.uid to profile) }
+                _addContact.value = AddContactState()
+                _events.tryEmit("${profile.displayName} kişilerinize eklendi")
+                openChat(profile.uid)
+            } catch (e: Exception) {
+                _addContact.value = AddContactState(found = profile, error = "Kişi eklenemedi. Lütfen tekrar deneyin.")
+            }
+        }
+    }
+
+    fun resetAddContact() {
+        _addContact.value = AddContactState()
+    }
+
+    // ------------------------------------------------------------------ Hesap
+
+    fun updateDisplayName(name: String) {
+        val user = _user.value ?: return
+        val clean = name.trim().take(60)
+        if (clean.isEmpty()) return
+        prefs.edit().putString(PREF_NAME_PREFIX + user.uid, clean).apply()
+        viewModelScope.launch {
+            publishMyProfile(user)
+            _events.tryEmit("Adınız güncellendi")
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            GoogleAuth.signOut(getApplication())
+        }
+    }
+
+    // ------------------------------------------------------------------ Güncelleme
+
+    fun setAutoUpdate(enabled: Boolean) {
+        _autoUpdate.value = enabled
+        prefs.edit().putBoolean(PREF_AUTO_UPDATE, enabled).apply()
+    }
+
+    fun checkForUpdates(manual: Boolean) {
+        if (_update.value.checking || _update.value.downloading) return
+        _update.update { it.copy(checking = true, statusMessage = if (manual) "Denetleniyor…" else null) }
+        viewModelScope.launch {
+            when (val result = updater.check()) {
+                is UpdateCheckResult.Available -> _update.update {
+                    it.copy(checking = false, release = result.release, showDialog = true,
+                        statusMessage = "Yeni sürüm mevcut: v${result.release.version}")
+                }
+                UpdateCheckResult.UpToDate -> _update.update {
+                    it.copy(checking = false, statusMessage = if (manual) "Dakk güncel (v$appVersion)" else null)
+                }
+                is UpdateCheckResult.Failed -> _update.update {
+                    it.copy(checking = false, statusMessage = if (manual) result.message else null)
                 }
             }
         }
     }
 
-    /**
-     * 6 Haneli PIN ile Sıfır Maliyetli Odaya Gönderim
-     */
-    fun publishToPinRoom(pin: String, payload: SignalingPayload, onDone: (Boolean) -> Unit) {
-        val compact = payload.encodeToCompactString()
-        rendezvous.publishOfferOrAnswer(pin, compact, onDone)
-    }
-
-    fun listenToPinRoom(pin: String, onReceived: (SignalingPayload) -> Unit) {
-        rendezvous.subscribeToRoom(pin) { raw ->
-            val payload = SignalingPayload.decodeFromCompactString(raw)
-            if (payload != null) {
-                onReceived(payload)
-            }
-        }
-    }
-
-    fun clearChat(peerId: String) {
-        viewModelScope.launch {
-            repository.clearChat(peerId)
-            _chatMessages.value = emptyList()
-        }
-    }
-
-    fun toggleBlock(peerId: String, currentBlocked: Boolean) {
-        viewModelScope.launch {
-            repository.setBlocked(peerId, !currentBlocked)
-            _currentScreen.value = Screen.Home
-        }
-    }
-
-    fun deleteContact(peerId: String) {
-        viewModelScope.launch {
-            repository.deleteContact(peerId)
-            _currentScreen.value = Screen.Home
-        }
-    }
-
-    fun logDiagnosticResult(notes: String) {
-        viewModelScope.launch {
-            val log = NetworkLogEntity(
-                peerId = _activeChatPeer.value?.userId ?: "TEST_SESSION",
-                operatorName = webRtc.selectedOperator.value,
-                networkType = webRtc.networkType.value,
-                iceState = webRtc.iceConnectionState.value.name,
-                stunLatencyMs = webRtc.stunLatencyMs.value,
-                rttMs = webRtc.p2pRttMs.value,
-                candidateTypes = webRtc.candidateTypes.value.joinToString(", "),
-                statusSummary = notes
-            )
-            repository.addNetworkLog(log)
-        }
-    }
-
-    fun checkGitHubUpdates() {
-        _updateChecking.value = true
-        _updateStatusMessage.value = "GitHub Releases denetleniyor..."
-
-        updateManager.checkForUpdate { hasUpdate, info, error ->
-            _updateChecking.value = false
-            if (error != null) {
-                _updateStatusMessage.value = error
-            } else if (hasUpdate && info != null) {
-                _updateInfo.value = info
-                _showUpdateDialog.value = true
-                _updateStatusMessage.value = "Yeni sürüm bulundu: v${info.tagName}"
-            } else {
-                _updateStatusMessage.value = "Dakk güncel (v${GitHubUpdateManager.CURRENT_VERSION})"
-            }
-        }
-    }
-
-    fun checkGitHubUpdatesOnLaunch() {
-        updateManager.checkForUpdate { hasUpdate, info, _ ->
-            if (hasUpdate && info != null) {
-                _updateInfo.value = info
-                _showUpdateDialog.value = true
-            }
-        }
+    fun showUpdateDialog() {
+        if (_update.value.release != null) _update.update { it.copy(showDialog = true) }
     }
 
     fun dismissUpdateDialog() {
-        _showUpdateDialog.value = false
+        if (!_update.value.downloading) _update.update { it.copy(showDialog = false) }
     }
 
-    fun downloadAndInstallUpdate() {
-        val info = _updateInfo.value ?: return
-        val apkUrl = info.apkDownloadUrl ?: return
-        _isDownloading.value = true
-        _downloadProgress.value = 0
-
-        updateManager.downloadAndPromptInstall(
-            downloadUrl = apkUrl,
-            onProgress = { progress ->
-                _downloadProgress.value = progress
-            },
-            onComplete = {
-                _isDownloading.value = false
-                _showUpdateDialog.value = false
-            },
-            onError = { errorMsg ->
-                _isDownloading.value = false
-                _updateStatusMessage.value = errorMsg
+    fun startUpdate() {
+        val release = _update.value.release ?: return
+        if (_update.value.downloading) return
+        _update.update { it.copy(downloading = true, progress = 0) }
+        viewModelScope.launch {
+            try {
+                val apk = updater.download(release) { p -> _update.update { it.copy(progress = p) } }
+                _update.update { it.copy(downloading = false, progress = 100, showDialog = false) }
+                if (updater.canInstallPackages()) {
+                    updater.install(apk)
+                } else {
+                    pendingApk = apk
+                    _events.tryEmit("Güncellemeyi yüklemek için Dakk'a izin verin, ardından geri dönün.")
+                    updater.openInstallPermissionSettings()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Güncelleme indirilemedi", e)
+                _update.update { it.copy(downloading = false, statusMessage = "İndirme başarısız oldu. Tekrar deneyin.") }
+                _events.tryEmit("Güncelleme indirilemedi. İnternet bağlantınızı kontrol edin.")
             }
-        )
+        }
+    }
+
+    // ------------------------------------------------------------------ Yardımcılar
+
+    private fun peerOf(doc: ChatDoc, myUid: String): String? =
+        doc.memberUids.firstOrNull { it != myUid } ?: doc.memberUids.firstOrNull()
+
+    private fun buildChatSummaries(
+        docs: List<ChatDoc>,
+        profiles: Map<String, UserProfile>,
+        contacts: List<Contact>,
+        reads: Map<String, Long>,
+        clears: Map<String, Long>
+    ): List<ChatSummary> {
+        val myUid = sessionUid ?: return emptyList()
+        val blocked = contacts.filter { it.isBlocked }.map { it.uid }.toSet()
+        return docs.mapNotNull { doc ->
+            val peerUid = peerOf(doc, myUid) ?: return@mapNotNull null
+            if (peerUid in blocked) return@mapNotNull null
+            if (doc.lastMessage.isBlank() && doc.lastMessageTime == 0L) return@mapNotNull null
+            if (doc.lastMessageTime <= (clears[doc.chatId] ?: 0L)) return@mapNotNull null
+            val profile = profiles[peerUid]
+            val contact = contacts.firstOrNull { it.uid == peerUid }
+            val fromMe = doc.lastMessageSenderId == myUid
+            ChatSummary(
+                chatId = doc.chatId,
+                peerUid = peerUid,
+                peerName = profile?.displayName?.ifBlank { null } ?: contact?.alias?.ifBlank { null } ?: "Dakk Kullanıcısı",
+                peerPhotoUrl = profile?.photoUrl?.ifBlank { null } ?: contact?.photoUrl.orEmpty(),
+                preview = crypto.decryptMessage(doc.lastMessage, doc.lastMessageSenderKey, doc.lastMessageRecipientKey)
+                    ?: "🔒 Şifreli mesaj",
+                lastMessageTime = doc.lastMessageTime,
+                lastFromMe = fromMe,
+                isUnread = !fromMe && doc.lastMessageTime > (reads[doc.chatId] ?: 0L)
+            )
+        }.sortedByDescending { it.lastMessageTime }
+    }
+
+    private fun handleNotifications(docs: List<ChatDoc>, myUid: String) {
+        val editor = prefs.edit()
+        val blocked = _rawContacts.value.filter { it.isBlocked }.map { it.uid }.toSet()
+        docs.forEach { doc ->
+            if (doc.lastMessageSenderId.isBlank() || doc.lastMessageSenderId == myUid) return@forEach
+            val key = PREFIX_NOTIFIED + doc.chatId
+            val last = prefs.getLong(key, -1L)
+            if (doc.lastMessageTime <= last) return@forEach
+            editor.putLong(key, doc.lastMessageTime)
+            if (!notificationsPrimed) return@forEach
+
+            val peerUid = peerOf(doc, myUid) ?: return@forEach
+            if (peerUid in blocked) return@forEach
+            val viewing = isForeground && (_screen.value as? Screen.Chat)?.peerUid == peerUid
+            if (viewing) return@forEach
+
+            viewModelScope.launch {
+                val text = withContext(Dispatchers.Default) {
+                    crypto.decryptMessage(doc.lastMessage, doc.lastMessageSenderKey, doc.lastMessageRecipientKey)
+                } ?: "Yeni şifreli mesaj"
+                val name = _profiles.value[peerUid]?.displayName?.ifBlank { null } ?: "Dakk"
+                notifications.showMessage(peerUid, name, text)
+            }
+        }
+        editor.apply()
+        notificationsPrimed = true
+    }
+
+    private fun loadMarks(prefix: String): Map<String, Long> =
+        prefs.all.entries
+            .filter { it.key.startsWith(prefix) }
+            .mapNotNull { e -> (e.value as? Long)?.let { e.key.removePrefix(prefix) to it } }
+            .toMap()
+
+    private fun previewOf(text: String): String {
+        val single = text.replace('\n', ' ')
+        return if (single.length > 100) single.take(100) + "…" else single
+    }
+
+    companion object {
+        private const val TAG = "DakkViewModel"
+        private const val PREF_AUTO_UPDATE = "auto_update"
+        private const val PREF_NAME_PREFIX = "display_name_"
+        private const val PREFIX_READ = "read_"
+        private const val PREFIX_CLEARED = "cleared_"
+        private const val PREFIX_NOTIFIED = "notified_"
+        const val MAX_MESSAGE_BYTES = 3_500
+        const val MAX_MESSAGE_CHARS = 2_000
     }
 }

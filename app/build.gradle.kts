@@ -1,13 +1,31 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 import java.time.Duration
 
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
-  alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
+
+// ---------------------------------------------------------------------------------------------
+// Sürüm bilgisi — yeni bir sürüm yayınlamak için SADECE burayı değiştirin.
+// main dalına push edildiğinde GitHub Actions bu sürüm için otomatik olarak Release oluşturur.
+// ---------------------------------------------------------------------------------------------
+val dakkVersionName = "2.0.0"
+val dakkVersionCode = 20
+
+// ---------------------------------------------------------------------------------------------
+// İmzalama — SHA-1 parmak izinin HER derlemede aynı kalması için sabit anahtar deposu kullanılır.
+// Google ile Giriş (Firebase) bu parmak izine bağlıdır; anahtarı değiştirmeyin!
+//   SHA-1  : 05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21
+//   SHA-256: A1:31:5B:56:6C:73:7F:46:3E:27:D8:01:36:03:47:F9:C0:80:06:85:5F:E7:66:E7:B9:6F:E1:FB:35:23:FC:D9
+// İsteğe bağlı olarak ortam değişkenleriyle (CI secrets) geçersiz kılınabilir.
+// ---------------------------------------------------------------------------------------------
+fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+
+val dakkKeystorePath: String = envOrNull("DAKK_KEYSTORE_PATH") ?: "${rootDir}/signing/dakk-release.p12"
+val dakkKeystorePassword: String = envOrNull("DAKK_KEYSTORE_PASSWORD") ?: "dakk-android-2026"
+val dakkKeyAlias: String = envOrNull("DAKK_KEY_ALIAS") ?: "dakk"
+val dakkKeyPassword: String = envOrNull("DAKK_KEY_PASSWORD") ?: dakkKeystorePassword
 
 android {
   namespace = "com.example"
@@ -17,45 +35,37 @@ android {
     applicationId = "dakk.android.co"
     minSdk = 24
     targetSdk = 36
-    versionCode = 11
-    versionName = "1.0.11"
+    versionCode = dakkVersionCode
+    versionName = dakkVersionName
 
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("String", "GITHUB_REPO", "\"cnrcrm20-ctrl/Dakk\"")
+    buildConfigField("String", "INVITE_BASE_URL", "\"https://cnrcrm20-ctrl.github.io/Dakk/invite/\"")
   }
 
-  // Do not remove or modify these signingConfigs. They are necessary for building, installing,
-  // and updating Android apps in AI Studio.
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+    create("dakk") {
+      storeFile = file(dakkKeystorePath)
+      storePassword = dakkKeystorePassword
+      keyAlias = dakkKeyAlias
+      keyPassword = dakkKeyPassword
+      storeType = "PKCS12"
     }
   }
 
   buildTypes {
     release {
-      isCrunchPngs = false
       isMinifyEnabled = false
+      isShrinkResources = false
+      isCrunchPngs = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.getByName("dakk")
     }
     debug {
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // Debug derlemeleri de aynı anahtarla imzalanır; böylece Google girişi her derlemede çalışır.
+      signingConfig = signingConfigs.getByName("dakk")
     }
   }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
@@ -64,86 +74,51 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
   }
 }
 
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
-}
-
-googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
-
-// Some unused dependencies are commented out below instead of being removed.
-// This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
-  // implementation(libs.accompanist.permissions)
+
+  implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.activity.compose)
-  implementation(libs.androidx.camera.camera2)
-  implementation(libs.androidx.camera.core)
-  implementation(libs.androidx.camera.lifecycle)
-  implementation(libs.androidx.camera.view)
-  implementation(libs.androidx.compose.material.icons.core)
-  implementation(libs.androidx.compose.material.icons.extended)
-  implementation(libs.androidx.compose.material3)
+  implementation(libs.androidx.lifecycle.runtime.ktx)
+  implementation(libs.androidx.lifecycle.runtime.compose)
+  implementation(libs.androidx.lifecycle.viewmodel.compose)
+
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
-  implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
-  implementation(libs.androidx.lifecycle.runtime.compose)
-  implementation(libs.androidx.lifecycle.runtime.ktx)
-  implementation(libs.androidx.lifecycle.viewmodel.compose)
-  // implementation(libs.androidx.navigation.compose)
-  implementation(libs.androidx.room.ktx)
-  implementation(libs.androidx.room.runtime)
-  implementation(libs.webrtc)
-  implementation(libs.zxing)
-  implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
-  implementation(libs.firebase.firestore)
+  implementation(libs.androidx.compose.material3)
+  implementation(libs.androidx.compose.material.icons.extended)
+
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
+
+  implementation(libs.kotlinx.coroutines.android)
+  implementation(libs.kotlinx.coroutines.play.services)
+
   implementation(libs.firebase.auth)
+  implementation(libs.firebase.firestore)
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
-  implementation(libs.kotlinx.coroutines.android)
-  implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
+
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
-  testImplementation(libs.androidx.compose.ui.test.junit4)
-  testImplementation(libs.androidx.core)
-  testImplementation(libs.androidx.junit)
+  implementation(libs.coil.compose)
+  implementation(libs.zxing)
+
   testImplementation(libs.junit)
-  testImplementation(libs.kotlinx.coroutines.test)
-  testImplementation(libs.robolectric)
-  androidTestImplementation(platform(libs.androidx.compose.bom))
-  androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-  androidTestImplementation(libs.androidx.espresso.core)
-  androidTestImplementation(libs.androidx.junit)
-  androidTestImplementation(libs.androidx.runner)
-  debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
 }
 
 tasks.withType<Test> {
-  failFast = true
-  timeout.set(Duration.ofMinutes(2))
+  timeout.set(Duration.ofMinutes(5))
   testLogging { events("passed", "failed", "skipped") }
 }

@@ -1,10 +1,15 @@
-name: Dakk Android CI & Release
+name: Android CI & Release
 
+# - Pull request: derler, testleri çalıştırır, imzayı doğrular.
+# - main'e push: aynı adımlar + app/build.gradle.kts içindeki sürüm için henüz Release yoksa
+#   otomatik olarak GitHub Release oluşturur ve imzalı APK'yı yükler.
 on:
   push:
     branches: [ "main" ]
-    tags:
-      - 'v*'
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -12,60 +17,134 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Sabit imza anahtarının beklenen SHA-1 parmak izi (Firebase'e kayıtlı olan değer).
+  EXPECTED_SHA1: "05:8B:B2:98:2B:5C:20:CD:F5:CD:29:FC:68:3D:4C:CB:C4:A1:56:21"
+
 jobs:
   build:
+    name: Derle, test et ve yayınla
     runs-on: ubuntu-latest
+    env:
+      DAKK_KEYSTORE_BASE64: ${{ secrets.DAKK_KEYSTORE_BASE64 }}
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Kodu al
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      - name: JDK 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x ./gradlew
+      - name: Gradle kur
+        uses: gradle/actions/setup-gradle@v4
 
-    - name: Generate Debug Keystore
-      run: |
-        if [ ! -f debug.keystore ]; then
-          keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-        fi
+      - name: Sürümü oku
+        id: version
+        run: |
+          NAME=$(grep -E '^val dakkVersionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          CODE=$(grep -E '^val dakkVersionCode' app/build.gradle.kts | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          if [ -z "$NAME" ] || [ -z "$CODE" ]; then echo "Sürüm okunamadı" >&2; exit 1; fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NAME" >> "$GITHUB_OUTPUT"
+          echo "Sürüm: $NAME ($CODE)"
 
-    - name: Run Unit Tests
-      run: ./gradlew testDebugUnitTest
+      - name: İmza anahtarını secrets'tan yükle (isteğe bağlı)
+        if: env.DAKK_KEYSTORE_BASE64 != ''
+        env:
+          DAKK_KEYSTORE_PASSWORD: ${{ secrets.DAKK_KEYSTORE_PASSWORD }}
+          DAKK_KEY_ALIAS: ${{ secrets.DAKK_KEY_ALIAS }}
+          DAKK_KEY_PASSWORD: ${{ secrets.DAKK_KEY_PASSWORD }}
+        run: |
+          echo "$DAKK_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/dakk-release.p12"
+          echo "DAKK_KEYSTORE_PATH=$RUNNER_TEMP/dakk-release.p12" >> "$GITHUB_ENV"
+          [ -n "$DAKK_KEYSTORE_PASSWORD" ] && echo "DAKK_KEYSTORE_PASSWORD=$DAKK_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          [ -n "$DAKK_KEY_ALIAS" ] && echo "DAKK_KEY_ALIAS=$DAKK_KEY_ALIAS" >> "$GITHUB_ENV"
+          [ -n "$DAKK_KEY_PASSWORD" ] && echo "DAKK_KEY_PASSWORD=$DAKK_KEY_PASSWORD" >> "$GITHUB_ENV"
+          true
 
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
+      - name: Birim testleri
+        run: ./gradlew --no-daemon testDebugUnitTest
 
-    - name: Prepare Release APK Name
-      run: |
-        TAG_NAME="${{ github.ref_name }}"
-        if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "main" ]; then
-          TAG_NAME="v1.0.11"
-        fi
-        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dakk-${TAG_NAME}.apk
-        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dakk.apk
+      - name: Release APK derle
+        run: ./gradlew --no-daemon assembleRelease
 
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: dakk-apk
-        path: app/build/outputs/apk/debug/Dakk*.apk
+      - name: APK imzasını doğrula (SHA-1 sabit mi?)
+        id: apk
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)
+          CERTS=$("$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$APK")
+          echo "$CERTS"
+          SHA1=$(echo "$CERTS" | grep -m1 'SHA-1 digest' | awk '{print $NF}' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          SHA256=$(echo "$CERTS" | grep -m1 'SHA-256 digest' | awk '{print $NF}' | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          echo "SHA-1  : $SHA1"
+          echo "SHA-256: $SHA256"
+          if [ "$SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "::error::İmza SHA-1 değeri beklenenden farklı! ($SHA1) Google ile Giriş çalışmaz."
+            exit 1
+          fi
+          OUT="Dakk-${{ steps.version.outputs.tag }}.apk"
+          cp "$APK" "$OUT"
+          echo "file=$OUT" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$OUT" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Dakk ${{ steps.version.outputs.tag }} (${{ steps.version.outputs.code }})"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| İmza SHA-1 | \`$SHA1\` |"
+            echo "| İmza SHA-256 | \`$SHA256\` |"
+            echo "| APK SHA-256 | \`$(sha256sum "$OUT" | awk '{print $1}')\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          app/build/outputs/apk/debug/Dakk-${{ github.ref_name }}.apk
-          app/build/outputs/apk/debug/Dakk.apk
-        name: Dakk Release ${{ github.ref_name }}
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: APK'yı artifact olarak yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dakk-${{ steps.version.outputs.tag }}
+          path: ${{ steps.apk.outputs.file }}
+          if-no-files-found: error
+
+      - name: GitHub Release oluştur
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.name }}
+          APK_FILE: ${{ steps.apk.outputs.file }}
+          APK_SHA256: ${{ steps.apk.outputs.sha256 }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG zaten yayınlanmış; yeni Release oluşturulmadı. (Yeni sürüm için app/build.gradle.kts içindeki sürümü artırın.)"
+            exit 0
+          fi
+          # CHANGELOG.md içinden bu sürümün notlarını al
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md || true
+          if [ ! -s notes.md ]; then echo "Dakk $TAG" > notes.md; fi
+          {
+            echo ""
+            echo "---"
+            echo "### Kurulum"
+            echo "1. Aşağıdaki **$APK_FILE** dosyasını indirin ve açın."
+            echo "2. İstenirse \"Bilinmeyen kaynaklardan yükleme\" iznini verin."
+            echo ""
+            echo "Uygulama içinden otomatik güncelleme desteklenir."
+            echo ""
+            echo "APK SHA-256: \`$APK_SHA256\`"
+          } >> notes.md
+          gh release create "$TAG" "$APK_FILE" \
+            --title "Dakk $TAG" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA" \
+            --latest
