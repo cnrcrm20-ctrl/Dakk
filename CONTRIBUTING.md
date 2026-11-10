@@ -1,7 +1,7 @@
 # Katkıda Bulunma
 
-Dakk'a katkı yapmak istediğin için teşekkürler! Başlamadan önce [brain.md](brain.md) dosyasını oku;
-projenin mimarisi ve bozulmaması gereken kurallar orada.
+Dakk'a katkı yapmak istediğin için teşekkürler! Başlamadan önce [README](README.md) içindeki mimari
+bölümüne göz at. İmza, sürüm yayınlama veya güvenlik kurallarına dokunan değişiklikler için önce bir issue aç.
 
 ## Hata bildirmek / öneri sunmak
 

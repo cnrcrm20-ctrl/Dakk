@@ -22,3 +22,6 @@ local.properties
 public/assets/
 *-debug.log
 debug.keystore*
+
+# Bakımcı notları (yalnızca yerelde)
+brain.md

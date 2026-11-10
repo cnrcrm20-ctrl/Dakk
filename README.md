@@ -122,10 +122,8 @@ app/src/main/java/com/example/
 cloud/
 ├── admin_panel.json   Kurucu panelinin tanımı (uygulama bu dosyayı çizer)
 └── worker/            Dakk sunucusu: bildirimler + özel API vekili (Cloudflare Worker)
-firestore.rules        Firestore güvenlik kuralları (kurucu listesi burada)
+firestore.rules        Firestore güvenlik kuralları
 ```
-
-Proje hafızası ve kararların tamamı için [brain.md](brain.md) dosyasına bak.
 
 ### Derleme
 

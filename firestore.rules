@@ -10,12 +10,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Kurucular: Kurucu panelini ve uygulama ayarlarını yalnızca bu doğrulanmış Google hesapları yönetebilir.
-    // Kurucu listesi uygulama kodunda DEĞİL, yalnızca burada tutulur.
+    // Kurucular: Kurucu panelini ve uygulama ayarlarını yalnızca doğrulanmış kurucu Google hesapları yönetebilir.
+    // Gerçek liste yalnızca Firebase'de yayınlanan kurallarda tutulur; depodaki kopyada örnek adresler vardır.
     function isFounder() {
       return isSignedIn() &&
              request.auth.token.email_verified == true &&
-             request.auth.token.email in ['thecukulataa@gmail.com', 'cnrcrm20@gmail.com'];
+             request.auth.token.email in ['kurucu1@example.com', 'kurucu2@example.com'];
     }
 
     function isChatMember(chatId) {
