@@ -29,7 +29,9 @@ const worker = {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "");
     if (request.method === "GET") {
-      return json({ ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() });
+      const info = { ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() };
+      if (info.configured && url.searchParams.get("check") === "deep") info.checks = await deepCheck(env);
+      return json(info);
     }
     if (request.method !== "POST") return json({ error: "Yöntem desteklenmiyor" }, 405);
 
@@ -49,6 +51,28 @@ const worker = {
 };
 
 export default worker;
+
+/** Sunucunun Google'a, Firestore'a ve FCM'e erişebildiğini doğrular. Gizli bilgi döndürmez. */
+async function deepCheck(env) {
+  const out = { google: false, firestore: false, fcm: "unknown" };
+  try {
+    const sa = serviceAccount(env);
+    const ctx = { env, sa, uid: null, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
+    await getAccessToken(sa);
+    out.google = true;
+    await getDoc(ctx, "app_config/public");
+    out.firestore = true;
+    const res = await googleFetch(ctx, `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
+      method: "POST",
+      body: JSON.stringify({ validate_only: true, message: { token: "dakk-health-check", data: { type: "ping" } } }),
+    });
+    // 400 = API açık ve yetki var (sahte jeton reddedildi); 403/401 = API kapalı veya yetki yok.
+    out.fcm = res.status === 400 || res.ok ? "ok" : `http_${res.status}`;
+  } catch (e) {
+    out.error = String((e && e.message) || e).slice(0, 160);
+  }
+  return out;
+}
 
 function isConfigured(env) {
   try {
