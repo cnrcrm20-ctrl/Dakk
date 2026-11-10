@@ -223,6 +223,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingChatUid: String? = null
     private var pendingApk: File? = null
     private var pushTokenRegistered = false
+    private var serverReady = false
+    private var checkedServerUrl: String? = null
     private val decryptCache = HashMap<String, String?>()
 
     private val authListener = FirebaseAuth.AuthStateListener { a -> onAuthChanged(a.currentUser) }
@@ -280,6 +282,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 configRepo.observePublic().retrying("Ayarlar", uid).collect { cfg ->
                     _config.value = cfg
                     updatePushActive()
+                    if (cfg.serverUrl != checkedServerUrl) {
+                        checkedServerUrl = cfg.serverUrl
+                        launch {
+                            serverReady = cfg.hasServer && push.isServerReady(cfg.serverUrl)
+                            updatePushActive()
+                        }
+                    }
                     if (cfg.requiresUpdate(appVersion) && _update.value.release == null) checkForUpdates(manual = false)
                 }
             }
@@ -321,6 +330,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _isFounder.value = false
         privateConfig = null
         pushTokenRegistered = false
+        serverReady = false
+        checkedServerUrl = null
         updatePushActive()
         _uploads.value = emptyMap()
         _imageStates.value = emptyMap()
@@ -330,7 +341,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun updatePushActive() {
-        AppState.pushActive = pushTokenRegistered && _config.value.hasServer
+        AppState.pushActive = pushTokenRegistered && _config.value.hasServer && serverReady
     }
 
     /** Kurucu yetkisini Firestore kurallarına sorar (yalnızca kurucular app_config/private okuyabilir). */

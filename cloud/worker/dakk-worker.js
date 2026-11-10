@@ -1,23 +1,15 @@
 /**
- * Dakk sunucusu — Cloudflare Worker (ücretsiz plan yeterlidir).
+ * Dakk sunucusu.
  *
- * Görevleri:
- *   POST /notify     Uygulama kapalıyken mesaj bildirimi (Firebase Cloud Messaging).
+ *   POST /notify     Uygulama kapalıyken mesaj bildirimi.
  *   POST /assistant  Kurucu panelinde "Özel API" seçildiyse OpenAI uyumlu uç noktaya vekillik.
  *
  * Güvenlik:
- *   - Her istek, Firebase Authentication kimlik jetonu (ID token) ile doğrulanır.
- *   - /notify yalnızca isteği yapan kişinin GERÇEKTEN gönderdiği bir mesaj için, o sohbetin
- *     diğer üyesine bildirim gönderir. Mesaj içeriği şifreli olarak iletilir; sunucu okuyamaz.
+ *   - Her istek Firebase kimlik jetonuyla doğrulanır.
+ *   - /notify yalnızca isteği yapan kişinin gerçekten gönderdiği bir mesaj için, sohbetin diğer üyesine
+ *     bildirim gönderir. İçerik şifreli iletilir; sunucu okuyamaz.
  *   - Alıcı göndereni engellediyse bildirim gönderilmez.
- *   - Özel API anahtarı yalnızca Firestore'daki app_config/private belgesindedir; uygulamalara gitmez.
- *
- * Gerekli ayarlar (Worker › Settings › Variables and Secrets):
- *   FIREBASE_SERVICE_ACCOUNT  (Secret)  Firebase Console › Proje ayarları › Hizmet hesapları ›
- *                                       "Yeni özel anahtar oluştur" ile indirilen JSON dosyasının TAMAMI.
- *   FIRESTORE_DATABASE_ID     (Text, isteğe bağlı) Varsayılan aşağıda.
- *
- * Kurulum adımları: cloud/worker/README.md
+ *   - Özel API anahtarı uygulamalara gitmez.
  */
 
 const DEFAULT_DATABASE_ID = "ai-studio-android-e2d067e8-8aba-4fce-a486-b836129f76c1";
@@ -35,7 +27,6 @@ const notifiedMessages = new Map();
 const worker = {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // Cloudflare'de yol "/notify", Supabase'de "/dakk/notify" olur; ikisi de desteklenir.
     const path = url.pathname.replace(/\/+$/, "");
     if (request.method === "GET") {
       return json({ ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() });

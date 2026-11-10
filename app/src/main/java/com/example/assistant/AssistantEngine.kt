@@ -35,7 +35,7 @@ class AssistantException(message: String, cause: Throwable? = null) : Exception(
  *
  * Varsayılan: Firebase AI Logic üzerinden Gemini (ücretsiz katman, uygulamada API anahtarı yok).
  * Kurucu panelinden "özel API" seçilirse OpenAI uyumlu bir uç nokta kullanılır; anahtar uygulamaya
- * hiç gelmez, istek Dakk sunucusu (Cloudflare Worker) üzerinden geçer. Kurucular kendi cihazlarında
+ * hiç gelmez, istek Dakk sunucusu üzerinden geçer. Kurucular kendi cihazlarında
  * private ayarları okuyabildikleri için uç noktayı doğrudan çağırabilir.
  */
 class AssistantEngine(context: Context) {

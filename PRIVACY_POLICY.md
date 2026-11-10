@@ -1,6 +1,6 @@
 # Dakk Gizlilik Politikası
 
-**Son güncelleme:** 8 Kasım 2026 • **Geçerli sürüm:** Dakk 2.1 ve sonrası
+**Son güncelleme:** 10 Kasım 2026 • **Geçerli sürüm:** Dakk 2.1 ve sonrası
 
 Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları [GitHub deposunda](https://github.com/cnrcrm20-ctrl/Dakk) doğrulayabilirsin.
 
@@ -94,11 +94,11 @@ Dakk Asistan isteğe bağlıdır ve ilk kullanımda seni uyarır.
   - AI Logic
 
   Google'ın gizlilik politikası: <https://policies.google.com/privacy>
-- **Cloudflare Workers** — Dakk sunucusu burada çalışır. Görevleri:
+- **Supabase** — Dakk sunucusu burada (Avrupa Birliği, Frankfurt) çalışır. Görevleri:
   - uygulama kapalıyken bildirim iletmek,
   - yöneticiler özel bir yapay zekâ hizmeti seçtiyse asistan isteklerini o hizmete aktarmak.
 
-  Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir. Cloudflare'in gizlilik politikası: <https://www.cloudflare.com/privacypolicy/>
+  Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir ve hiçbir veriyi kalıcı olarak saklamaz. Supabase'in gizlilik politikası: <https://supabase.com/privacy>
 - **GitHub** — güncelleme denetimi için GitHub Releases'a anonim bir istek gönderilir ve APK buradan indirilir. GitHub'ın gizlilik politikası: <https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement>
 
 ## Verilerini silmek

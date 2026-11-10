@@ -19,7 +19,7 @@ data class PublicConfig(
     val forceUpdateMessage: String = "",
     val maintenanceEnabled: Boolean = false,
     val maintenanceMessage: String = "",
-    val serverUrl: String = "",
+    val serverUrl: String = DEFAULT_SERVER_URL,
     val announcement: Announcement? = null
 ) {
     /** Bu sürüm artık desteklenmiyorsa true (zorunlu güncelleme). */
@@ -32,6 +32,9 @@ data class PublicConfig(
         const val PROVIDER_GEMINI = "gemini"
         const val PROVIDER_CUSTOM = "custom"
         const val DEFAULT_MODEL = "gemini-2.5-flash"
+
+        /** Varsayılan Dakk sunucusu. Kurucu panelindeki adres boşsa bu kullanılır. */
+        const val DEFAULT_SERVER_URL = "https://hkpmrbahktbujdjpnwwb.supabase.co/functions/v1/dakk"
 
         fun fromMap(data: Map<String, Any?>?): PublicConfig {
             if (data == null) return PublicConfig()
@@ -47,7 +50,7 @@ data class PublicConfig(
                 forceUpdateMessage = data.str("force_update_message") ?: "",
                 maintenanceEnabled = data.bool("maintenance_enabled") ?: false,
                 maintenanceMessage = data.str("maintenance_message") ?: "",
-                serverUrl = data.str("server_url")?.trim()?.trimEnd('/') ?: "",
+                serverUrl = data.str("server_url")?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: DEFAULT_SERVER_URL,
                 announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) }
             )
         }

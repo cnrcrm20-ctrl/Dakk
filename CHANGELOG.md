@@ -2,6 +2,16 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.2.0] - 2026-11-10
+
+### Yeni
+- **Uygulama kapalıyken bildirim:** Artık Dakk tamamen kapalıyken de yeni mesaj bildirimi geliyor.
+  Bildirimde gönderenin adı ve mesaj görünüyor; mesaj yine yalnızca senin telefonunda çözülüyor.
+
+### İyileştirildi
+- Bildirim sunucusuna ulaşılamadığında Dakk, uygulama arka plandayken bildirim göstermeye devam ediyor.
+- Gizlilik politikası ve güvenlik sayfası sadeleştirildi.
+
 ## [2.1.0] - 2026-11-08
 
 ### Yeni

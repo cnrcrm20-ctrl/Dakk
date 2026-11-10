@@ -61,9 +61,9 @@
     },
     {
       "title": "Dakk sunucusu",
-      "description": "Uygulama kapalıyken mesaj bildirimleri ve özel API için gereken ücretsiz Cloudflare Worker. Kurulum: depodaki cloud/worker/README.md",
+      "description": "Uygulama kapalıyken mesaj bildirimleri ve özel API bu sunucu üzerinden çalışır.",
       "fields": [
-        { "key": "server_url", "doc": "public", "type": "url", "label": "Sunucu adresi", "placeholder": "https://dakk-push.kullaniciadi.workers.dev", "help": "Boş bırakılırsa bildirimler yalnızca uygulama açıkken çalışır." }
+        { "key": "server_url", "doc": "public", "type": "url", "label": "Sunucu adresi", "placeholder": "Boş bırak: varsayılan Dakk sunucusu", "help": "Boş bırakırsan uygulamadaki varsayılan Dakk sunucusu kullanılır. Yalnızca başka bir sunucuya geçmek için doldur." }
       ]
     },
     {
