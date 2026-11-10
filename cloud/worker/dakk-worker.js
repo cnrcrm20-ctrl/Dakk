@@ -32,11 +32,13 @@ let accessTokenCache = { token: null, expires: 0 };
 let configCache = { pub: null, priv: null, expires: 0 };
 const notifiedMessages = new Map();
 
-export default {
+const worker = {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/") {
-      return json({ ok: true, service: "dakk", time: new Date().toISOString() });
+    // Cloudflare'de yol "/notify", Supabase'de "/dakk/notify" olur; ikisi de desteklenir.
+    const path = url.pathname.replace(/\/+$/, "");
+    if (request.method === "GET") {
+      return json({ ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() });
     }
     if (request.method !== "POST") return json({ error: "Yöntem desteklenmiyor" }, 405);
 
@@ -44,8 +46,8 @@ export default {
       const sa = serviceAccount(env);
       const uid = await verifyIdToken(request, sa.project_id);
       const ctx = { env, sa, uid, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
-      if (url.pathname === "/notify") return await handleNotify(request, ctx);
-      if (url.pathname === "/assistant") return await handleAssistant(request, ctx);
+      if (path.endsWith("/notify")) return await handleNotify(request, ctx);
+      if (path.endsWith("/assistant")) return await handleAssistant(request, ctx);
       return json({ error: "Bulunamadı" }, 404);
     } catch (e) {
       const status = e.status || 500;
@@ -54,6 +56,17 @@ export default {
     }
   },
 };
+
+export default worker;
+
+function isConfigured(env) {
+  try {
+    const sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT || "{}");
+    return Boolean(sa.client_email && sa.private_key && sa.project_id);
+  } catch (_) {
+    return false;
+  }
+}
 
 // ------------------------------------------------------------------------------------------------
 // /notify
