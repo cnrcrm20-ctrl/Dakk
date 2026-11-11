@@ -1,6 +1,6 @@
 # Dakk Gizlilik Politikası
 
-**Son güncelleme:** 10 Kasım 2026 • **Geçerli sürüm:** Dakk 2.1 ve sonrası
+**Son güncelleme:** 11 Kasım 2026 • **Geçerli sürüm:** Dakk 2.1 ve sonrası
 
 Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları [GitHub deposunda](https://github.com/cnrcrm20-ctrl/Dakk) doğrulayabilirsin.
 
@@ -26,13 +26,15 @@ Cihazın bir anahtar çifti üretir:
 - **Özel anahtar** cihazından hiç çıkmaz ve Android Keystore ile korunur.
 
 ### 3. Mesajlar
-- Mesaj içeriği ve sohbet listesinde görünen son mesaj önizlemesi **uçtan uca şifreli** olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.
+- Mesaj içeriği, sohbet listesinde görünen son mesaj önizlemesi, mesajlara bırakılan **tepkiler** ve yanıtlarda görünen **alıntı** metni **uçtan uca şifreli** olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.
 - Mesajın iletilebilmesi için bazı bilgiler **şifrelenmeden** saklanır:
   - gönderen ve alıcı kimliği,
   - gönderim zamanı,
   - iletim ve okundu durumu,
   - gönderenin görünen adı,
-  - mesaj türü (yazı veya fotoğraf).
+  - mesaj türü (yazı, fotoğraf veya "ekran görüntüsü aldı" bilgisi),
+  - bir mesaja kimin tepki bıraktığı (hangi tepki olduğu değil) ve yanıtlanan mesajın kimliği.
+- Bir sohbette ekran görüntüsü aldığında (Android 14 ve üzeri) karşı tarafa sohbet içinde "ekran görüntüsü aldı" bilgisi gönderilir. Ekran görüntüsünün kendisi hiçbir yere gönderilmez.
 
 ### 4. Fotoğraflar
 - Gönderdiğin fotoğraf önce telefonunda küçültülür, sonra **uçtan uca şifrelenir**.
@@ -82,7 +84,8 @@ Dakk Asistan isteğe bağlıdır ve ilk kullanımda seni uyarır.
 | Kamera | Yalnızca QR kod tararken. Görüntü kaydedilmez veya gönderilmez. |
 | Fotoğraf seçici | Yalnızca gönderdiğin fotoğrafı seçerken. Galerinin geri kalanına erişilmez. |
 | Depolama (yalnızca Android 9 ve öncesi) | Bir fotoğrafı galeriye kaydetmek istediğinde |
-| Bildirimler | Yeni mesajları haber vermek |
+| Bildirimler | Yeni mesajları haber vermek; bildirimden yanıt, "Görüldü" ve ❤️ |
+| Ekran görüntüsü algılama (Android 14+) | Sohbette ekran görüntüsü alındığını karşı tarafa bildirmek. Görüntüye erişilmez. |
 | Uygulama yükleme | Uygulama içi güncellemeyi kurmak (yalnızca sen onaylarsan) |
 
 ## Üçüncü taraf hizmetler

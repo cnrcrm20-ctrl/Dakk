@@ -1,5 +1,6 @@
 package com.example.push
 
+import android.content.Context
 import android.util.Log
 import com.example.data.FirestoreRepository
 import com.google.firebase.Firebase
@@ -23,6 +24,18 @@ object AppState {
     /** Sunucu üzerinden anlık bildirim alınabiliyorsa true; bu durumda arka plandaki yerel bildirimler kapatılır. */
     @Volatile
     var pushActive: Boolean = false
+
+    private const val PREFS = "dakk_push"
+    private const val KEY_SERVER = "server_url"
+
+    /** Hazır olduğu doğrulanan sunucu adresini saklar (bildirimden yanıt verirken kullanılır). */
+    fun rememberServer(context: Context, serverUrl: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(KEY_SERVER, "") != serverUrl) prefs.edit().putString(KEY_SERVER, serverUrl).apply()
+    }
+
+    fun rememberedServer(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SERVER, "").orEmpty()
 }
 
 /**

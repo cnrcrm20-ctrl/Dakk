@@ -59,10 +59,24 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() <= 60 &&
              data.content is string && data.content.size() <= 5000 &&
              data.deliveryStatus is string && (data.deliveryStatus in ['SENT', 'DELIVERED', 'READ']) &&
-             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE']) &&
+             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE', 'SCREENSHOT']) &&
              (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 2000)) &&
              (!('isAssistant' in data) || data.isAssistant is bool) &&
+             (!('replyTo' in data) || (data.replyTo is string && data.replyTo.size() <= 64)) &&
+             (!('replyToSender' in data) || (data.replyToSender is string && data.replyToSender.size() <= 128)) &&
+             (!('replyPreview' in data) || (data.replyPreview is string && data.replyPreview.size() <= 1000)) &&
+             !('reactions' in data) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isOwnReactionChange() {
+      let before = resource.data.get('reactions', {});
+      let after = request.resource.data.get('reactions', {});
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
+             after is map && after.size() <= 50 &&
+             after.diff(before).affectedKeys().hasOnly([request.auth.uid]) &&
+             (!(request.auth.uid in after) ||
+              (after[request.auth.uid] is string && after[request.auth.uid].size() <= 300));
     }
 
     function isValidBlob(data) {
@@ -101,7 +115,9 @@ service cloud.firestore {
                          isValidChatMessage(request.resource.data);
         allow update: if isSignedIn() &&
                          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids &&
-                         (resource.data.senderId == request.auth.uid || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deliveryStatus']));
+                         (resource.data.senderId == request.auth.uid ||
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deliveryStatus']) ||
+                          isOwnReactionChange());
         allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
       }
 

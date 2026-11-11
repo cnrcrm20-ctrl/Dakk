@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.app.Activity.ScreenCaptureCallback
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -91,6 +92,34 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIntent(intent)
+    }
+
+    /**
+     * Android 14 ve üzerinde, sohbet açıkken alınan ekran görüntüsünü sistem bildirir.
+     * Ekran görüntüsü engellenmez; karşı tarafa sohbet içinde küçük bir not düşülür.
+     */
+    private val screenCaptureCallback: Any? by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ScreenCaptureCallback { viewModel.onScreenCaptured() }
+        } else null
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            (screenCaptureCallback as? ScreenCaptureCallback)?.let {
+                runCatching { registerScreenCaptureCallback(mainExecutor, it) }
+            }
+        }
+    }
+
+    override fun onStop() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            (screenCaptureCallback as? ScreenCaptureCallback)?.let {
+                runCatching { unregisterScreenCaptureCallback(it) }
+            }
+        }
+        super.onStop()
     }
 
     override fun onResume() {

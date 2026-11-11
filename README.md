@@ -36,8 +36,13 @@ mesajı sadece sen ve karşındaki kişi açabilir.
 - 🚫 **Engelleme** — İstemediğin kişilerden gelen mesajları durdur.
 - 🖼️ **Fotoğraf gönderme** — Fotoğraflar telefonda küçültülür ve uçtan uca şifrelenir. Alıcı açınca sunucudaki kopya silinir.
 - ✨ **Dakk Asistan** — Uygulama içi yapay zekâ asistanı. Bir sohbette `@dakk` yazarak onu sohbete çağırabilirsin. Yapay zekâ tarafından işlenir; ilk kullanımda uyarı gösterilir.
+- 😂 **Tepkiler** — Mesaja uzun bas, 😂 ❤️ ⭐ 👌 tepkilerinden birini bırak. Tepkiler de şifrelidir.
+- ↩️ **Yanıtla** — Bir mesajı alıntılayarak yanıt ver.
 - 🗑️ **Herkesten sil** — Gönderdiğin mesajı iki taraftan da kaldır.
-- 🔔 **Bildirimler** — Yeni mesaj geldiğinde, uygulama kapalıyken bile haber verir. Bildirime dokununca sohbet açılır.
+- 🔔 **Bildirimler** — Yeni mesaj geldiğinde, uygulama kapalıyken bile haber verir. Bildirimden
+  *Cevapla*, *Görüldü* veya *❤️* ile uygulamayı açmadan işlem yapabilirsin. Kilit ekranında içerik,
+  telefonunun gizlilik ayarına göre gizlenir.
+- 📸 **Ekran görüntüsü bilgisi** — Sohbette ekran görüntüsü alınırsa karşı taraf küçük bir notla haberdar olur.
 - 📣 **Duyurular** — Önemli haberler açılışta tam ekran gösterilir.
 - ⬆️ **Otomatik güncelleme** — Yeni sürüm çıktığında uygulama içinden tek dokunuşla güncelle.
 - 🌙 **Koyu tema** — Göz yormayan, OLED dostu tasarım.
@@ -63,7 +68,12 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 | Kendi kodunu göstermek | **Kişi ekle** → *QR kodumu göster* (veya Ayarlar → *Davet bağlantısı paylaş*) |
 | Sohbeti doğrulamak | Sohbet → ⋮ → *Güvenlik numarası* — iki telefonda aynı sayılar görünmeli |
 | Bir kişiyi engellemek | Sohbet → ⋮ → *Engelle* |
+| Tepki bırakmak | Mesaja uzun bas → 😂 ❤️ ⭐ 👌 (kaldırmak için aynı tepkiye tekrar dokun) |
+| Bir mesajı yanıtlamak | Mesaja uzun bas → *Yanıtla* |
+| Mesajı kopyalamak | Mesaja uzun bas → *Kopyala* |
 | Mesajı silmek | Mesaja uzun bas → *Herkesten sil* |
+| Bildirimden yanıt vermek | Bildirimi aşağı çek → *Cevapla*, *Görüldü* veya *❤️* |
+| Kilit ekranında mesajı gizlemek | Telefon Ayarları → Bildirimler → Kilit ekranı → *Hassas içeriği gizle* |
 | Fotoğraf göndermek | Sohbet → mesaj kutusunun solundaki 🖼️ simgesi |
 | Asistanla konuşmak | Sohbetler listesinin en üstündeki *Dakk Asistan* |
 | Asistanı sohbete çağırmak | Mesajına `@dakk` ile başla, ör. `@dakk bu akşam ne yesek?` |
@@ -76,6 +86,8 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
   **Otomatik başlatma** izni açık, pil tasarrufu **Kısıtlama yok** olmalıdır.
 - Bir hesap aynı anda tek cihazda kullanılabilir. Yeni bir cihazda giriş yapıldığında eski cihazdaki
   mesajlar o cihazda okunamaz hale gelir (anahtarlar cihazdan dışarı çıkmaz).
+- "Ekran görüntüsü aldı" bilgisi yalnızca ekran görüntüsünü alan kişinin telefonu **Android 14 veya
+  üzeriyse** gönderilir. Daha eski Android sürümleri bunu uygulamalara bildirmez. Ekran kaydı algılanmaz.
 - Şimdilik yazı ve fotoğraf gönderilebilir. Video, sesli mesaj ve grup sohbeti yoktur.
 - Dakk Asistan ile yapılan sohbetler ve `@dakk` ile asistana gönderilen mesajlar uçtan uca şifreli değildir.
 

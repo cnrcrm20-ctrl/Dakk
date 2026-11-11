@@ -40,7 +40,15 @@ data class MessageDoc(
     val createdAt: Long,
     val isPending: Boolean,
     val messageType: String = "TEXT",
-    val isAssistant: Boolean = false
+    val isAssistant: Boolean = false,
+    /** Kullanıcı kimliği → şifreli tepki emojisi. */
+    val reactions: Map<String, String> = emptyMap(),
+    /** Yanıtlanan mesajın kimliği (yoksa null). */
+    val replyTo: String? = null,
+    /** Yanıtlanan mesajı gönderen kişinin kimliği. */
+    val replyToSender: String? = null,
+    /** Yanıtlanan mesajdan kısa, şifreli alıntı. */
+    val replyPreview: String? = null
 )
 
 enum class MessageStatus { PENDING, SENT, READ }
@@ -71,7 +79,20 @@ data class UiMessage(
     val timestamp: Long,
     val status: MessageStatus,
     val image: ImageAttachment? = null,
-    val isAssistant: Boolean = false
+    val isAssistant: Boolean = false,
+    /** Tepkiler: kullanıcı kimliği → emoji (çözülmüş). */
+    val reactions: Map<String, String> = emptyMap(),
+    /** Bu mesaj bir yanıtsa alıntılanan mesajın özeti. */
+    val reply: ReplyQuote? = null,
+    /** "Ekran görüntüsü aldı" gibi sohbet içi sistem satırı. */
+    val isScreenshotNotice: Boolean = false
+)
+
+/** Yanıtlanan mesajın baloncukta gösterilen alıntısı. */
+data class ReplyQuote(
+    val messageId: String,
+    val fromMe: Boolean,
+    val text: String
 )
 
 /** Sohbet listesi satırı. */

@@ -2,11 +2,21 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
-## [2.2.0] - 2026-11-10
+## [2.2.0] - 2026-11-11
 
 ### Yeni
 - **Uygulama kapalıyken bildirim:** Artık Dakk tamamen kapalıyken de yeni mesaj bildirimi geliyor.
   Bildirimde gönderenin adı ve mesaj görünüyor; mesaj yine yalnızca senin telefonunda çözülüyor.
+- **Tepkiler:** Bir mesaja uzun basınca 😂 ❤️ ⭐ 👌 tepkilerinden birini bırakabilirsin. Tepkiler baloncuğun
+  altında görünüyor; aynı tepkiye yeniden dokunursan kaldırılıyor. Tepkiler de uçtan uca şifreli.
+- **Yanıtla:** Mesaja uzun bas → *Yanıtla*. Yanıtın, alıntılanan mesajla birlikte görünüyor; alıntıya
+  dokununca o mesaja gidiliyor.
+- **Bildirimden hızlı işlemler:** Bildirimde üç düğme var: *Cevapla* (uygulamayı açmadan yanıt yaz),
+  *Görüldü* (okundu yap) ve *❤️* (son mesaja kalp bırak).
+- **Ekran görüntüsü bilgisi:** Bir sohbette ekran görüntüsü alındığında karşı tarafın sohbetinde
+  "… ekran görüntüsü aldı" yazısı çıkıyor. Ekran görüntüsü engellenmiyor. (Android 14 ve üzeri)
+- **Kilit ekranında gizlilik:** Telefonunda "hassas içeriği gizle" açıksa kilit ekranında yalnızca
+  "Yeni mesaj" yazıyor; mesaj içeriği telefonun kilidi açılınca görünüyor.
 
 ### İyileştirildi
 - Bildirim sunucusuna ulaşılamadığında Dakk, uygulama arka plandayken bildirim göstermeye devam ediyor.
