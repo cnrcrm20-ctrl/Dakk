@@ -233,6 +233,25 @@ class CryptoEngine(context: Context) {
     }
 
     /**
+     * Var olan bir mesaja bağlı küçük bir veriyi (ör. tepki emojisi) aynı iki anahtarla şifreler;
+     * böylece [decryptMessage] ile iki taraf da çözebilir. Bu cihaz mesajın taraflarından biri değilse null.
+     */
+    fun encryptForMessage(plainText: String, senderKey: String, recipientKey: String): String? {
+        if (senderKey.isBlank() || recipientKey.isBlank()) return null
+        val otherKey = when (publicKeyBase64()) {
+            senderKey -> recipientKey
+            recipientKey -> senderKey
+            else -> return null
+        }
+        return try {
+            encrypt(plainText, otherKey)
+        } catch (e: Exception) {
+            Log.w(TAG, "Tepki şifrelenemedi", e)
+            null
+        }
+    }
+
+    /**
      * İki kişinin açık anahtarlarından, her iki cihazda da aynı görünen 60 haneli güvenlik numarası üretir.
      */
     fun safetyNumber(peerPublicKeyBase64: String): String {

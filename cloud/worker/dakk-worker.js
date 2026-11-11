@@ -1,28 +1,25 @@
 /**
- * Dakk sunucusu — Cloudflare Worker (ücretsiz plan yeterlidir).
+ * Dakk sunucusu.
  *
- * Görevleri:
- *   POST /notify     Uygulama kapalıyken mesaj bildirimi (Firebase Cloud Messaging).
+ *   POST /notify     Uygulama kapalıyken mesaj bildirimi.
  *   POST /assistant  Kurucu panelinde "Özel API" seçildiyse OpenAI uyumlu uç noktaya vekillik.
+ *   POST /admin/broadcast  (yalnızca kurucular) Herkese bildirim, ör. "yeni sürüm çıktı".
+ *   POST /admin/rules      (yalnızca kurucular) Firestore kurallarını derleyip yayınlar.
  *
  * Güvenlik:
- *   - Her istek, Firebase Authentication kimlik jetonu (ID token) ile doğrulanır.
- *   - /notify yalnızca isteği yapan kişinin GERÇEKTEN gönderdiği bir mesaj için, o sohbetin
- *     diğer üyesine bildirim gönderir. Mesaj içeriği şifreli olarak iletilir; sunucu okuyamaz.
+ *   - Her istek Firebase kimlik jetonuyla doğrulanır.
+ *   - /notify yalnızca isteği yapan kişinin gerçekten gönderdiği bir mesaj için, sohbetin diğer üyesine
+ *     bildirim gönderir. İçerik şifreli iletilir; sunucu okuyamaz.
  *   - Alıcı göndereni engellediyse bildirim gönderilmez.
- *   - Özel API anahtarı yalnızca Firestore'daki app_config/private belgesindedir; uygulamalara gitmez.
- *
- * Gerekli ayarlar (Worker › Settings › Variables and Secrets):
- *   FIREBASE_SERVICE_ACCOUNT  (Secret)  Firebase Console › Proje ayarları › Hizmet hesapları ›
- *                                       "Yeni özel anahtar oluştur" ile indirilen JSON dosyasının TAMAMI.
- *   FIRESTORE_DATABASE_ID     (Text, isteğe bağlı) Varsayılan aşağıda.
- *
- * Kurulum adımları: cloud/worker/README.md
+ *   - Özel API anahtarı uygulamalara gitmez.
+ *   - /admin/* uçları yalnızca sunucu gizlisinde (DAKK_ADMIN_KEY) tutulan anahtarla çalışır; anahtar
+ *     depoda veya uygulamada yer almaz. Anahtar tanımlı değilse bu uçlar tamamen kapalıdır.
  */
 
 const DEFAULT_DATABASE_ID = "ai-studio-android-e2d067e8-8aba-4fce-a486-b836129f76c1";
 const JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
-const SCOPES = "https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase.messaging";
+const SCOPES =
+  "https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/firebase";
 const MAX_FCM_CONTENT = 3000;
 const MAX_MESSAGE_AGE_MS = 15 * 60 * 1000;
 
@@ -35,14 +32,16 @@ const notifiedMessages = new Map();
 const worker = {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // Cloudflare'de yol "/notify", Supabase'de "/dakk/notify" olur; ikisi de desteklenir.
     const path = url.pathname.replace(/\/+$/, "");
     if (request.method === "GET") {
-      return json({ ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() });
+      const info = { ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() };
+      if (info.configured && url.searchParams.get("check") === "deep") info.checks = await deepCheck(env);
+      return json(info);
     }
     if (request.method !== "POST") return json({ error: "Yöntem desteklenmiyor" }, 405);
 
     try {
+      if (path.includes("/admin/")) return await handleAdmin(request, env, path);
       const sa = serviceAccount(env);
       const uid = await verifyIdToken(request, sa.project_id);
       const ctx = { env, sa, uid, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
@@ -58,6 +57,28 @@ const worker = {
 };
 
 export default worker;
+
+/** Sunucunun Google'a, Firestore'a ve FCM'e erişebildiğini doğrular. Gizli bilgi döndürmez. */
+async function deepCheck(env) {
+  const out = { google: false, firestore: false, fcm: "unknown" };
+  try {
+    const sa = serviceAccount(env);
+    const ctx = { env, sa, uid: null, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
+    await getAccessToken(sa);
+    out.google = true;
+    await getDoc(ctx, "app_config/public");
+    out.firestore = true;
+    const res = await googleFetch(ctx, `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
+      method: "POST",
+      body: JSON.stringify({ validate_only: true, message: { token: "dakk-health-check", data: { type: "ping" } } }),
+    });
+    // 400 = API açık ve yetki var (sahte jeton reddedildi); 403/401 = API kapalı veya yetki yok.
+    out.fcm = res.status === 400 || res.ok ? "ok" : `http_${res.status}`;
+  } catch (e) {
+    out.error = String((e && e.message) || e).slice(0, 160);
+  }
+  return out;
+}
 
 function isConfigured(env) {
   try {
@@ -149,6 +170,139 @@ async function handleNotify(request, ctx) {
     for (const [k, t] of notifiedMessages) if (t < cutoff) notifiedMessages.delete(k);
   }
   return json({ ok: true });
+}
+
+// ------------------------------------------------------------------------------------------------
+// /admin/* — yalnızca kurucuların bildiği sunucu anahtarıyla
+// ------------------------------------------------------------------------------------------------
+
+async function handleAdmin(request, env, path) {
+  await requireAdminKey(request, env);
+  const sa = serviceAccount(env);
+  const ctx = { env, sa, uid: null, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
+  if (path.endsWith("/admin/broadcast")) return await handleBroadcast(request, ctx);
+  if (path.endsWith("/admin/rules")) return await handleRules(request, ctx);
+  return json({ error: "Bulunamadı" }, 404);
+}
+
+async function requireAdminKey(request, env) {
+  const expected = String(env.DAKK_ADMIN_KEY || "");
+  if (expected.length < 32) throw httpError(404, "Bulunamadı");
+  const given = String(request.headers.get("x-dakk-admin") || "");
+  // Sabit süreli karşılaştırma: iki değerin özetini bayt bayt karşılaştır.
+  const [a, b] = await Promise.all([sha256(given), sha256(expected)]);
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  if (diff !== 0 || !given) throw httpError(401, "Yetkisiz");
+}
+
+async function sha256(text) {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", textEncode(text)));
+}
+
+/**
+ * Bildirim jetonu olan herkese bildirim gönderir. Eski sürümler de gösterir (bildirim yükü kullanılır).
+ * Gövde: { title, body, dryRun? }
+ */
+async function handleBroadcast(request, ctx) {
+  const body = await readJson(request);
+  const title = String(body.title || "").trim();
+  const text = String(body.body || "").trim();
+  if (!title || title.length > 80 || !text || text.length > 400) throw httpError(400, "Başlık veya metin geçersiz");
+  const dryRun = body.dryRun === true;
+
+  const tokens = await listPushTokens(ctx);
+  const result = { ok: true, dryRun, total: tokens.length, sent: 0, failed: 0, removed: 0 };
+  const url = `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`;
+
+  let next = 0;
+  async function workerLoop() {
+    while (next < tokens.length) {
+      const { uid, token } = tokens[next++];
+      const res = await googleFetch(ctx, url, {
+        method: "POST",
+        body: JSON.stringify({
+          validate_only: dryRun,
+          message: {
+            token,
+            notification: { title, body: text },
+            data: { type: "announce" },
+            android: {
+              priority: "HIGH",
+              ttl: "604800s",
+              notification: { channel_id: "dakk_messages", icon: "ic_stat_dakk", color: "#FFCC00", tag: "dakk_announce" },
+            },
+          },
+        }),
+      });
+      if (res.ok) {
+        result.sent++;
+        continue;
+      }
+      const errText = await res.text();
+      if (res.status === 404 || errText.includes("UNREGISTERED")) {
+        if (!dryRun) await deleteDoc(ctx, `push_tokens/${uid}`).catch(() => {});
+        result.removed++;
+      } else {
+        result.failed++;
+        if (result.failed <= 3) console.error("Duyuru bildirimi hatası", res.status, errText.slice(0, 300));
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(8, tokens.length) }, workerLoop));
+  return json(result);
+}
+
+async function listPushTokens(ctx) {
+  const out = [];
+  let pageToken = "";
+  do {
+    const params = new URLSearchParams({ pageSize: "300", "mask.fieldPaths": "token" });
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await googleFetch(ctx, `${docUrl(ctx, "push_tokens")}?${params}`);
+    if (!res.ok) throw new Error(`Jetonlar okunamadı: ${res.status} ${await res.text()}`);
+    const page = await res.json();
+    for (const d of page.documents || []) {
+      const token = d.fields && d.fields.token && d.fields.token.stringValue;
+      if (token) out.push({ uid: d.name.split("/").pop(), token });
+    }
+    pageToken = page.nextPageToken || "";
+  } while (pageToken && out.length < 50000);
+  return out;
+}
+
+/**
+ * Firestore kurallarını derler; dryRun değilse yayınlar. Hatalı kural yayınlanmaz.
+ * Gövde: { source, dryRun? }
+ */
+async function handleRules(request, ctx) {
+  const body = await readJson(request);
+  const source = String(body.source || "");
+  if (!source.includes("service cloud.firestore") || source.length > 64000) throw httpError(400, "Geçersiz kural metni");
+  const base = `https://firebaserules.googleapis.com/v1/projects/${ctx.sa.project_id}`;
+
+  const created = await googleFetch(ctx, `${base}/rulesets`, {
+    method: "POST",
+    body: JSON.stringify({ source: { files: [{ name: "firestore.rules", content: source }] } }),
+  });
+  const createdText = await created.text();
+  if (!created.ok) return json({ ok: false, stage: "compile", status: created.status, detail: createdText.slice(0, 4000) }, 400);
+  const rulesetName = JSON.parse(createdText).name;
+  if (body.dryRun === true) return json({ ok: true, dryRun: true, ruleset: rulesetName });
+
+  const releaseName = `projects/${ctx.sa.project_id}/releases/cloud.firestore/${ctx.db}`;
+  const current = await googleFetch(ctx, `https://firebaserules.googleapis.com/v1/${releaseName}`);
+  const previous = current.ok ? (await current.json()).rulesetName : null;
+
+  const res = current.status === 404
+    ? await googleFetch(ctx, `${base}/releases`, { method: "POST", body: JSON.stringify({ name: releaseName, rulesetName }) })
+    : await googleFetch(ctx, `https://firebaserules.googleapis.com/v1/${releaseName}`, {
+        method: "PATCH",
+        body: JSON.stringify({ release: { name: releaseName, rulesetName } }),
+      });
+  const text = await res.text();
+  if (!res.ok) return json({ ok: false, stage: "release", status: res.status, detail: text.slice(0, 2000), previous }, 502);
+  return json({ ok: true, ruleset: rulesetName, previous, release: releaseName });
 }
 
 // ------------------------------------------------------------------------------------------------

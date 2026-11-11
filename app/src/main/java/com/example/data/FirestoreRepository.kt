@@ -3,7 +3,10 @@ package com.example.data
 import android.content.Context
 import android.util.Log
 import com.example.R
+import com.google.android.gms.tasks.Task
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.MetadataChanges
@@ -162,12 +165,23 @@ class FirestoreRepository(context: Context) {
         createdAt = getTimestamp("createdAt", estimate)?.toDate()?.time ?: System.currentTimeMillis(),
         isPending = metadata.hasPendingWrites(),
         messageType = getString("messageType") ?: "TEXT",
-        isAssistant = getBoolean("isAssistant") ?: false
+        isAssistant = getBoolean("isAssistant") ?: false,
+        reactions = (get("reactions") as? Map<*, *>)
+            ?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
+            ?.toMap()
+            .orEmpty(),
+        replyTo = getString("replyTo")?.ifBlank { null },
+        replyToSender = getString("replyToSender")?.ifBlank { null },
+        replyPreview = getString("replyPreview")?.ifBlank { null }
     )
+
+    /** Yanıtlanan mesaj bilgisi (alıntı metni şifrelidir). */
+    data class ReplyFields(val messageId: String, val senderUid: String, val encryptedPreview: String)
 
     /**
      * Mesaj gönderir. Önce sohbet belgesi (üyelik + şifreli önizleme), ardından mesaj yazılır.
      * Yazmalar sırayla kuyruğa alındığı için çevrimdışıyken de güvenle çalışır.
+     * [updateChat] false ise sohbet listesi önizlemesi değişmez (ör. ekran görüntüsü bildirimi).
      */
     fun sendMessage(
         chatId: String,
@@ -180,40 +194,91 @@ class FirestoreRepository(context: Context) {
         recipientKey: String,
         messageType: String = "TEXT",
         isAssistant: Boolean = false,
+        reply: ReplyFields? = null,
+        updateChat: Boolean = true,
         onSent: (messageId: String) -> Unit = {},
         onError: (Exception) -> Unit
     ): String {
-        val chatRef = db.collection("chats").document(chatId)
-        val chatPayload = mapOf(
-            "chatId" to chatId,
-            "memberUids" to listOf(myUid, peerUid).sorted(),
-            "lastMessage" to encryptedPreview,
-            "lastMessageSenderId" to myUid,
-            "lastMessageSenderKey" to senderKey,
-            "lastMessageRecipientKey" to recipientKey,
-            "lastMessageTimestamp" to FieldValue.serverTimestamp(),
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to FieldValue.serverTimestamp()
+        val (chatTask, messageRef, messageTask) = writeMessage(
+            chatId, myUid, peerUid, senderName, encryptedContent, encryptedPreview,
+            senderKey, recipientKey, messageType, isAssistant, reply, updateChat
         )
-        chatRef.set(chatPayload, SetOptions.merge())
-            .addOnFailureListener { e -> Log.e(TAG, "Sohbet güncellenemedi", e); onError(e) }
-
-        val messagePayload = mapOf(
-            "chatId" to chatId,
-            "senderId" to myUid,
-            "senderName" to senderName.ifBlank { "Dakk" }.take(60),
-            "content" to encryptedContent,
-            "senderKey" to senderKey,
-            "recipientKey" to recipientKey,
-            "deliveryStatus" to "SENT",
-            "messageType" to messageType,
-            "createdAt" to FieldValue.serverTimestamp()
-        ).let { if (isAssistant) it + ("isAssistant" to true) else it }
-        val messageRef = chatRef.collection("messages").document()
-        messageRef.set(messagePayload)
+        chatTask?.addOnFailureListener { e -> Log.e(TAG, "Sohbet güncellenemedi", e); onError(e) }
+        messageTask
             .addOnSuccessListener { onSent(messageRef.id) }
             .addOnFailureListener { e -> Log.e(TAG, "Mesaj gönderilemedi", e); onError(e) }
         return messageRef.id
+    }
+
+    /** [sendMessage] ile aynı, ancak sunucu yazmayı onaylayana kadar bekler (bildirimden yanıt için). */
+    suspend fun sendMessageAndWait(
+        chatId: String,
+        myUid: String,
+        peerUid: String,
+        senderName: String,
+        encryptedContent: String,
+        encryptedPreview: String,
+        senderKey: String,
+        recipientKey: String
+    ): String {
+        val (chatTask, messageRef, messageTask) = writeMessage(
+            chatId, myUid, peerUid, senderName, encryptedContent, encryptedPreview,
+            senderKey, recipientKey, "TEXT", false, null, true
+        )
+        chatTask?.await()
+        messageTask.await()
+        return messageRef.id
+    }
+
+    private fun writeMessage(
+        chatId: String,
+        myUid: String,
+        peerUid: String,
+        senderName: String,
+        encryptedContent: String,
+        encryptedPreview: String,
+        senderKey: String,
+        recipientKey: String,
+        messageType: String,
+        isAssistant: Boolean,
+        reply: ReplyFields?,
+        updateChat: Boolean
+    ): Triple<Task<Void>?, DocumentReference, Task<Void>> {
+        val chatRef = db.collection("chats").document(chatId)
+        val chatTask = if (updateChat) {
+            val chatPayload = mapOf(
+                "chatId" to chatId,
+                "memberUids" to listOf(myUid, peerUid).sorted(),
+                "lastMessage" to encryptedPreview,
+                "lastMessageSenderId" to myUid,
+                "lastMessageSenderKey" to senderKey,
+                "lastMessageRecipientKey" to recipientKey,
+                "lastMessageTimestamp" to FieldValue.serverTimestamp(),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            chatRef.set(chatPayload, SetOptions.merge())
+        } else null
+
+        val messagePayload = buildMap<String, Any> {
+            put("chatId", chatId)
+            put("senderId", myUid)
+            put("senderName", senderName.ifBlank { "Dakk" }.take(60))
+            put("content", encryptedContent)
+            put("senderKey", senderKey)
+            put("recipientKey", recipientKey)
+            put("deliveryStatus", "SENT")
+            put("messageType", messageType)
+            put("createdAt", FieldValue.serverTimestamp())
+            if (isAssistant) put("isAssistant", true)
+            if (reply != null) {
+                put("replyTo", reply.messageId)
+                put("replyToSender", reply.senderUid)
+                put("replyPreview", reply.encryptedPreview)
+            }
+        }
+        val messageRef = chatRef.collection("messages").document()
+        return Triple(chatTask, messageRef, messageRef.set(messagePayload))
     }
 
     /** Sohbet belgesinin var olduğundan emin olur (fotoğraf parçaları yüklenmeden önce gerekli). */
@@ -302,6 +367,41 @@ class FirestoreRepository(context: Context) {
         messageIds.take(400).forEach { id -> batch.update(messages.document(id), "deliveryStatus", "READ") }
         batch.commit().addOnFailureListener { e -> Log.w(TAG, "Okundu bilgisi yazılamadı", e) }
     }
+
+    /**
+     * Bu kişinin bir mesaja bıraktığı tepkiyi yazar ([encryptedEmoji] null ise kaldırır).
+     * Kurallar herkesin yalnızca kendi tepkisini değiştirmesine izin verir.
+     */
+    suspend fun setReaction(chatId: String, messageId: String, myUid: String, encryptedEmoji: String?) {
+        db.collection("chats").document(chatId).collection("messages").document(messageId)
+            .update(FieldPath.of("reactions", myUid), encryptedEmoji ?: FieldValue.delete())
+            .await()
+    }
+
+    /** Karşı taraftan gelen ve henüz okunmamış tüm mesajları "okundu" yapar; işaretlenen sayısını döner. */
+    suspend fun markAllReadFrom(chatId: String, peerUid: String): Int {
+        val messages = db.collection("chats").document(chatId).collection("messages")
+        val unread = messages
+            .whereEqualTo("senderId", peerUid)
+            .whereEqualTo("deliveryStatus", "SENT")
+            .limit(400)
+            .get().await()
+        if (unread.isEmpty) return 0
+        val batch = db.batch()
+        unread.documents.forEach { batch.update(it.reference, "deliveryStatus", "READ") }
+        batch.commit().await()
+        return unread.size()
+    }
+
+    /** Karşı taraftan gelen en son mesaj (bildirimdeki ❤️ düğmesi için). */
+    suspend fun latestMessageFrom(chatId: String, peerUid: String): MessageDoc? =
+        db.collection("chats").document(chatId).collection("messages")
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(20)
+            .get().await()
+            .documents
+            .map { it.toMessage() }
+            .firstOrNull { it.senderId == peerUid && it.messageType != "SCREENSHOT" }
 
     suspend fun deleteMessage(chatId: String, messageId: String) {
         db.collection("chats").document(chatId).collection("messages").document(messageId)

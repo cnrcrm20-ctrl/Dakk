@@ -10,8 +10,6 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Kurucular: Kurucu panelini ve uygulama ayarlarını yalnızca doğrulanmış kurucu Google hesapları yönetebilir.
-    // Gerçek liste yalnızca Firebase'de yayınlanan kurallarda tutulur; depodaki kopyada örnek adresler vardır.
     function isFounder() {
       return isSignedIn() &&
              request.auth.token.email_verified == true &&
@@ -61,13 +59,26 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() <= 60 &&
              data.content is string && data.content.size() <= 5000 &&
              data.deliveryStatus is string && (data.deliveryStatus in ['SENT', 'DELIVERED', 'READ']) &&
-             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE']) &&
+             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE', 'SCREENSHOT']) &&
              (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 2000)) &&
              (!('isAssistant' in data) || data.isAssistant is bool) &&
+             (!('replyTo' in data) || (data.replyTo is string && data.replyTo.size() <= 64)) &&
+             (!('replyToSender' in data) || (data.replyToSender is string && data.replyToSender.size() <= 128)) &&
+             (!('replyPreview' in data) || (data.replyPreview is string && data.replyPreview.size() <= 1000)) &&
+             !('reactions' in data) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
-    // Şifreli fotoğraf parçası: chats/{chatId}/blobs/{mediaId}_{index}
+    function isOwnReactionChange() {
+      let before = resource.data.get('reactions', {});
+      let after = request.resource.data.get('reactions', {});
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
+             after is map && after.size() <= 50 &&
+             after.diff(before).affectedKeys().hasOnly([request.auth.uid]) &&
+             (!(request.auth.uid in after) ||
+              (after[request.auth.uid] is string && after[request.auth.uid].size() <= 300));
+    }
+
     function isValidBlob(data) {
       return data.senderId == request.auth.uid &&
              data.mediaId is string && data.mediaId.size() >= 8 && data.mediaId.size() <= 64 &&
@@ -77,14 +88,12 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
-    // Users collection
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isOwner(userId) && isValidUserProfile(request.resource.data);
       allow update: if isOwner(userId) && isValidUserProfile(request.resource.data);
       allow delete: if isOwner(userId);
 
-      // Contacts subcollection
       match /contacts/{contactUserId} {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidContact(request.resource.data);
@@ -93,14 +102,12 @@ service cloud.firestore {
       }
     }
 
-    // Chats collection
     match /chats/{chatId} {
       allow read: if isSignedIn() && request.auth.uid in resource.data.memberUids;
       allow create: if isSignedIn() && isValidChat(request.resource.data);
       allow update: if isSignedIn() && request.auth.uid in resource.data.memberUids && isValidChat(request.resource.data);
       allow delete: if isSignedIn() && request.auth.uid in resource.data.memberUids;
 
-      // Messages subcollection
       match /messages/{messageId} {
         allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids;
         allow create: if isSignedIn() &&
@@ -108,18 +115,18 @@ service cloud.firestore {
                          isValidChatMessage(request.resource.data);
         allow update: if isSignedIn() &&
                          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids &&
-                         (resource.data.senderId == request.auth.uid || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deliveryStatus']));
+                         (resource.data.senderId == request.auth.uid ||
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deliveryStatus']) ||
+                          isOwnReactionChange());
         allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
       }
 
-      // Şifreli fotoğraf parçaları — alıcı indirince siler, gönderici 7 gün sonra temizler.
       match /blobs/{blobId} {
         allow read, delete: if isChatMember(chatId);
         allow create: if isChatMember(chatId) && isValidBlob(request.resource.data);
       }
     }
 
-    // Uygulama ayarları (Kurucu paneli)
     match /app_config/public {
       allow read: if isSignedIn();
       allow write: if isFounder();
@@ -128,7 +135,6 @@ service cloud.firestore {
       allow read, write: if isFounder();
     }
 
-    // Anlık bildirim jetonları — yalnızca sahibi yazabilir, kimse okuyamaz (sunucu yönetici yetkisiyle okur).
     match /push_tokens/{userId} {
       allow create, update: if isOwner(userId) &&
                                request.resource.data.token is string &&

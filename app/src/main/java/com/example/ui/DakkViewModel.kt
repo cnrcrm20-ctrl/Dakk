@@ -31,6 +31,7 @@ import com.example.data.FirestoreRepository
 import com.example.data.MessageDoc
 import com.example.data.MessageStatus
 import com.example.data.UiMessage
+import com.example.data.ReplyQuote
 import com.example.data.UserProfile
 import com.example.notification.NotificationHelper
 import com.example.update.GitHubUpdateManager
@@ -38,6 +39,9 @@ import com.example.update.ReleaseInfo
 import com.example.update.UpdateCheckResult
 import com.example.util.AssistantMention
 import com.example.util.InviteLinks
+import com.example.util.Reactions
+import com.example.util.ReplySnippets
+import com.example.util.ScreenshotNotice
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
@@ -223,6 +227,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingChatUid: String? = null
     private var pendingApk: File? = null
     private var pushTokenRegistered = false
+    private var serverReady = false
+    private var checkedServerUrl: String? = null
     private val decryptCache = HashMap<String, String?>()
 
     private val authListener = FirebaseAuth.AuthStateListener { a -> onAuthChanged(a.currentUser) }
@@ -280,6 +286,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 configRepo.observePublic().retrying("Ayarlar", uid).collect { cfg ->
                     _config.value = cfg
                     updatePushActive()
+                    if (cfg.serverUrl != checkedServerUrl) {
+                        checkedServerUrl = cfg.serverUrl
+                        launch {
+                            serverReady = cfg.hasServer && push.isServerReady(cfg.serverUrl)
+                            updatePushActive()
+                        }
+                    }
                     if (cfg.requiresUpdate(appVersion) && _update.value.release == null) checkForUpdates(manual = false)
                 }
             }
@@ -321,6 +334,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _isFounder.value = false
         privateConfig = null
         pushTokenRegistered = false
+        serverReady = false
+        checkedServerUrl = null
         updatePushActive()
         _uploads.value = emptyMap()
         _imageStates.value = emptyMap()
@@ -330,7 +345,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun updatePushActive() {
-        AppState.pushActive = pushTokenRegistered && _config.value.hasServer
+        AppState.pushActive = pushTokenRegistered && _config.value.hasServer && serverReady
+        // Bildirimden yanıt verilirken (uygulama kapalıyken) kullanılacak sunucu adresi.
+        val server = if (_config.value.hasServer && serverReady) _config.value.serverUrl else ""
+        AppState.rememberServer(getApplication<Application>(), server)
     }
 
     /** Kurucu yetkisini Firestore kurallarına sorar (yalnızca kurucular app_config/private okuyabilir). */
@@ -475,6 +493,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         AppState.foreground = foreground
         if (!foreground) return
         val myUid = sessionUid
+        if (myUid != null) {
+            // Bildirimdeki "Görüldü" / "Cevapla" düğmeleri okundu işaretini doğrudan kaydedebilir.
+            val stored = loadMarks(PREFIX_READ)
+            _readMarks.update { current ->
+                (current.keys + stored.keys).associateWith { maxOf(current[it] ?: 0L, stored[it] ?: 0L) }
+            }
+        }
         val current = _screen.value
         if (myUid != null && current is Screen.Chat) {
             notifications.cancelFor(current.peerUid)
@@ -494,6 +519,16 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val plain = synchronized(decryptCache) {
             if (decryptCache.containsKey(cacheKey)) decryptCache[cacheKey]
             else crypto.decryptMessage(content, senderKey, recipientKey).also { decryptCache[cacheKey] = it }
+        }
+        if (messageType == ScreenshotNotice.MESSAGE_TYPE) {
+            return UiMessage(
+                id = id,
+                text = null,
+                isFromMe = fromMe,
+                timestamp = createdAt,
+                status = if (isPending) MessageStatus.PENDING else MessageStatus.SENT,
+                isScreenshotNotice = true
+            )
         }
         val image = if (messageType == "IMAGE") {
             ImageMeta.parse(plain)?.let { meta ->
@@ -521,8 +556,31 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 else -> MessageStatus.SENT
             },
             image = image,
-            isAssistant = isAssistant
+            isAssistant = isAssistant,
+            reactions = decryptReactions(this),
+            reply = replyQuote(this, myUid)
         )
+    }
+
+    private fun cachedDecrypt(key: String, cipher: String, senderKey: String, recipientKey: String): String? =
+        synchronized(decryptCache) {
+            if (decryptCache.containsKey(key)) decryptCache[key]
+            else crypto.decryptMessage(cipher, senderKey, recipientKey).also { decryptCache[key] = it }
+        }
+
+    private fun decryptReactions(doc: MessageDoc): Map<String, String> =
+        doc.reactions.mapNotNull { (uid, cipher) ->
+            cachedDecrypt("r:${doc.id}:$uid:${cipher.hashCode()}", cipher, doc.senderKey, doc.recipientKey)
+                ?.takeIf { Reactions.isAllowed(it) }
+                ?.let { uid to it }
+        }.toMap()
+
+    private fun replyQuote(doc: MessageDoc, myUid: String): ReplyQuote? {
+        val target = doc.replyTo ?: return null
+        val text = doc.replyPreview?.let {
+            cachedDecrypt("q:${doc.id}:${it.hashCode()}", it, doc.senderKey, doc.recipientKey)
+        } ?: "🔒 Alıntı"
+        return ReplyQuote(messageId = target, fromMe = doc.replyToSender == myUid, text = text)
     }
 
     private fun markIncomingAsRead(chatId: String, myUid: String, docs: List<MessageDoc>) {
@@ -548,14 +606,18 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------ Mesajlaşma
 
     /** Gönderim kuyruğa alındıysa true döner (giriş alanı temizlenebilir). */
-    fun sendMessage(peerUid: String, rawText: String): Boolean {
+    fun sendMessage(peerUid: String, rawText: String, replyTo: UiMessage? = null): Boolean {
         val text = rawText.trim()
         if (text.isEmpty()) return false
         if (text.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES) {
             _events.tryEmit("Mesaj çok uzun. Lütfen daha kısa parçalar halinde gönderin.")
             return false
         }
-        val sent = sendEncrypted(peerUid, text, previewOf(text), "TEXT", isAssistant = false)
+        val myUid = sessionUid
+        val reply = replyTo?.takeIf { myUid != null && !it.isScreenshotNotice && !it.id.startsWith("upload_") }?.let {
+            ReplyDraft(it.id, if (it.isFromMe) myUid!! else peerUid, ReplySnippets.of(it.text, it.image != null))
+        }
+        val sent = sendEncrypted(peerUid, text, previewOf(text), "TEXT", isAssistant = false, reply = reply)
         if (sent && isAssistantMention(text) && _config.value.assistantEnabled) {
             askAssistantInChat(peerUid, AssistantMention.question(text))
         }
@@ -574,7 +636,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         plain: String,
         preview: String,
         messageType: String,
-        isAssistant: Boolean
+        isAssistant: Boolean,
+        reply: ReplyDraft? = null,
+        updateChat: Boolean = true,
+        notifyPeer: Boolean = true
     ): Boolean {
         val myUid = sessionUid ?: return false
         val peer = _profiles.value[peerUid]
@@ -595,6 +660,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                         crypto.publicKeyBase64()
                     )
                 }
+                val replyFields = reply?.let {
+                    val encQuote = withContext(Dispatchers.Default) { crypto.encrypt(it.snippet, peer.publicKey) }
+                    FirestoreRepository.ReplyFields(it.messageId, it.senderUid, encQuote)
+                }
                 repo.sendMessage(
                     chatId = chatId,
                     myUid = myUid,
@@ -606,9 +675,11 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     recipientKey = peer.publicKey,
                     messageType = messageType,
                     isAssistant = isAssistant,
+                    reply = replyFields,
+                    updateChat = updateChat,
                     onSent = { messageId ->
                         val server = _config.value.serverUrl
-                        if (server.isNotBlank()) {
+                        if (notifyPeer && server.isNotBlank()) {
                             viewModelScope.launch { push.notifyMessage(server, chatId, messageId) }
                         }
                     }
@@ -619,6 +690,61 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         return true
+    }
+
+    /** Yanıtlanan mesajın gönderim sırasında gereken bilgisi. */
+    data class ReplyDraft(val messageId: String, val senderUid: String, val snippet: String)
+
+    /** Oturumdaki kullanıcının kimliği (tepkilerde "benim tepkim" için). */
+    val currentUid: String? get() = sessionUid
+
+    /**
+     * Bir mesaja tepki bırakır. Aynı emojiye yeniden dokunulursa tepki kaldırılır.
+     * Tepki, mesajla aynı anahtarlarla şifrelenir; sunucu ve Dakk hangi emojinin seçildiğini göremez.
+     */
+    fun react(peerUid: String, messageId: String, emoji: String) {
+        val myUid = sessionUid ?: return
+        if (!Reactions.isAllowed(emoji)) return
+        val chatId = ChatIds.of(myUid, peerUid)
+        val doc = lastActiveDocs.firstOrNull { it.id == messageId } ?: return
+        if (doc.isPending || doc.messageType == ScreenshotNotice.MESSAGE_TYPE) return
+        val current = decryptReactions(doc)[myUid]
+        val next = Reactions.toggle(current, emoji)
+        viewModelScope.launch {
+            try {
+                val cipher = next?.let {
+                    withContext(Dispatchers.Default) { crypto.encryptForMessage(it, doc.senderKey, doc.recipientKey) }
+                        ?: run {
+                            _events.tryEmit("Bu mesaja tepki verilemiyor (farklı bir cihazda şifrelenmiş).")
+                            return@launch
+                        }
+                }
+                repo.setReaction(chatId, messageId, myUid, cipher)
+            } catch (e: Exception) {
+                Log.w(TAG, "Tepki kaydedilemedi", e)
+                _events.tryEmit("Tepki gönderilemedi.")
+            }
+        }
+    }
+
+    private var lastScreenshotAt = 0L
+
+    /**
+     * Sohbet açıkken ekran görüntüsü alındığında karşı tarafa sohbet içinde küçük bir not bırakır.
+     * Ekran görüntüsü engellenmez. Sohbet listesi önizlemesi ve bildirim etkilenmez.
+     */
+    fun onScreenCaptured() {
+        val myUid = sessionUid ?: return
+        val peerUid = (_screen.value as? Screen.Chat)?.peerUid ?: return
+        val chatId = ChatIds.of(myUid, peerUid)
+        if (_chatDocs.value.none { it.chatId == chatId }) return
+        val now = System.currentTimeMillis()
+        if (now - lastScreenshotAt < ScreenshotNotice.MIN_INTERVAL_MS) return
+        lastScreenshotAt = now
+        sendEncrypted(
+            peerUid, ScreenshotNotice.LEGACY_TEXT, ScreenshotNotice.LEGACY_TEXT, ScreenshotNotice.MESSAGE_TYPE,
+            isAssistant = false, updateChat = false, notifyPeer = false
+        )
     }
 
     /** Galeriden seçilen fotoğrafı sıkıştırır, şifreler ve gönderir. */
@@ -743,7 +869,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val myUid = sessionUid ?: return
         val myName = _profiles.value[myUid]?.displayName?.ifBlank { null } ?: "Ben"
         val peerName = _profiles.value[peerUid]?.displayName?.ifBlank { null } ?: "Karşı taraf"
-        val transcript = _activeMessages.value.takeLast(CHAT_CONTEXT_MESSAGES).joinToString("\n") { m ->
+        val transcript = _activeMessages.value.filterNot { it.isScreenshotNotice }
+            .takeLast(CHAT_CONTEXT_MESSAGES).joinToString("\n") { m ->
             val who = when {
                 m.isAssistant -> "Dakk Asistan"
                 m.isFromMe -> myName
@@ -1097,7 +1224,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 lastFromMe = fromMe,
                 isUnread = !fromMe && doc.lastMessageTime > (reads[doc.chatId] ?: 0L)
             )
-        }.sortedByDescending { it.lastMessageTime }
+        }.sortedWith(compareByDescending<ChatSummary> { it.lastMessageTime }.thenBy { it.chatId })
     }
 
     private fun handleNotifications(docs: List<ChatDoc>, myUid: String) {
@@ -1123,7 +1250,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     crypto.decryptMessage(doc.lastMessage, doc.lastMessageSenderKey, doc.lastMessageRecipientKey)
                 } ?: "Yeni şifreli mesaj"
                 val name = _profiles.value[peerUid]?.displayName?.ifBlank { null } ?: "Dakk"
-                notifications.showMessage(peerUid, name, text)
+                notifications.showMessage(peerUid, name, text, chatId = doc.chatId)
             }
         }
         editor.apply()

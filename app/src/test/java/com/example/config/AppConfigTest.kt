@@ -16,8 +16,15 @@ class AppConfigTest {
         assertEquals(PublicConfig.DEFAULT_MODEL, c.assistantModel)
         assertTrue(c.imagesEnabled)
         assertFalse(c.maintenanceEnabled)
-        assertFalse(c.hasServer)
+        assertTrue(c.hasServer)
         assertNull(c.announcement)
+    }
+
+    @Test
+    fun blankServerUrlFallsBackToDefault() {
+        assertEquals(PublicConfig.DEFAULT_SERVER_URL, PublicConfig.fromMap(null).serverUrl)
+        assertEquals(PublicConfig.DEFAULT_SERVER_URL, PublicConfig.fromMap(mapOf("server_url" to "  ")).serverUrl)
+        assertTrue(PublicConfig.fromMap(null).hasServer)
     }
 
     @Test

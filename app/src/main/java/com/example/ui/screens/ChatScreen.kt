@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,10 +36,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -69,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -86,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.MessageStatus
+import com.example.data.ReplyQuote
 import com.example.data.UiMessage
 import com.example.ui.DakkViewModel
 import com.example.ui.components.AiConsentDialog
@@ -99,10 +104,14 @@ import com.example.ui.theme.DakkStatusFailed
 import com.example.ui.theme.DakkTextSecondaryDark
 import com.example.ui.theme.DakkTextTertiaryDark
 import com.example.ui.theme.DakkYellow
+import com.example.util.Reactions
+import com.example.util.ReplySnippets
+import com.example.util.ScreenshotNotice
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 private val BubbleMine = Color(0xFF3D3410)
 private val BubbleTheirs = Color(0xFF1E2028)
@@ -135,6 +144,9 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     var selected by remember { mutableStateOf<UiMessage?>(null) }
     var viewingImage by remember { mutableStateOf<String?>(null) }
     var pendingMention by remember { mutableStateOf<String?>(null) }
+    var replyingTo by remember(peerUid) { mutableStateOf<UiMessage?>(null) }
+    val scope = rememberCoroutineScope()
+    val myUid = viewModel.currentUid
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) viewModel.sendImage(peerUid, uri)
@@ -148,8 +160,9 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
         val text = draft
         if (viewModel.isAssistantMention(text) && config.assistantEnabled && !viewModel.hasAiConsent("chat_$peerUid")) {
             pendingMention = text
-        } else if (viewModel.sendMessage(peerUid, text)) {
+        } else if (viewModel.sendMessage(peerUid, text, replyingTo)) {
             draft = ""
+            replyingTo = null
         }
     }
 
@@ -254,6 +267,13 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                replyingTo?.let { target ->
+                    ReplyComposerBar(
+                        authorLabel = if (target.isFromMe) "Sen" else peerName,
+                        text = ReplySnippets.of(target.text, target.image != null),
+                        onCancel = { replyingTo = null }
                     )
                 }
                 Row(
@@ -362,11 +382,23 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
             items(chatItems, key = { it.key }) { item ->
                 when (item) {
                     is ChatItem.DateHeader -> DateChip(item.label)
-                    is ChatItem.Message -> MessageBubble(
+                    is ChatItem.Message -> if (item.message.isScreenshotNotice) {
+                        ScreenshotNoticeRow(ScreenshotNotice.label(item.message.isFromMe, peerName))
+                    } else MessageBubble(
                         message = item.message,
+                        peerName = peerName,
+                        myUid = myUid,
                         onLongPress = { if (!item.message.id.startsWith("upload_")) selected = item.message },
                         onOpenImage = { id -> viewingImage = id },
-                        onRetryImage = { id -> viewModel.retryImage(peerUid, id) }
+                        onRetryImage = { id -> viewModel.retryImage(peerUid, id) },
+                        onReact = { emoji -> viewModel.react(peerUid, item.message.id, emoji) },
+                        onOpenQuote = { quoted ->
+                            val index = chatItems.indexOfFirst { it.key == quoted.messageId }
+                            if (index >= 0) {
+                                val headerCount = if (showUnknownBanner) 2 else 1
+                                scope.launch { listState.animateScrollToItem(headerCount + index) }
+                            }
+                        }
                     )
                 }
             }
@@ -377,11 +409,46 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     }
 
     selected?.let { msg ->
+        val canReact = msg.status != MessageStatus.PENDING
+        val myReaction = myUid?.let { msg.reactions[it] }
         AlertDialog(
             onDismissRequest = { selected = null },
-            title = { Text("Mesaj") },
             text = {
                 Column {
+                    if (canReact) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Reactions.ALL.forEach { emoji ->
+                                val chosen = emoji == myReaction
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(if (chosen) DakkYellow.copy(alpha = 0.25f) else Color.Transparent)
+                                        .clickable {
+                                            viewModel.react(peerUid, msg.id, emoji)
+                                            selected = null
+                                        }
+                                ) {
+                                    Text(emoji, fontSize = 26.sp)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (canReact && canSend) {
+                        TextButton(onClick = {
+                            replyingTo = msg
+                            selected = null
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.Reply, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Yanıtla")
+                        }
+                    }
                     if (msg.text != null) {
                         TextButton(onClick = {
                             copyToClipboard(context, msg.text, "Mesaj")
@@ -395,6 +462,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                     if (msg.isFromMe && msg.status != MessageStatus.PENDING) {
                         TextButton(onClick = {
                             viewModel.deleteMessage(peerUid, msg.id)
+                            if (replyingTo?.id == msg.id) replyingTo = null
                             selected = null
                         }) {
                             Icon(Icons.Default.Delete, null, tint = DakkStatusFailed)
@@ -428,7 +496,10 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
             onAccept = {
                 viewModel.giveAiConsent("chat_$peerUid")
                 pendingMention = null
-                if (viewModel.sendMessage(peerUid, text)) draft = ""
+                if (viewModel.sendMessage(peerUid, text, replyingTo)) {
+                    draft = ""
+                    replyingTo = null
+                }
             },
             onDismiss = { pendingMention = null }
         )
@@ -564,15 +635,20 @@ private fun AssistantTypingRow() {
 @Composable
 private fun MessageBubble(
     message: UiMessage,
+    peerName: String,
+    myUid: String?,
     onLongPress: () -> Unit,
     onOpenImage: (String) -> Unit,
-    onRetryImage: (String) -> Unit
+    onRetryImage: (String) -> Unit,
+    onReact: (String) -> Unit,
+    onOpenQuote: (ReplyQuote) -> Unit
 ) {
     val mine = message.isFromMe
     val image = message.image
-    Box(
+    val chips = remember(message.reactions, myUid) { Reactions.summarize(message.reactions, myUid) }
+    Column(
         Modifier.fillMaxWidth(),
-        contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart
+        horizontalAlignment = if (mine) Alignment.End else Alignment.Start
     ) {
         Column(
             modifier = Modifier
@@ -601,6 +677,19 @@ private fun MessageBubble(
                     Spacer(Modifier.width(4.dp))
                     Text("Dakk Asistan", color = DakkYellow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
+            }
+            message.reply?.let { quote ->
+                ReplyQuoteBox(
+                    authorLabel = if (quote.fromMe) "Sen" else peerName,
+                    text = quote.text,
+                    onClick = { onOpenQuote(quote) },
+                    modifier = Modifier.padding(
+                        start = if (image != null) 4.dp else 0.dp,
+                        end = if (image != null) 4.dp else 0.dp,
+                        top = if (image != null) 4.dp else 0.dp,
+                        bottom = 6.dp
+                    )
+                )
             }
             when {
                 image != null -> ImageMessageContent(
@@ -637,6 +726,106 @@ private fun MessageBubble(
                     }
                 }
             }
+        }
+        if (chips.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .offset(y = (-4).dp)
+                    .padding(horizontal = 8.dp)
+            ) {
+                chips.forEach { chip ->
+                    Surface(
+                        color = if (chip.mine) DakkYellow.copy(alpha = 0.22f) else DakkDarkSurfaceVariant,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = chip.mine) { onReact(chip.emoji) }
+                    ) {
+                        Text(
+                            if (chip.count > 1) "${chip.emoji} ${chip.count}" else chip.emoji,
+                            fontSize = 13.sp,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Yanıtlanan mesajın baloncuk içindeki alıntısı. */
+@Composable
+private fun ReplyQuoteBox(authorLabel: String, text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.25f))
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            Modifier
+                .width(3.dp)
+                .height(40.dp)
+                .background(DakkYellow)
+        )
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(authorLabel, color = DakkYellow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(
+                text,
+                color = DakkTextSecondaryDark,
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/** Giriş alanının üstünde, yanıtlanacak mesajı gösteren şerit. */
+@Composable
+private fun ReplyComposerBar(authorLabel: String, text: String, onCancel: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 4.dp, top = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(DakkDarkSurfaceVariant)
+    ) {
+        Box(
+            Modifier
+                .width(4.dp)
+                .height(48.dp)
+                .background(DakkYellow)
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text(authorLabel, color = DakkYellow, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(text, color = DakkTextSecondaryDark, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        IconButton(onClick = onCancel) {
+            Icon(Icons.Default.Close, contentDescription = "Yanıtı iptal et", tint = DakkTextSecondaryDark)
+        }
+    }
+}
+
+/** Sohbet içinde "… ekran görüntüsü aldı" satırı. */
+@Composable
+private fun ScreenshotNoticeRow(label: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Surface(color = DakkDarkSurfaceVariant.copy(alpha = 0.7f), shape = RoundedCornerShape(10.dp)) {
+            Text(
+                "📸 $label",
+                color = DakkTextSecondaryDark,
+                fontSize = 12.sp,
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
         }
     }
 }

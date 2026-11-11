@@ -70,6 +70,8 @@ class DakkMessagingService : FirebaseMessagingService() {
         val plain = runCatching {
             CryptoEngine(applicationContext).decryptMessage(content, senderKey, recipientKey)
         }.getOrNull()
+        // Ekran görüntüsü notları sohbet içinde gösterilir; ayrı bildirim çıkarmaz.
+        if (messageType == "SCREENSHOT") return
         val text = when {
             messageType == "IMAGE" -> "📷 Fotoğraf"
             plain == null -> "Yeni şifreli mesaj"
@@ -77,7 +79,7 @@ class DakkMessagingService : FirebaseMessagingService() {
             else -> plain
         }
         val name = data["senderName"]?.ifBlank { null } ?: "Dakk"
-        NotificationHelper(applicationContext).showMessage(senderId, name, text)
+        NotificationHelper(applicationContext).showMessage(senderId, name, text, chatId = chatId, messageId = messageId)
     }
 
     /** Aynı mesaj için ikinci kez bildirim göstermemek üzere son mesaj kimliklerini tutar. */

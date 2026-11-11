@@ -13,7 +13,7 @@
 <div style="height:16px;"></div>
 <!-- Bu sayfa PRIVACY_POLICY.md dosyasından üretilmiştir; değişiklikleri önce oraya yapın. -->
 <h1 style="color:#FFC107;font-size:30px;margin:0 0 8px;">Dakk Gizlilik Politikası</h1>
-<p style="color:#C8C8C8;margin:8px 0;"><b>Son güncelleme:</b> 8 Kasım 2026 • <b>Geçerli sürüm:</b> Dakk 2.1 ve sonrası</p>
+<p style="color:#C8C8C8;margin:8px 0;"><b>Son güncelleme:</b> 11 Kasım 2026 • <b>Geçerli sürüm:</b> Dakk 2.1 ve sonrası</p>
 <p style="color:#C8C8C8;margin:8px 0;">Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları <a href="https://github.com/cnrcrm20-ctrl/Dakk" style="color:#FFC107;">GitHub deposunda</a> doğrulayabilirsin.</p>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Kısaca</h2>
 <ul style="padding-left:20px;color:#C8C8C8;">
@@ -38,14 +38,16 @@
 </ul>
 <h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">3. Mesajlar</h3>
 <ul style="padding-left:20px;color:#C8C8C8;">
-<li style="margin:4px 0;">Mesaj içeriği ve sohbet listesinde görünen son mesaj önizlemesi <b>uçtan uca şifreli</b> olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.</li>
+<li style="margin:4px 0;">Mesaj içeriği, sohbet listesinde görünen son mesaj önizlemesi, mesajlara bırakılan <b>tepkiler</b> ve yanıtlarda görünen <b>alıntı</b> metni <b>uçtan uca şifreli</b> olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.</li>
 <li style="margin:4px 0;">Mesajın iletilebilmesi için bazı bilgiler <b>şifrelenmeden</b> saklanır:<ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">gönderen ve alıcı kimliği,</li>
 <li style="margin:4px 0;">gönderim zamanı,</li>
 <li style="margin:4px 0;">iletim ve okundu durumu,</li>
 <li style="margin:4px 0;">gönderenin görünen adı,</li>
-<li style="margin:4px 0;">mesaj türü (yazı veya fotoğraf).</li>
+<li style="margin:4px 0;">mesaj türü (yazı, fotoğraf veya "ekran görüntüsü aldı" bilgisi),</li>
+<li style="margin:4px 0;">bir mesaja kimin tepki bıraktığı (hangi tepki olduğu değil) ve yanıtlanan mesajın kimliği.</li>
 </ul></li>
+<li style="margin:4px 0;">Bir sohbette ekran görüntüsü aldığında (Android 14 ve üzeri) karşı tarafa sohbet içinde "ekran görüntüsü aldı" bilgisi gönderilir. Ekran görüntüsünün kendisi hiçbir yere gönderilmez.</li>
 </ul>
 <h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">4. Fotoğraflar</h3>
 <ul style="padding-left:20px;color:#C8C8C8;">
@@ -93,7 +95,8 @@
 <tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Kamera</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yalnızca QR kod tararken. Görüntü kaydedilmez veya gönderilmez.</td></tr>
 <tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Fotoğraf seçici</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yalnızca gönderdiğin fotoğrafı seçerken. Galerinin geri kalanına erişilmez.</td></tr>
 <tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Depolama (yalnızca Android 9 ve öncesi)</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Bir fotoğrafı galeriye kaydetmek istediğinde</td></tr>
-<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Bildirimler</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yeni mesajları haber vermek</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Bildirimler</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Yeni mesajları haber vermek; bildirimden yanıt, "Görüldü" ve ❤️</td></tr>
+<tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Ekran görüntüsü algılama (Android 14+)</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Sohbette ekran görüntüsü alındığını karşı tarafa bildirmek. Görüntüye erişilmez.</td></tr>
 <tr><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Uygulama yükleme</td><td style="border-bottom:1px solid #222;padding:6px;vertical-align:top;">Uygulama içi güncellemeyi kurmak (yalnızca sen onaylarsan)</td></tr>
 </table>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Üçüncü taraf hizmetler</h2>
@@ -104,10 +107,10 @@
 <li style="margin:4px 0;">Cloud Messaging</li>
 <li style="margin:4px 0;">AI Logic</li>
 </ul><p style="color:#C8C8C8;margin:8px 0;">Google'ın gizlilik politikası: <a href="https://policies.google.com/privacy" style="color:#FFC107;">https://policies.google.com/privacy</a></p></li>
-<li style="margin:4px 0;"><b>Cloudflare Workers</b> — Dakk sunucusu burada çalışır. Görevleri:<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;"><b>Supabase</b> — Dakk sunucusu burada (Avrupa Birliği, Frankfurt) çalışır. Görevleri:<ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">uygulama kapalıyken bildirim iletmek,</li>
 <li style="margin:4px 0;">yöneticiler özel bir yapay zekâ hizmeti seçtiyse asistan isteklerini o hizmete aktarmak.</li>
-</ul><p style="color:#C8C8C8;margin:8px 0;">Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir. Cloudflare'in gizlilik politikası: <a href="https://www.cloudflare.com/privacypolicy/" style="color:#FFC107;">https://www.cloudflare.com/privacypolicy/</a></p></li>
+</ul><p style="color:#C8C8C8;margin:8px 0;">Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir ve hiçbir veriyi kalıcı olarak saklamaz. Supabase'in gizlilik politikası: <a href="https://supabase.com/privacy" style="color:#FFC107;">https://supabase.com/privacy</a></p></li>
 <li style="margin:4px 0;"><b>GitHub</b> — güncelleme denetimi için GitHub Releases'a anonim bir istek gönderilir ve APK buradan indirilir. GitHub'ın gizlilik politikası: <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" style="color:#FFC107;">https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement</a></li>
 </ul>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Verilerini silmek</h2>

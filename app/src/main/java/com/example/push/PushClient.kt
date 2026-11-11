@@ -1,5 +1,6 @@
 package com.example.push
 
+import android.content.Context
 import android.util.Log
 import com.example.data.FirestoreRepository
 import com.google.firebase.Firebase
@@ -23,12 +24,24 @@ object AppState {
     /** Sunucu üzerinden anlık bildirim alınabiliyorsa true; bu durumda arka plandaki yerel bildirimler kapatılır. */
     @Volatile
     var pushActive: Boolean = false
+
+    private const val PREFS = "dakk_push"
+    private const val KEY_SERVER = "server_url"
+
+    /** Hazır olduğu doğrulanan sunucu adresini saklar (bildirimden yanıt verirken kullanılır). */
+    fun rememberServer(context: Context, serverUrl: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(KEY_SERVER, "") != serverUrl) prefs.edit().putString(KEY_SERVER, serverUrl).apply()
+    }
+
+    fun rememberedServer(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SERVER, "").orEmpty()
 }
 
 /**
  * Uygulama kapalıyken mesaj bildirimi.
  *
- * Gönderen cihaz, mesaj sunucuya ulaşınca Dakk sunucusuna (Cloudflare Worker) yalnızca
+ * Gönderen cihaz, mesaj sunucuya ulaşınca Dakk sunucusuna yalnızca
  * sohbet ve mesaj kimliğini bildirir. Sunucu kimliği doğrular, mesajın gerçekten bu kişiden
  * geldiğini Firestore'dan kontrol eder ve alıcıya Firebase Cloud Messaging ile ŞİFRELİ içeriği iletir.
  * Mesaj, alıcının telefonunda çözülür; sunucu içeriği okuyamaz.
@@ -52,6 +65,24 @@ class PushClient(private val repo: FirestoreRepository) {
     suspend fun unregister(uid: String) {
         runCatching { repo.deletePushToken(uid) }
         runCatching { FirebaseMessaging.getInstance().deleteToken().await() }
+    }
+
+    /** Sunucu ayakta ve bildirim göndermeye hazır mı? (GET → {"ok":true,"configured":true}) */
+    suspend fun isServerReady(serverUrl: String): Boolean {
+        if (!serverUrl.startsWith("https://")) return false
+        return try {
+            withContext(Dispatchers.IO) {
+                val request = Request.Builder().url(serverUrl).get().build()
+                http.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use false
+                    val body = JSONObject(response.body?.string().orEmpty())
+                    body.optBoolean("ok") && body.optBoolean("configured")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Bildirim sunucusuna ulaşılamadı", e)
+            false
+        }
     }
 
     suspend fun notifyMessage(serverUrl: String, chatId: String, messageId: String) {

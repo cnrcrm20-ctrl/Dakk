@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,6 +56,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +66,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -77,9 +90,11 @@ import com.example.ui.components.Avatar
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkDarkBorder
 import com.example.ui.theme.DakkDarkSurface
+import com.example.ui.theme.DakkDarkSurfaceVariant
 import com.example.ui.theme.DakkTextSecondaryDark
 import com.example.ui.theme.DakkTextTertiaryDark
 import com.example.ui.theme.DakkYellow
+import com.example.util.SearchText
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -96,6 +111,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
 
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var chatQuery by rememberSaveable { mutableStateOf("") }
     var showAddContact by rememberSaveable { mutableStateOf(false) }
 
     val unreadCount = chats.count { it.isUnread }
@@ -105,7 +121,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    if (searching && tab != HomeTab.SETTINGS) {
+                    if (searching && tab == HomeTab.CONTACTS) {
                         TextField(
                             value = query,
                             onValueChange = { query = it },
@@ -150,7 +166,8 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 },
                 actions = {
                     if (tab != HomeTab.SETTINGS) {
-                        IconButton(onClick = {
+                        // Sohbetler sekmesinde arama, listenin üstündeki arama çubuğundadır.
+                        if (tab == HomeTab.CONTACTS) IconButton(onClick = {
                             searching = !searching
                             if (!searching) query = ""
                         }) {
@@ -191,7 +208,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 )
                 NavigationBarItem(
                     selected = tab == HomeTab.CHATS,
-                    onClick = { viewModel.setTab(HomeTab.CHATS); searching = false; query = "" },
+                    onClick = { viewModel.setTab(HomeTab.CHATS); searching = false; query = ""; chatQuery = "" },
                     icon = {
                         BadgedBox(badge = {
                             if (unreadCount > 0) Badge(containerColor = DakkYellow, contentColor = Color.Black) {
@@ -240,36 +257,50 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 .padding(padding)
         ) {
             when (tab) {
-                HomeTab.CHATS -> {
-                    val filtered = remember(chats, query) {
-                        if (query.isBlank()) chats
-                        else chats.filter {
-                            it.peerName.contains(query, ignoreCase = true) || it.preview.contains(query, ignoreCase = true)
+                HomeTab.CHATS -> Column(Modifier.fillMaxSize()) {
+                    if (chatsLoaded && (chats.isNotEmpty() || contacts.isNotEmpty())) {
+                        ChatSearchBar(query = chatQuery, onQueryChange = { chatQuery = it })
+                    }
+                    val searchingChats = chatQuery.isNotBlank()
+                    val filtered = remember(chats, chatQuery) {
+                        chats.filter { SearchText.matchesAny(chatQuery, it.peerName, it.preview) }
+                    }
+                    val otherContacts = remember(contacts, chats, chatQuery) {
+                        if (!searchingChats) emptyList()
+                        else {
+                            val withChat = chats.map { it.peerUid }.toSet()
+                            contacts.filter { it.uid !in withChat && SearchText.matchesAny(chatQuery, it.alias, it.email) }
                         }
                     }
-                    when {
-                        !chatsLoaded -> CenteredLoading()
-                        config.assistantEnabled && query.isBlank() -> ChatList(
-                            chats = filtered,
-                            showAssistant = true,
-                            onAssistant = { viewModel.openAssistant() },
-                            onAddContact = { showAddContact = true }
-                        ) { viewModel.openChat(it.peerUid) }
-                        chats.isEmpty() -> EmptyState(
-                            title = "Henüz sohbet yok",
-                            message = "Bir arkadaşınızı ekleyin ve ilk şifreli mesajınızı gönderin.",
-                            action = "Kişi ekle",
-                            onAction = { showAddContact = true }
-                        )
-                        else -> ChatList(filtered, showAssistant = false) { viewModel.openChat(it.peerUid) }
+                    Box(Modifier.weight(1f)) {
+                        when {
+                            !chatsLoaded -> CenteredLoading()
+                            searchingChats -> SearchResults(
+                                query = chatQuery,
+                                chats = filtered,
+                                contacts = otherContacts,
+                                onChat = { viewModel.openChat(it.peerUid) },
+                                onContact = { viewModel.openChat(it.uid) }
+                            )
+                            config.assistantEnabled -> ChatList(
+                                chats = filtered,
+                                showAssistant = true,
+                                onAssistant = { viewModel.openAssistant() },
+                                onAddContact = { showAddContact = true }
+                            ) { viewModel.openChat(it.peerUid) }
+                            chats.isEmpty() -> EmptyState(
+                                title = "Henüz sohbet yok",
+                                message = "Bir arkadaşınızı ekleyin ve ilk şifreli mesajınızı gönderin.",
+                                action = "Kişi ekle",
+                                onAction = { showAddContact = true }
+                            )
+                            else -> ChatList(filtered, showAssistant = false) { viewModel.openChat(it.peerUid) }
+                        }
                     }
                 }
                 HomeTab.CONTACTS -> {
                     val filtered = remember(contacts, query) {
-                        if (query.isBlank()) contacts
-                        else contacts.filter {
-                            it.alias.contains(query, ignoreCase = true) || it.email.contains(query, ignoreCase = true)
-                        }
+                        contacts.filter { SearchText.matchesAny(query, it.alias, it.email) }
                     }
                     if (contacts.isEmpty()) {
                         EmptyState(
@@ -300,7 +331,14 @@ private fun ChatList(
     onAddContact: () -> Unit = {},
     onClick: (ChatSummary) -> Unit
 ) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+    val listState = rememberLazyListState()
+    // Yeni mesaj gelen sohbet en üste çıkar. Liste en üstteyken görünür kalsın diye başa kaydır;
+    // kullanıcı aşağıda geziniyorsa yerinden oynatma.
+    val topChatId = chats.firstOrNull()?.chatId
+    LaunchedEffect(topChatId) {
+        if (topChatId != null && listState.firstVisibleItemIndex <= 2) listState.animateScrollToItem(0)
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
         if (showAssistant) {
             item(key = "dakk_assistant") {
                 Row(
@@ -359,69 +397,218 @@ private fun ChatList(
             }
         }
         items(chats, key = { it.chatId }) { chat ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onClick(chat) }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Avatar(chat.peerName, chat.peerPhotoUrl, size = 52.dp)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            ChatRow(chat, query = "", onClick = { onClick(chat) })
+        }
+    }
+}
+
+@Composable
+private fun ChatRow(chat: ChatSummary, query: String, onClick: () -> Unit) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Avatar(chat.peerName, chat.peerPhotoUrl, size = 52.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        highlight(chat.peerName, query),
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        formatListTime(chat.lastMessageTime),
+                        color = if (chat.isUnread) DakkYellow else DakkTextTertiaryDark,
+                        fontSize = 12.sp
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (chat.lastFromMe) {
+                        Icon(
+                            Icons.Default.DoneAll,
+                            contentDescription = null,
+                            tint = DakkTextTertiaryDark,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        highlight(chat.preview, query),
+                        color = if (chat.isUnread) Color.White else DakkTextSecondaryDark,
+                        fontWeight = if (chat.isUnread) FontWeight.Medium else FontWeight.Normal,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (chat.isUnread) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(DakkYellow)
+                        )
+                    }
+                }
+            }
+        }
+        HorizontalDivider(
+            color = DakkDarkBorder.copy(alpha = 0.5f),
+            thickness = 0.5.dp,
+            modifier = Modifier.padding(start = 82.dp)
+        )
+    }
+}
+
+/** Aranan kısmı sarıyla vurgular. */
+private fun highlight(text: String, query: String): AnnotatedString {
+    val range = SearchText.matchRange(text, query) ?: return AnnotatedString(text)
+    return buildAnnotatedString {
+        append(text.substring(0, range.first))
+        withStyle(SpanStyle(color = DakkYellow, fontWeight = FontWeight.Bold)) {
+            append(text.substring(range.first, range.last + 1))
+        }
+        append(text.substring(range.last + 1))
+    }
+}
+
+/** Sohbet listesinin üstündeki yuvarlak arama çubuğu. */
+@Composable
+private fun ChatSearchBar(query: String, onQueryChange: (String) -> Unit) {
+    val focus = LocalFocusManager.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(DakkDarkSurfaceVariant)
+            .padding(start = 14.dp, end = 4.dp)
+            .height(46.dp)
+    ) {
+        Icon(
+            Icons.Default.Search,
+            contentDescription = null,
+            tint = if (query.isNotEmpty()) DakkYellow else DakkTextSecondaryDark,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text("Sohbetlerde ara", color = DakkTextTertiaryDark, fontSize = 15.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = { onQueryChange(it.take(60)) },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                cursorBrush = SolidColor(DakkYellow),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQueryChange(""); focus.clearFocus() }) {
+                Icon(Icons.Default.Close, contentDescription = "Aramayı temizle", tint = DakkTextSecondaryDark)
+            }
+        } else {
+            Spacer(Modifier.width(10.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        color = DakkTextTertiaryDark,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+    )
+}
+
+/** Arama sonuçları: eşleşen sohbetler ve henüz sohbet açılmamış kişiler. */
+@Composable
+private fun SearchResults(
+    query: String,
+    chats: List<ChatSummary>,
+    contacts: List<Contact>,
+    onChat: (ChatSummary) -> Unit,
+    onContact: (Contact) -> Unit
+) {
+    if (chats.isEmpty() && contacts.isEmpty()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 32.dp, vertical = 56.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null, tint = DakkTextTertiaryDark, modifier = Modifier.size(44.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("Sonuç bulunamadı", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "\u201C${query.trim()}\u201D ile eşleşen sohbet veya kişi yok.",
+                color = DakkTextSecondaryDark,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+        if (chats.isNotEmpty()) {
+            item(key = "label_chats") { SectionLabel("SOHBETLER") }
+            items(chats, key = { "c_" + it.chatId }) { chat ->
+                ChatRow(chat, query = query, onClick = { onChat(chat) })
+            }
+        }
+        if (contacts.isNotEmpty()) {
+            item(key = "label_contacts") { SectionLabel("KİŞİLER") }
+            items(contacts, key = { "p_" + it.uid }) { contact ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onContact(contact) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Avatar(contact.alias, contact.photoUrl, size = 48.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            chat.peerName,
+                            highlight(contact.alias, query),
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            formatListTime(chat.lastMessageTime),
-                            color = if (chat.isUnread) DakkYellow else DakkTextTertiaryDark,
-                            fontSize = 12.sp
-                        )
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (chat.lastFromMe) {
-                            Icon(
-                                Icons.Default.DoneAll,
-                                contentDescription = null,
-                                tint = DakkTextTertiaryDark,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        Text(
-                            chat.preview,
-                            color = if (chat.isUnread) Color.White else DakkTextSecondaryDark,
-                            fontWeight = if (chat.isUnread) FontWeight.Medium else FontWeight.Normal,
-                            fontSize = 14.sp,
+                            if (contact.email.isNotBlank()) highlight(contact.email, query)
+                            else AnnotatedString("Sohbet başlatmak için dokun"),
+                            color = DakkTextSecondaryDark,
+                            fontSize = 13.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
+                            overflow = TextOverflow.Ellipsis
                         )
-                        if (chat.isUnread) {
-                            Spacer(Modifier.width(8.dp))
-                            Box(
-                                Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(DakkYellow)
-                            )
-                        }
                     }
                 }
             }
-            HorizontalDivider(
-                color = DakkDarkBorder.copy(alpha = 0.5f),
-                thickness = 0.5.dp,
-                modifier = Modifier.padding(start = 82.dp)
-            )
         }
     }
 }
