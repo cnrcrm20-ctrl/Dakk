@@ -38,6 +38,8 @@ mesajı sadece sen ve karşındaki kişi açabilir.
 - ✨ **Dakk Asistan** — Uygulama içi yapay zekâ asistanı. Bir sohbette `@dakk` yazarak onu sohbete çağırabilirsin. Yapay zekâ tarafından işlenir; ilk kullanımda uyarı gösterilir.
 - 😂 **Tepkiler** — Mesaja uzun bas, 😂 ❤️ ⭐ 👌 tepkilerinden birini bırak. Tepkiler de şifrelidir.
 - ↩️ **Yanıtla** — Bir mesajı alıntılayarak yanıt ver.
+- 🔎 **Sohbet arama** — Kişi adında ve son mesajlarda ara; Türkçe karakter yazmasan da bulur.
+  Sohbetler en son konuşulandan eskiye sıralanır.
 - 🗑️ **Herkesten sil** — Gönderdiğin mesajı iki taraftan da kaldır.
 - 🔔 **Bildirimler** — Yeni mesaj geldiğinde, uygulama kapalıyken bile haber verir. Bildirimden
   *Cevapla*, *Görüldü* veya *❤️* ile uygulamayı açmadan işlem yapabilirsin. Kilit ekranında içerik,
@@ -68,6 +70,7 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 | Kendi kodunu göstermek | **Kişi ekle** → *QR kodumu göster* (veya Ayarlar → *Davet bağlantısı paylaş*) |
 | Sohbeti doğrulamak | Sohbet → ⋮ → *Güvenlik numarası* — iki telefonda aynı sayılar görünmeli |
 | Bir kişiyi engellemek | Sohbet → ⋮ → *Engelle* |
+| Bir sohbeti bulmak | Sohbetler listesinin üstündeki *Sohbetlerde ara* çubuğu |
 | Tepki bırakmak | Mesaja uzun bas → 😂 ❤️ ⭐ 👌 (kaldırmak için aynı tepkiye tekrar dokun) |
 | Bir mesajı yanıtlamak | Mesaja uzun bas → *Yanıtla* |
 | Mesajı kopyalamak | Mesaja uzun bas → *Kopyala* |

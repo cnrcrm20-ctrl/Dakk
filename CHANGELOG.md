@@ -15,10 +15,15 @@ Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik 
   *Görüldü* (okundu yap) ve *❤️* (son mesaja kalp bırak).
 - **Ekran görüntüsü bilgisi:** Bir sohbette ekran görüntüsü alındığında karşı tarafın sohbetinde
   "… ekran görüntüsü aldı" yazısı çıkıyor. Ekran görüntüsü engellenmiyor. (Android 14 ve üzeri)
+- **Sohbet arama:** Sohbetler listesinin üstünde yeni bir arama çubuğu var. Kişi adında ve son mesajda
+  arıyor, eşleşen kısmı sarıyla vurguluyor, henüz yazışmadığın kişileri de gösteriyor. Türkçe karakterleri
+  yazmasan da buluyor ("cagri" yazınca "Çağrı" çıkıyor).
 - **Kilit ekranında gizlilik:** Telefonunda "hassas içeriği gizle" açıksa kilit ekranında yalnızca
   "Yeni mesaj" yazıyor; mesaj içeriği telefonun kilidi açılınca görünüyor.
 
 ### İyileştirildi
+- Yeni mesaj gelen veya yazdığın sohbet artık her zaman listenin en üstünde görünüyor. Önceden liste
+  yerinde kaldığı için en üste çıkan sohbet ekranın dışında kalabiliyordu.
 - Bildirim sunucusuna ulaşılamadığında Dakk, uygulama arka plandayken bildirim göstermeye devam ediyor.
 - Gizlilik politikası ve güvenlik sayfası sadeleştirildi.
 

@@ -1224,7 +1224,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 lastFromMe = fromMe,
                 isUnread = !fromMe && doc.lastMessageTime > (reads[doc.chatId] ?: 0L)
             )
-        }.sortedByDescending { it.lastMessageTime }
+        }.sortedWith(compareByDescending<ChatSummary> { it.lastMessageTime }.thenBy { it.chatId })
     }
 
     private fun handleNotifications(docs: List<ChatDoc>, myUid: String) {
