@@ -82,6 +82,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.NotificationsOff
 import com.example.data.ChatSummary
 import com.example.data.Contact
 import com.example.ui.DakkViewModel
@@ -108,13 +110,14 @@ fun HomeScreen(viewModel: DakkViewModel) {
     val chatsLoaded by viewModel.chatsLoaded.collectAsStateWithLifecycle()
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
+    val typingLabels by viewModel.typingLabels.collectAsStateWithLifecycle()
 
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var chatQuery by rememberSaveable { mutableStateOf("") }
     var showAddContact by rememberSaveable { mutableStateOf(false) }
 
-    val unreadCount = chats.count { it.isUnread }
+    val unreadCount = chats.count { it.isUnread && !it.isMuted }
 
     Scaffold(
         containerColor = DakkDarkBg,
@@ -165,6 +168,11 @@ fun HomeScreen(viewModel: DakkViewModel) {
                     }
                 },
                 actions = {
+                    if (tab == HomeTab.CHATS) {
+                        IconButton(onClick = { viewModel.openNewGroup() }) {
+                            Icon(Icons.Default.GroupAdd, contentDescription = "Yeni grup")
+                        }
+                    }
                     if (tab != HomeTab.SETTINGS) {
                         // Sohbetler sekmesinde arama, listenin üstündeki arama çubuğundadır.
                         if (tab == HomeTab.CONTACTS) IconButton(onClick = {
@@ -278,12 +286,14 @@ fun HomeScreen(viewModel: DakkViewModel) {
                             searchingChats -> SearchResults(
                                 query = chatQuery,
                                 chats = filtered,
+                                typing = typingLabels,
                                 contacts = otherContacts,
                                 onChat = { viewModel.openChat(it.peerUid) },
                                 onContact = { viewModel.openChat(it.uid) }
                             )
                             config.assistantEnabled -> ChatList(
                                 chats = filtered,
+                                typing = typingLabels,
                                 showAssistant = true,
                                 onAssistant = { viewModel.openAssistant() },
                                 onAddContact = { showAddContact = true }
@@ -294,7 +304,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 action = "Kişi ekle",
                                 onAction = { showAddContact = true }
                             )
-                            else -> ChatList(filtered, showAssistant = false) { viewModel.openChat(it.peerUid) }
+                            else -> ChatList(filtered, typing = typingLabels, showAssistant = false) { viewModel.openChat(it.peerUid) }
                         }
                     }
                 }
@@ -326,6 +336,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
 @Composable
 private fun ChatList(
     chats: List<ChatSummary>,
+    typing: Map<String, String>,
     showAssistant: Boolean,
     onAssistant: () -> Unit = {},
     onAddContact: () -> Unit = {},
@@ -397,13 +408,13 @@ private fun ChatList(
             }
         }
         items(chats, key = { it.chatId }) { chat ->
-            ChatRow(chat, query = "", onClick = { onClick(chat) })
+            ChatRow(chat, query = "", typing = typing[chat.peerUid], onClick = { onClick(chat) })
         }
     }
 }
 
 @Composable
-private fun ChatRow(chat: ChatSummary, query: String, onClick: () -> Unit) {
+private fun ChatRow(chat: ChatSummary, query: String, typing: String?, onClick: () -> Unit) {
     Column {
         Row(
             modifier = Modifier
@@ -412,19 +423,30 @@ private fun ChatRow(chat: ChatSummary, query: String, onClick: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Avatar(chat.peerName, chat.peerPhotoUrl, size = 52.dp)
+            Avatar(chat.peerName, chat.peerPhotoUrl, size = 52.dp, model = chat.photoModel, isGroup = chat.isGroup)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        highlight(chat.peerName, query),
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            highlight(chat.peerName, query),
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (chat.isMuted) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Default.NotificationsOff,
+                                contentDescription = "Sessizde",
+                                tint = DakkTextTertiaryDark,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
                     Text(
                         formatListTime(chat.lastMessageTime),
                         color = if (chat.isUnread) DakkYellow else DakkTextTertiaryDark,
@@ -432,7 +454,16 @@ private fun ChatRow(chat: ChatSummary, query: String, onClick: () -> Unit) {
                     )
                 }
                 Spacer(Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (typing != null) {
+                    Text(
+                        typing,
+                        color = DakkYellow,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else Row(verticalAlignment = Alignment.CenterVertically) {
                     if (chat.lastFromMe) {
                         Icon(
                             Icons.Default.DoneAll,
@@ -457,7 +488,7 @@ private fun ChatRow(chat: ChatSummary, query: String, onClick: () -> Unit) {
                             Modifier
                                 .size(10.dp)
                                 .clip(CircleShape)
-                                .background(DakkYellow)
+                                .background(if (chat.isMuted) DakkTextTertiaryDark else DakkYellow)
                         )
                     }
                 }
@@ -546,6 +577,7 @@ private fun SectionLabel(text: String) {
 private fun SearchResults(
     query: String,
     chats: List<ChatSummary>,
+    typing: Map<String, String>,
     contacts: List<Contact>,
     onChat: (ChatSummary) -> Unit,
     onContact: (Contact) -> Unit
@@ -574,7 +606,7 @@ private fun SearchResults(
         if (chats.isNotEmpty()) {
             item(key = "label_chats") { SectionLabel("SOHBETLER") }
             items(chats, key = { "c_" + it.chatId }) { chat ->
-                ChatRow(chat, query = query, onClick = { onChat(chat) })
+                ChatRow(chat, query = query, typing = typing[chat.peerUid], onClick = { onChat(chat) })
             }
         }
         if (contacts.isNotEmpty()) {

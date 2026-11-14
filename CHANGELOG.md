@@ -2,6 +2,45 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.3.0] - 2026-11-14
+
+### Yeni
+- **Gruplar:** En fazla 50 kişilik gruplar kurabilirsin. Sohbetler sekmesindeki 👥+ simgesi → kişileri seç →
+  grup adı ve fotoğrafı. Grup mesajları da uçtan uca şifreli. Tepkiler, yanıtlar, fotoğraflar ve ekran
+  görüntüsü bilgisi gruplarda da çalışıyor. Bildirim başlığında "Grup · Gönderen" yazıyor.
+  - Grubu kuran kişi yöneticidir. Yöneticiler kişi ekleyip çıkarabilir, başkalarını yönetici yapabilir,
+    grubun adını ve fotoğrafını değiştirebilir.
+  - **Davet bağlantısı:** Yönetici açarsa bağlantıya dokunan kişi gruba katılabilir. Bağlantı istenince
+    yenilenebilir; eski bağlantı çalışmaz hale gelir.
+  - Herkes istediği zaman gruptan ayrılabilir.
+- **Anketler:** Grupta 📊 simgesiyle 2–10 seçenekli anket aç; tek veya çoklu seçim. Kim neye oy verdi
+  görünür, oyunu istediğin zaman değiştirebilirsin. Sorular ve oylar da şifreli.
+- **⚽ Maç anketi + Takım kur:** Hazır "Maça geliyor musun?" anketi. *Takım kur* düğmesi "Geliyorum"
+  diyenleri rastgele iki dengeli takıma bölüp sonucu gruba yazıyor.
+- **Yazıyor balonu:** Karşındaki yazarken sohbette zıplayan sarı noktalı bir balon çıkıyor; başlıkta ve
+  sohbet listesinde "yazıyor…" görünüyor. Gruplarda kimin yazdığı da görünüyor ("ronaldoo7 ve 2 kişi
+  yazıyor…"). Sinyal hiçbir yerde saklanmıyor, yazmayı bırakınca birkaç saniyede kayboluyor.
+- **Sohbet bilgi ekranı:** Sohbetin başlığına dokun. Profil, sohbette arama, sessize alma, kaybolan mesajlar,
+  takma adlar, gizlilik ve güvenlik, paylaşılan fotoğraflar ve bağlantılar tek ekranda. Grupta kişiler,
+  yöneticiler ve davet bağlantısı da burada.
+- **Sessize al:** 8 saat, 1 hafta veya her zaman. Sessizdeki sohbet bildirim göndermez, listede 🔕 ile görünür.
+- **Takma adlar:** Sohbetteki herkesin gördüğü takma adlar. Birebir sohbette iki taraf da birbirine takma ad
+  verebilir. Grupta herkes kendi takma adını, yöneticiler herkesinkini değiştirebilir. Değişiklik sohbete
+  küçük bir notla yazılıyor.
+- **Kişiye özel fotoğraf:** Birebir sohbette karşındakine yalnızca senin telefonunda görünen bir fotoğraf
+  verebilirsin.
+- **Kaybolan mesajlar:** Sohbet başına Kapalı / 24 saat / 7 gün. Açıkken yeni mesajlar süre dolunca
+  herkesten siliniyor.
+
+### İyileştirildi
+- **Yeni güncelleme ekranı:** Tam ekran, sarı ışıltılı ve modern bir tasarım. Sürüm geçişi, boyut,
+  "Neler yeni?" kartı ve dolan bir indirme düğmesi var. "Güncelleme gerekli" ekranı da aynı tasarıma geçti.
+- Ekranlar arası geçişler daha akıcı.
+
+### Önemli
+- Gruplar, anketler ve yazıyor balonu için **iki tarafın da 2.3.0 kullanması** gerekiyor.
+- Gizlilik politikası güncellendi: gruplar, takma adlar ve yazıyor sinyaliyle ilgili bölümler eklendi.
+
 ## [2.2.0] - 2026-11-11
 
 ### Yeni

@@ -46,7 +46,10 @@ import com.example.ui.components.UpdateDialog
 import com.example.ui.screens.AssistantScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.FounderPanelScreen
+import com.example.ui.screens.ChatInfoScreen
 import com.example.ui.screens.ChatScreen
+import com.example.ui.screens.GroupInviteDialog
+import com.example.ui.screens.NewGroupScreen
 import com.example.ui.screens.FoundContactDialog
 import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.DakkDarkBg
@@ -187,7 +190,7 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
         AnimatedContent(
             targetState = screen,
             transitionSpec = {
-                if (targetState != Screen.Home) {
+                if (targetState.depth >= initialState.depth && targetState != Screen.Home) {
                     (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
                         .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
                 } else {
@@ -200,11 +203,14 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
             when (target) {
                 Screen.Home -> HomeScreen(viewModel)
                 is Screen.Chat -> ChatScreen(target.peerUid, viewModel)
+                is Screen.ChatInfo -> ChatInfoScreen(target.key, viewModel)
+                is Screen.NewGroup -> NewGroupScreen(target, viewModel)
                 Screen.Assistant -> AssistantScreen(viewModel)
                 Screen.FounderPanel -> FounderPanelScreen(viewModel)
             }
         }
         if (dialogsAllowed) FoundContactDialog(viewModel)
+        if (dialogsAllowed) GroupInviteDialog(viewModel)
     }
 
     val pendingAnnouncement = announcement

@@ -182,40 +182,54 @@ fun ForceUpdateScreen(
     onUpdate: () -> Unit,
     onOpenReleasePage: () -> Unit
 ) {
-    NoticeLayout(
-        icon = { Icon(Icons.Default.SystemUpdate, null, tint = DakkYellow, modifier = Modifier.size(56.dp)) },
-        title = "Güncelleme gerekli",
-        body = when {
-            signatureMismatch ->
-                "Bu güncelleme yeni bir imza anahtarıyla yayınlandı. Dakk'ı kaldırıp yeni sürümü indirerek kurun."
-            message.isNotBlank() -> message
-            else -> "Dakk'ın bu sürümü artık desteklenmiyor. Devam etmek için lütfen güncelleyin."
-        }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(DakkDarkBg)
     ) {
-        if (downloading) {
-            LinearProgressIndicator(
-                progress = { progress / 100f },
-                color = DakkYellow,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(8.dp))
-            Text("İndiriliyor… %$progress", color = DakkTextSecondaryDark, fontSize = 13.sp)
-        } else {
-            Button(
-                onClick = { if (signatureMismatch || latestVersion == null) onOpenReleasePage() else onUpdate() },
-                colors = ButtonDefaults.buttonColors(containerColor = DakkYellow, contentColor = Color.Black),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) {
-                Text(
-                    when {
-                        signatureMismatch || latestVersion == null -> "İndirme sayfasını aç"
-                        else -> "Şimdi güncelle (v$latestVersion)"
+        UpdateGlow()
+        UpdateScaffold(
+            onClose = null,
+            bottom = {
+                val openPage = signatureMismatch || latestVersion == null
+                ProgressButton(
+                    label = when {
+                        downloading -> "İndiriliyor… %$progress"
+                        openPage -> "İndirme sayfasını aç"
+                        else -> "Şimdi güncelle"
                     },
-                    fontWeight = FontWeight.SemiBold
+                    downloading = downloading,
+                    progress = progress,
+                    onClick = { if (openPage) onOpenReleasePage() else onUpdate() }
                 )
             }
+        ) {
+            Spacer(Modifier.height(24.dp))
+            GlowingLogo()
+            Spacer(Modifier.height(22.dp))
+            Pill("GÜNCELLEME GEREKLİ")
+            Spacer(Modifier.height(14.dp))
+            Text(
+                if (latestVersion != null) "Dakk $latestVersion seni bekliyor" else "Dakk'ı güncelle",
+                color = Color.White,
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                lineHeight = 36.sp
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                when {
+                    signatureMismatch ->
+                        "Bu güncelleme yeni bir imza anahtarıyla yayınlandı. Dakk'ı kaldırıp yeni sürümü indirerek kurun."
+                    message.isNotBlank() -> message
+                    else -> "Dakk'ın bu sürümü artık desteklenmiyor. Devam etmek için güncelle; mesajların ve kişilerin olduğu gibi kalır."
+                },
+                color = DakkTextSecondaryDark,
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

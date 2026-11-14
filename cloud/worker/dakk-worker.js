@@ -8,8 +8,8 @@
  *
  * Güvenlik:
  *   - Her istek Firebase kimlik jetonuyla doğrulanır.
- *   - /notify yalnızca isteği yapan kişinin gerçekten gönderdiği bir mesaj için, sohbetin diğer üyesine
- *     bildirim gönderir. İçerik şifreli iletilir; sunucu okuyamaz.
+ *   - /notify yalnızca isteği yapan kişinin gerçekten gönderdiği bir mesaj için, sohbetin diğer
+ *     üyelerine (grupta tüm üyelere) bildirim gönderir. İçerik şifreli iletilir; sunucu okuyamaz.
  *   - Alıcı göndereni engellediyse bildirim gönderilmez.
  *   - Özel API anahtarı uygulamalara gitmez.
  *   - /admin/* uçları yalnızca sunucu gizlisinde (DAKK_ADMIN_KEY) tutulan anahtarla çalışır; anahtar
@@ -22,6 +22,7 @@ const SCOPES =
   "https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/firebase";
 const MAX_FCM_CONTENT = 3000;
 const MAX_MESSAGE_AGE_MS = 15 * 60 * 1000;
+const MAX_GROUP_MEMBERS = 50;
 
 // İzolat (Worker örneği) yaşadığı sürece tutulan önbellekler.
 let jwksCache = { keys: null, expires: 0 };
@@ -35,6 +36,10 @@ const worker = {
     const path = url.pathname.replace(/\/+$/, "");
     if (request.method === "GET") {
       const info = { ok: true, service: "dakk", configured: isConfigured(env), time: new Date().toISOString() };
+      // "Yazıyor…" sinyali için anlık yayın kanalı. Yalnızca herkese açık (anon) anahtar paylaşılır.
+      if (env.REALTIME_URL && env.REALTIME_PUBLIC_KEY) {
+        info.realtime = { url: env.REALTIME_URL, key: env.REALTIME_PUBLIC_KEY };
+      }
       if (info.configured && url.searchParams.get("check") === "deep") info.checks = await deepCheck(env);
       return json(info);
     }
@@ -116,15 +121,12 @@ async function handleNotify(request, ctx) {
   const createdAt = msg.createdAt ? Date.parse(msg.createdAt) : 0;
   if (createdAt && Date.now() - createdAt > MAX_MESSAGE_AGE_MS) return json({ ok: true, skipped: "old" });
 
-  const recipient = members.find((m) => m !== ctx.uid);
-  if (!recipient) return json({ ok: true, skipped: "no_recipient" });
+  const messageType = String(msg.messageType || "TEXT");
+  if (messageType === "SYSTEM" || messageType === "SCREENSHOT") return json({ ok: true, skipped: "silent" });
 
-  const contact = await getDoc(ctx, `users/${recipient}/contacts/${ctx.uid}`);
-  if (contact && contact.isBlocked === true) return json({ ok: true, skipped: "blocked" });
-
-  const tokenDoc = await getDoc(ctx, `push_tokens/${recipient}`);
-  const token = tokenDoc && typeof tokenDoc.token === "string" ? tokenDoc.token : "";
-  if (!token) return json({ ok: true, skipped: "no_token" });
+  const isGroup = chat.isGroup === true || chatId.startsWith("g_");
+  const recipients = members.filter((m) => m !== ctx.uid).slice(0, MAX_GROUP_MEMBERS);
+  if (recipients.length === 0) return json({ ok: true, skipped: "no_recipient" });
 
   const data = {
     type: "msg",
@@ -132,44 +134,67 @@ async function handleNotify(request, ctx) {
     messageId,
     senderId: ctx.uid,
     senderName: String(msg.senderName || "Dakk").slice(0, 60),
-    messageType: String(msg.messageType || "TEXT"),
+    messageType,
     senderKey: String(msg.senderKey || ""),
     recipientKey: String(msg.recipientKey || ""),
     assistant: msg.isAssistant === true ? "1" : "0",
   };
-  const content = String(msg.content || "");
-  // FCM veri sınırı 4 KB; sığmayan içeriği telefon Firestore'dan kendisi okur.
-  if (content.length + data.senderKey.length + data.recipientKey.length <= MAX_FCM_CONTENT) {
-    data.content = content;
-  }
-
-  const res = await googleFetch(ctx, `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`, {
-    method: "POST",
-    body: JSON.stringify({
-      message: {
-        token,
-        data,
-        android: { priority: "HIGH", ttl: "86400s" },
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    if (res.status === 404 || text.includes("UNREGISTERED")) {
-      await deleteDoc(ctx, `push_tokens/${recipient}`).catch(() => {});
-      return json({ ok: true, skipped: "token_unregistered" });
+  if (isGroup) {
+    // Grup içeriği her üye için ayrı sarılmış anahtarla şifrelidir; telefon mesajı Firestore'dan okur.
+    data.group = "1";
+    data.groupName = String(chat.name || "Grup").slice(0, 60);
+  } else {
+    const content = String(msg.content || "");
+    // FCM veri sınırı 4 KB; sığmayan içeriği telefon Firestore'dan kendisi okur.
+    if (content.length + data.senderKey.length + data.recipientKey.length <= MAX_FCM_CONTENT) {
+      data.content = content;
     }
-    console.error("FCM hatası", res.status, text);
-    throw httpError(502, "Bildirim gönderilemedi");
   }
+
+  const results = await Promise.all(recipients.map((r) => pushTo(ctx, r, data)));
+  const sent = results.filter((r) => r === "sent").length;
+  if (sent === 0 && results.includes("error")) throw httpError(502, "Bildirim gönderilemedi");
 
   notifiedMessages.set(dedupeKey, Date.now());
   if (notifiedMessages.size > 2000) {
     const cutoff = Date.now() - MAX_MESSAGE_AGE_MS;
     for (const [k, t] of notifiedMessages) if (t < cutoff) notifiedMessages.delete(k);
   }
-  return json({ ok: true });
+  return json({ ok: true, sent });
+}
+
+/** Tek bir alıcıya bildirim gönderir. Alıcı göndereni engellediyse gönderilmez. */
+async function pushTo(ctx, recipient, data) {
+  try {
+    const contact = await getDoc(ctx, `users/${recipient}/contacts/${ctx.uid}`);
+    if (contact && contact.isBlocked === true) return "blocked";
+
+    const tokenDoc = await getDoc(ctx, `push_tokens/${recipient}`);
+    const token = tokenDoc && typeof tokenDoc.token === "string" ? tokenDoc.token : "";
+    if (!token) return "no_token";
+
+    const res = await googleFetch(ctx, `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`, {
+      method: "POST",
+      body: JSON.stringify({
+        message: {
+          token,
+          data,
+          android: { priority: "HIGH", ttl: "86400s" },
+        },
+      }),
+    });
+    if (res.ok) return "sent";
+    const text = await res.text();
+    if (res.status === 404 || text.includes("UNREGISTERED")) {
+      await deleteDoc(ctx, `push_tokens/${recipient}`).catch(() => {});
+      return "unregistered";
+    }
+    console.error("FCM hatası", res.status, text);
+    return "error";
+  } catch (e) {
+    console.error("Bildirim hatası", e && e.stack ? e.stack : e);
+    return "error";
+  }
 }
 
 // ------------------------------------------------------------------------------------------------

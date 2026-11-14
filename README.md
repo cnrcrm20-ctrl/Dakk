@@ -32,6 +32,16 @@ mesajı sadece sen ve karşındaki kişi açabilir.
 - 📨 **Çevrimdışı iletim** — Arkadaşın o an çevrimdışı olsa bile mesajın ona ulaşır.
 - ✓✓ **Okundu bilgisi** — Gönderiliyor, gönderildi ve okundu göstergeleri.
 - 📷 **Kolay arkadaş ekleme** — QR kod tara, galeriden QR seç, davet bağlantısı paylaş veya e-postayla ara.
+- 👥 **Gruplar** — 50 kişiye kadar şifreli grup sohbeti. Yöneticiler kişi ekler/çıkarır, grubun adını ve
+  fotoğrafını değiştirir, davet bağlantısını açıp kapatır.
+- 📊 **Anketler** — Grupta tek veya çoklu seçimli anket. Hazır *⚽ Maç anketi*nde **Takım kur** düğmesi
+  gelenleri rastgele iki takıma böler.
+- 💬 **Yazıyor balonu** — Karşındaki yazarken zıplayan noktalar; grupta kimin yazdığı da görünür.
+- ℹ️ **Sohbet bilgi ekranı** — Başlığa dokun: profil, arama, sessize alma, kaybolan mesajlar, takma adlar,
+  paylaşılan fotoğraflar ve bağlantılar.
+- 🔕 **Sessize al** — 8 saat, 1 hafta veya her zaman.
+- 🏷️ **Takma adlar** — Sohbetteki herkesin gördüğü takma adlar.
+- ⏳ **Kaybolan mesajlar** — Sohbet başına 24 saat veya 7 gün sonra kendiliğinden silinen mesajlar.
 - 🛡️ **Güvenlik numarası** — Sohbetin gerçekten doğru kişiyle olduğunu yüz yüze doğrula.
 - 🚫 **Engelleme** — İstemediğin kişilerden gelen mesajları durdur.
 - 🖼️ **Fotoğraf gönderme** — Fotoğraflar telefonda küçültülür ve uçtan uca şifrelenir. Alıcı açınca sunucudaki kopya silinir.
@@ -68,8 +78,18 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 | --- | --- |
 | Arkadaş eklemek | Ana ekranda **Kişi ekle** → *QR kod tara*, *Galeriden QR seç* veya e-posta / davet bağlantısı yaz |
 | Kendi kodunu göstermek | **Kişi ekle** → *QR kodumu göster* (veya Ayarlar → *Davet bağlantısı paylaş*) |
-| Sohbeti doğrulamak | Sohbet → ⋮ → *Güvenlik numarası* — iki telefonda aynı sayılar görünmeli |
-| Bir kişiyi engellemek | Sohbet → ⋮ → *Engelle* |
+| Grup kurmak | Sohbetler sekmesi → sağ üstteki 👥+ simgesi → kişileri seç → grup adı |
+| Gruba kişi eklemek | Grubun başlığına dokun → *Ekle* (yalnızca yöneticiler) |
+| Davet bağlantısı paylaşmak | Grubun başlığına dokun → *Davet linki* → aç ve paylaş (yalnızca yöneticiler) |
+| Gruptan ayrılmak | Grubun başlığına dokun → en altta *Gruptan ayrıl* |
+| Anket açmak | Grup sohbetinde mesaj kutusunun solundaki 📊 simgesi → *Anket* veya *⚽ Maç anketi* |
+| Takım kurmak | Maç anketinin altındaki *Takım kur* düğmesi |
+| Sohbeti sessize almak | Sohbetin başlığına dokun → *Sessize al* |
+| Takma ad vermek | Sohbetin başlığına dokun → *Takma adlar* |
+| Kaybolan mesajları açmak | Sohbetin başlığına dokun → *Kaybolan mesajlar* → 24 saat / 7 gün |
+| Kişiye özel fotoğraf vermek | Birebir sohbette başlığa dokun → *Sohbet ayarları* → *Fotoğrafı değiştir* (yalnızca sende görünür) |
+| Sohbeti doğrulamak | Sohbetin başlığına dokun → *Gizlilik ve güvenlik* → *Güvenlik numarası* — iki telefonda aynı sayılar görünmeli |
+| Bir kişiyi engellemek | Sohbetin başlığına dokun → *Sohbet ayarları* → *Engelle* |
 | Bir sohbeti bulmak | Sohbetler listesinin üstündeki *Sohbetlerde ara* çubuğu |
 | Tepki bırakmak | Mesaja uzun bas → 😂 ❤️ ⭐ 👌 (kaldırmak için aynı tepkiye tekrar dokun) |
 | Bir mesajı yanıtlamak | Mesaja uzun bas → *Yanıtla* |
@@ -91,7 +111,9 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
   mesajlar o cihazda okunamaz hale gelir (anahtarlar cihazdan dışarı çıkmaz).
 - "Ekran görüntüsü aldı" bilgisi yalnızca ekran görüntüsünü alan kişinin telefonu **Android 14 veya
   üzeriyse** gönderilir. Daha eski Android sürümleri bunu uygulamalara bildirmez. Ekran kaydı algılanmaz.
-- Şimdilik yazı ve fotoğraf gönderilebilir. Video, sesli mesaj ve grup sohbeti yoktur.
+- Şimdilik yazı, fotoğraf ve anket gönderilebilir. Video ve sesli mesaj yoktur.
+- Gruplar, anketler ve "yazıyor…" bilgisi için konuştuğun kişilerin de Dakk 2.3.0 veya üzerini kullanması gerekir.
+- "Yazıyor…" bilgisi yalnızca uygulama açıkken gönderilir ve görünür.
 - Dakk Asistan ile yapılan sohbetler ve `@dakk` ile asistana gönderilen mesajlar uçtan uca şifreli değildir.
 
 ## Gizlilik ve güvenlik
