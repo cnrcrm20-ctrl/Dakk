@@ -20,7 +20,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.DataSaverOn
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
@@ -79,6 +82,7 @@ fun SettingsScreen(viewModel: DakkViewModel) {
     val blocked by viewModel.blockedContacts.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val autoUpdate by viewModel.autoUpdate.collectAsStateWithLifecycle()
+    val chatBackup by viewModel.chatBackup.collectAsStateWithLifecycle()
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
     val dataSaver by viewModel.dataSaver.collectAsStateWithLifecycle()
     val saverLevel by viewModel.saverLevel.collectAsStateWithLifecycle()
@@ -136,6 +140,30 @@ fun SettingsScreen(viewModel: DakkViewModel) {
             }
             runCatching { context.startActivity(intent) }
         }
+        SettingRow(Icons.Default.VerifiedUser, "İzinler", "Bildirim, kamera, güncelleme ve pil") { viewModel.openPermissions() }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setChatBackup(!chatBackup) }
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Backup, contentDescription = null, tint = DakkYellow, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Sohbet yedeği", color = Color.White, fontSize = 16.sp)
+                Text(
+                    "Telefon değiştirince arkadaşların ortak sohbetleri şifreli geri gönderir; sen de onlara",
+                    color = DakkTextSecondaryDark,
+                    fontSize = 13.sp
+                )
+            }
+            Switch(
+                checked = chatBackup,
+                onCheckedChange = { viewModel.setChatBackup(it) },
+                colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
+            )
+        }
         SettingRow(
             Icons.Default.DataSaverOn,
             "Veri tasarrufu",
@@ -181,6 +209,7 @@ fun SettingsScreen(viewModel: DakkViewModel) {
 
         SectionTitle("Hakkında")
         SettingRow(Icons.Default.PrivacyTip, "Gizlilik Politikası", null) { openUrl(context, PRIVACY_POLICY_URL) }
+        SettingRow(Icons.Default.PlayCircle, "Tanıtımı tekrar izle", "30 saniyelik kısa tur") { viewModel.replayTutorial() }
         SettingRow(Icons.Default.Code, "Açık kaynak kodu", "GitHub'da görüntüle") { openUrl(context, REPO_URL) }
         SettingRow(Icons.Default.Info, "Dakk", "Sürüm ${viewModel.appVersion}") { openUrl(context, "$REPO_URL/releases") }
 

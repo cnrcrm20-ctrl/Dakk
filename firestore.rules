@@ -27,6 +27,9 @@ service cloud.firestore {
              data.email is string && data.email.size() <= 120 &&
              (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000)) &&
              (!('status' in data) || (data.status is string && data.status.size() <= 100)) &&
+             (!('caps' in data) || (data.caps is int && data.caps >= 0 && data.caps <= 100)) &&
+             (!('backup' in data) || data.backup is bool) &&
+             (!('restoreAt' in data) || (data.restoreAt is int && data.restoreAt >= 0)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -197,7 +200,21 @@ service cloud.firestore {
              (!('replyToSender' in data) || (data.replyToSender is string && data.replyToSender.size() <= 128)) &&
              (!('replyPreview' in data) || (data.replyPreview is string && data.replyPreview.size() <= 1000)) &&
              !('reactions' in data) &&
+             (!('del' in data) || (data.del == true && data.content == '')) &&
+             (!('restoreTo' in data) || (data.messageType == 'SYSTEM' && data.restoreTo is string && data.restoreTo.size() <= 128)) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // 2.5.0+ posta kutusu: birebir sohbette alıcı, telefonuna kaydettiği mesajı okuduktan sonra sunucudan
+    // kaldırabilir (anketler ve silinmiş mesaj kayıtları hariç). Grup sohbetlerinde yalnızca gönderen kaldırır.
+    function isReceivedSweep(chatId) {
+      return !isGroupId(chatId) &&
+             request.auth.uid in chatId.split('_') &&
+             resource.data.senderId != request.auth.uid &&
+             resource.data.get('del', false) != true &&
+             resource.data.messageType != 'POLL' &&
+             (resource.data.deliveryStatus == 'READ' || resource.data.messageType in ['SYSTEM', 'SCREENSHOT']) &&
+             resource.data.createdAt < request.time - duration.value(1, 'd');
     }
 
     function isOwnReactionChange() {
@@ -270,6 +287,7 @@ service cloud.firestore {
                           isOwnVoteChange());
         allow delete: if isSignedIn() &&
                          (resource.data.senderId == request.auth.uid ||
+                          isReceivedSweep(chatId) ||
                           (isExpired(resource.data) && isChatMember(chatId)));
       }
 

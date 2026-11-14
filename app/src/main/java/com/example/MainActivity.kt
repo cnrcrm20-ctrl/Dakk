@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -44,7 +45,15 @@ import com.example.ui.components.ForceUpdateScreen
 import com.example.ui.components.MaintenanceScreen
 import com.example.ui.components.UpdateDialog
 import com.example.ui.screens.AssistantScreen
+import com.example.ui.onboarding.Onboarding
+import com.example.ui.onboarding.SetupStep
+import com.example.ui.onboarding.SetupWizard
+import com.example.ui.onboarding.TutorialOverlay
+import com.example.ui.onboarding.WelcomeStep
+import com.example.ui.onboarding.WizardTopBar
+import com.example.ui.onboarding.deviceSetupState
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.PermissionsScreen
 import com.example.ui.screens.FounderPanelScreen
 import com.example.ui.screens.ChatInfoScreen
 import com.example.ui.screens.ChatScreen
@@ -183,38 +192,66 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
         return
     }
 
+    val wizardDone by viewModel.wizardDone.collectAsStateWithLifecycle()
+    val tutorialVisible by viewModel.tutorialVisible.collectAsStateWithLifecycle()
+    // Adımlar oturum başına bir kez hesaplanır; izin verilince adım listeden kaybolmasın.
+    val setupSteps = remember(user?.uid) { Onboarding.steps(viewModel.isNewInstall, deviceSetupState(context)) }
+    val pendingSteps = remember(setupSteps, wizardDone) { Onboarding.postAuthPending(setupSteps, wizardDone) }
+
     if (user == null) {
-        AuthScreen()
-    } else {
-        if (dialogsAllowed) NotificationPermissionRequest()
-        AnimatedContent(
-            targetState = screen,
-            transitionSpec = {
-                if (targetState.depth >= initialState.depth && targetState != Screen.Home) {
-                    (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
-                        .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
-                } else {
-                    (slideInHorizontally(tween(220)) { -it / 4 } + fadeIn(tween(220)))
-                        .togetherWith(slideOutHorizontally(tween(220)) { it } + fadeOut(tween(220)))
-                }
-            },
-            label = "screen"
-        ) { target ->
-            when (target) {
-                Screen.Home -> HomeScreen(viewModel)
-                is Screen.Chat -> ChatScreen(target.peerUid, viewModel)
-                is Screen.ChatInfo -> ChatInfoScreen(target.key, viewModel)
-                is Screen.NewGroup -> NewGroupScreen(target, viewModel)
-                Screen.Assistant -> AssistantScreen(viewModel)
-                Screen.FounderPanel -> FounderPanelScreen(viewModel)
-            }
+        if (viewModel.isNewInstall && SetupStep.WELCOME.id !in wizardDone) {
+            WelcomeStep(setupSteps) { viewModel.markWizardStep(SetupStep.WELCOME.id) }
+        } else if (viewModel.isNewInstall) {
+            AuthScreen(header = {
+                WizardTopBar(
+                    total = setupSteps.size,
+                    index = setupSteps.indexOf(SetupStep.GOOGLE).coerceAtLeast(0),
+                    onBack = { viewModel.unmarkWizardStep(SetupStep.WELCOME.id) },
+                    onSkip = null
+                )
+            })
+        } else {
+            AuthScreen()
         }
-        if (dialogsAllowed) FoundContactDialog(viewModel)
-        if (dialogsAllowed) GroupInviteDialog(viewModel)
+        return
+    }
+    if (pendingSteps.isNotEmpty()) {
+        SetupWizard(viewModel, setupSteps, pendingSteps.first())
+        return
     }
 
+    AnimatedContent(
+        targetState = screen,
+        transitionSpec = {
+            if (targetState.depth >= initialState.depth && targetState != Screen.Home) {
+                (slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)))
+                    .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
+            } else {
+                (slideInHorizontally(tween(220)) { -it / 4 } + fadeIn(tween(220)))
+                    .togetherWith(slideOutHorizontally(tween(220)) { it } + fadeOut(tween(220)))
+            }
+        },
+        label = "screen"
+    ) { target ->
+        when (target) {
+            Screen.Home -> HomeScreen(viewModel)
+            is Screen.Chat -> ChatScreen(target.peerUid, viewModel)
+            is Screen.ChatInfo -> ChatInfoScreen(target.key, viewModel)
+            is Screen.NewGroup -> NewGroupScreen(target, viewModel)
+            Screen.Assistant -> AssistantScreen(viewModel)
+            Screen.FounderPanel -> FounderPanelScreen(viewModel)
+            Screen.Permissions -> PermissionsScreen(viewModel)
+        }
+    }
+    if (tutorialVisible && screen == Screen.Home) {
+        TutorialOverlay(onFinish = { viewModel.finishTutorial() })
+        return
+    }
+    if (dialogsAllowed) FoundContactDialog(viewModel)
+    if (dialogsAllowed) GroupInviteDialog(viewModel)
+
     val pendingAnnouncement = announcement
-    if (dialogsAllowed && user != null && pendingAnnouncement != null) {
+    if (dialogsAllowed && pendingAnnouncement != null) {
         AnnouncementScreen(
             announcement = pendingAnnouncement,
             isPreview = preview != null,
@@ -233,24 +270,8 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
             signatureMismatch = update.signatureMismatch,
             onUpdate = { viewModel.startUpdate() },
             onOpenReleasePage = { viewModel.openReleasePage() },
-            onDismiss = { viewModel.dismissUpdateDialog() }
+            onDismiss = { viewModel.dismissUpdateDialog() },
+            silentInstall = viewModel.silentUpdates
         )
-    }
-}
-
-/** Android 13+ için bildirim iznini oturum açıldıktan sonra bir kez ister. */
-@Composable
-private fun NotificationPermissionRequest() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    LaunchedEffect(Unit) {
-        val prefs = context.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
-        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!granted && !prefs.getBoolean("notification_permission_asked", false)) {
-            prefs.edit().putBoolean("notification_permission_asked", true).apply()
-            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
     }
 }

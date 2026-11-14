@@ -2,6 +2,10 @@ package com.example.update
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
+import android.content.pm.PackageManager
+import android.content.pm.PackageInstaller
+import android.app.PendingIntent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -169,6 +173,7 @@ class GitHubUpdateManager(context: Context) {
         }
     }
 
+    /** Tek dokunuşla kurulum: sistemin kurulum ekranı açılır (sessiz kurulum olmazsa yedek yol). */
     fun install(apk: File) {
         val uri = FileProvider.getUriForFile(appContext, "${appContext.packageName}.fileprovider", apk)
         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -176,5 +181,50 @@ class GitHubUpdateManager(context: Context) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         appContext.startActivity(intent)
+    }
+
+    /** Android 12+ cihazlarda Dakk kendini sorusuz güncelleyebilir. */
+    val supportsSilentInstall: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+    /**
+     * Dakk Güncelleyici: APK, PackageInstaller oturumuyla kurulur. Android 12+ cihazlarda uygulama kendini
+     * güncellediği için onay istenmez (USER_ACTION_NOT_REQUIRED); sistem yine de onay isterse tek dokunuşluk
+     * kurulum ekranı açılır ([UpdateInstallReceiver]). Oturum açılamazsa klasik kurulum ekranına dönülür.
+     */
+    fun installWithSession(apk: File) {
+        try {
+            val installer = appContext.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                setAppPackageName(appContext.packageName)
+                setSize(apk.length())
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setInstallReason(PackageManager.INSTALL_REASON_USER)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                }
+            }
+            val sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("dakk.apk", 0, apk.length()).use { out ->
+                    apk.inputStream().use { it.copyTo(out, 64 * 1024) }
+                    session.fsync(out)
+                }
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+                val status = PendingIntent.getBroadcast(
+                    appContext,
+                    sessionId,
+                    Intent(appContext, UpdateInstallReceiver::class.java).setAction(UpdateInstallReceiver.ACTION_STATUS),
+                    flags
+                )
+                session.commit(status.intentSender)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Güncelleyici oturumu açılamadı; kurulum ekranı açılıyor", e)
+            install(apk)
+        }
+    }
+
+    companion object {
+        private const val TAG = "DakkUpdater"
     }
 }

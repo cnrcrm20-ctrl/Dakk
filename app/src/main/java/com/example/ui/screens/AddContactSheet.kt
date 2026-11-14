@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.onboarding.PermissionExplainer
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -85,6 +86,7 @@ fun AddContactSheet(viewModel: DakkViewModel, onDismiss: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var showScanner by remember { mutableStateOf(false) }
     var showMyQr by remember { mutableStateOf(false) }
+    var showCameraCard by remember { mutableStateOf(false) }
 
     val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) showScanner = true
@@ -96,6 +98,19 @@ fun AddContactSheet(viewModel: DakkViewModel, onDismiss: () -> Unit) {
             if (decoded != null) viewModel.lookupContact(decoded)
             else Toast.makeText(context, "Seçilen görselde Dakk QR kodu bulunamadı.", Toast.LENGTH_LONG).show()
         }
+    }
+
+    if (showCameraCard) {
+        PermissionExplainer(
+            emoji = "📷",
+            title = "QR için kamera",
+            text = "Arkadaşının QR kodunu okutmak için kameraya bir anlığına bakmamız lazım. Fotoğraf çekmeyiz, hiçbir şey kaydetmeyiz.",
+            onConfirm = {
+                showCameraCard = false
+                cameraPermission.launch(Manifest.permission.CAMERA)
+            },
+            onDismiss = { showCameraCard = false }
+        )
     }
 
     ModalBottomSheet(
@@ -121,7 +136,7 @@ fun AddContactSheet(viewModel: DakkViewModel, onDismiss: () -> Unit) {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                     showScanner = true
                 } else {
-                    cameraPermission.launch(Manifest.permission.CAMERA)
+                    showCameraCard = true
                 }
             }
             ActionRow(Icons.Default.Image, "Galeriden QR seç", "Ekran görüntüsündeki QR kodu tanıyın") {

@@ -46,6 +46,7 @@ class CryptoEngine(context: Context) {
         private const val PREF_PUB_KEY = "pref_ec_pub_key"
         private const val PREF_PRIV_KEY = "pref_ec_priv_key"
         private const val PREF_PRIV_KEY_WRAPPED = "pref_ec_priv_key_wrapped"
+        private const val PREF_KEY_CREATED_AT = "pref_key_created_at"
         private const val KEYSTORE_ALIAS = "dakk_identity_wrap_key"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val GCM_TAG_BITS = 128
@@ -66,9 +67,16 @@ class CryptoEngine(context: Context) {
         kpg.initialize(ECGenParameterSpec("secp256r1"), secureRandom)
         val pair = kpg.generateKeyPair()
         storeKeyPair(pair)
+        prefs.edit().putLong(PREF_KEY_CREATED_AT, System.currentTimeMillis()).apply()
         cachedKeyPair = pair
         return pair
     }
+
+    /** Bu kurulumda daha önce bir kimlik anahtarı üretilmiş mi? */
+    fun hasStoredKey(): Boolean = prefs.contains(PREF_PUB_KEY)
+
+    /** Kimlik anahtarının bu kurulumda üretildiği zaman (2.5.0 öncesi üretilenlerde 0). */
+    fun keyCreatedAt(): Long = prefs.getLong(PREF_KEY_CREATED_AT, 0L)
 
     fun publicKeyBase64(): String =
         Base64.encodeToString(getOrCreateKeyPair().public.encoded, Base64.NO_WRAP)
@@ -159,11 +167,15 @@ class CryptoEngine(context: Context) {
             SecretKeySpec(secret, "AES")
         }
 
-    fun encrypt(plainText: String, peerPublicKeyBase64: String): String {
+    /**
+     * [pack] true ise metin önce sıkıştırılır ([TextPack]); yalnızca alıcıların hepsi 2.5.0+ ise kullanılmalı.
+     * Çözme tarafı iki biçimi de otomatik tanır.
+     */
+    fun encrypt(plainText: String, peerPublicKeyBase64: String, pack: Boolean = false): String {
         val iv = ByteArray(GCM_IV_BYTES).also { secureRandom.nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, sharedKey(peerPublicKeyBase64), GCMParameterSpec(GCM_TAG_BITS, iv))
-        val body = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
+        val body = cipher.doFinal(plainBytes(plainText, pack))
         return Base64.encodeToString(iv + body, Base64.NO_WRAP)
     }
 
@@ -174,8 +186,11 @@ class CryptoEngine(context: Context) {
         val body = all.copyOfRange(GCM_IV_BYTES, all.size)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, sharedKey(peerPublicKeyBase64), GCMParameterSpec(GCM_TAG_BITS, iv))
-        return String(cipher.doFinal(body), StandardCharsets.UTF_8)
+        return TextPack.decode(cipher.doFinal(body))
     }
+
+    private fun plainBytes(text: String, pack: Boolean): ByteArray =
+        if (pack) TextPack.encode(text) else text.toByteArray(StandardCharsets.UTF_8)
 
     /** İkili veriyi (ör. fotoğraf) sohbet anahtarıyla şifreler: [12 bayt IV][şifreli veri + etiket]. */
     fun encryptBytes(data: ByteArray, peerPublicKeyBase64: String): ByteArray {
@@ -232,7 +247,7 @@ class CryptoEngine(context: Context) {
      * Var olan bir mesaja bağlı küçük bir veriyi (ör. tepki emojisi) aynı iki anahtarla şifreler;
      * böylece [decryptMessage] ile iki taraf da çözebilir. Bu cihaz mesajın taraflarından biri değilse null.
      */
-    fun encryptForMessage(plainText: String, senderKey: String, recipientKey: String): String? {
+    fun encryptForMessage(plainText: String, senderKey: String, recipientKey: String, pack: Boolean = false): String? {
         if (senderKey.isBlank() || recipientKey.isBlank()) return null
         val otherKey = when (publicKeyBase64()) {
             senderKey -> recipientKey
@@ -240,7 +255,7 @@ class CryptoEngine(context: Context) {
             else -> return null
         }
         return try {
-            encrypt(plainText, otherKey)
+            encrypt(plainText, otherKey, pack)
         } catch (e: Exception) {
             Log.w(TAG, "Tepki şifrelenemedi", e)
             null
@@ -271,11 +286,11 @@ class CryptoEngine(context: Context) {
         }
     }
 
-    fun encryptWithKey(plainText: String, messageKey: ByteArray): String {
+    fun encryptWithKey(plainText: String, messageKey: ByteArray, pack: Boolean = false): String {
         val iv = ByteArray(GCM_IV_BYTES).also { secureRandom.nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(messageKey, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
-        val body = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
+        val body = cipher.doFinal(plainBytes(plainText, pack))
         return Base64.encodeToString(iv + body, Base64.NO_WRAP)
     }
 
@@ -288,7 +303,7 @@ class CryptoEngine(context: Context) {
             SecretKeySpec(messageKey, "AES"),
             GCMParameterSpec(GCM_TAG_BITS, all.copyOfRange(0, GCM_IV_BYTES))
         )
-        String(cipher.doFinal(all, GCM_IV_BYTES, all.size - GCM_IV_BYTES), StandardCharsets.UTF_8)
+        TextPack.decode(cipher.doFinal(all, GCM_IV_BYTES, all.size - GCM_IV_BYTES))
     } catch (e: Exception) {
         Log.w(TAG, "Grup mesajı çözülemedi", e)
         null

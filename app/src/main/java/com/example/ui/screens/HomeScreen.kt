@@ -89,6 +89,8 @@ import com.example.data.Contact
 import com.example.ui.DakkViewModel
 import com.example.ui.HomeTab
 import com.example.ui.components.Avatar
+import com.example.ui.onboarding.CoachTargets
+import com.example.ui.onboarding.coachTarget
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkDarkBorder
 import com.example.ui.theme.DakkDarkSurface
@@ -169,7 +171,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 },
                 actions = {
                     if (tab == HomeTab.CHATS) {
-                        IconButton(onClick = { viewModel.openNewGroup() }) {
+                        IconButton(onClick = { viewModel.openNewGroup() }, modifier = Modifier.coachTarget(CoachTargets.NEW_GROUP)) {
                             Icon(Icons.Default.GroupAdd, contentDescription = "Yeni grup")
                         }
                     }
@@ -184,7 +186,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 contentDescription = if (searching) "Aramayı kapat" else "Ara"
                             )
                         }
-                        IconButton(onClick = { showAddContact = true }) {
+                        IconButton(onClick = { showAddContact = true }, modifier = Modifier.coachTarget(CoachTargets.ADD_CONTACT)) {
                             Icon(Icons.Default.PersonAdd, contentDescription = "Kişi ekle")
                         }
                     }
@@ -199,7 +201,8 @@ fun HomeScreen(viewModel: DakkViewModel) {
                         if (contacts.isEmpty()) showAddContact = true else viewModel.setTab(HomeTab.CONTACTS)
                     },
                     containerColor = DakkYellow,
-                    contentColor = Color.Black
+                    contentColor = Color.Black,
+                    modifier = Modifier.coachTarget(CoachTargets.NEW_CHAT)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Yeni sohbet")
                 }
@@ -242,7 +245,8 @@ fun HomeScreen(viewModel: DakkViewModel) {
                         )
                     },
                     label = { Text("Kişiler") },
-                    colors = itemColors
+                    colors = itemColors,
+                    modifier = Modifier.coachTarget(CoachTargets.TAB_CONTACTS)
                 )
                 NavigationBarItem(
                     selected = tab == HomeTab.SETTINGS,
@@ -254,7 +258,8 @@ fun HomeScreen(viewModel: DakkViewModel) {
                         )
                     },
                     label = { Text("Ayarlar") },
-                    colors = itemColors
+                    colors = itemColors,
+                    modifier = Modifier.coachTarget(CoachTargets.TAB_SETTINGS)
                 )
             }
         }

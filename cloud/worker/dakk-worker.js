@@ -5,7 +5,7 @@
  *   POST /notify           Uygulama kapalıyken mesaj bildirimi.
  *   POST /register         Bildirim jetonunu kaydeder (2.4.0+; Supabase tablosunda tutulur).
  *   POST /unregister       Bildirim jetonunu siler.
- *   POST /media/upload     Fotoğraf için tek kullanımlık yükleme adresi (2. Supabase projesi).
+ *   POST /media/upload     Fotoğraf için tek kullanımlık yükleme adresi (iki depodan biri, yedekli).
  *   POST /media/download   Fotoğraf için kısa ömürlü indirme adresi.
  *   POST /media/delete     Fotoğrafı sunucudan siler (alıcı indirince).
  *   POST /assistant        Kurucu panelinde "Özel API" seçildiyse OpenAI uyumlu uç noktaya vekillik.
@@ -13,7 +13,8 @@
  *   POST /admin/rules      Firestore kurallarını derleyip yayınlar.
  *   POST /admin/config     Uygulama ayarlarını okur / izinli alanları değiştirir.
  *   POST /admin/usage      Günlük ve aylık kullanım özeti.
- *   POST /admin/cleanup    7 günden eski fotoğrafları siler (pg_cron her gün çağırır).
+ *   POST /admin/cleanup    7 günden eski fotoğrafları siler, kotaları denetler (pg_cron her gün çağırır).
+ *   POST /admin/alerts     Kota %70'i geçtiyse kuruculara bildirim (ayda bir kez).
  *
  * Güvenlik:
  *   - Her istek Firebase kimlik jetonuyla doğrulanır.
@@ -34,9 +35,13 @@ const MAX_MESSAGE_AGE_MS = 15 * 60 * 1000;
 const MAX_GROUP_MEMBERS = 50;
 const MAX_MEDIA_BYTES = 2 * 1024 * 1024;
 const MEDIA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-// Fotoğraf projesinin aylık ücretsiz veri çıkışı 5 GB; %20 pay bırakılır.
-const MEDIA_MONTHLY_BUDGET = 4 * 1000 * 1000 * 1000;
-const MEDIA_DAILY_BUDGET = MEDIA_MONTHLY_BUDGET / 30;
+// Her Supabase projesinin aylık ücretsiz veri çıkışı 5 GB. Fotoğraflara depo başına 3,5 GB ayrılır;
+// kalan pay ana projede "yazıyor…" sinyali ve diğer istekler içindir.
+const FREE_EGRESS_BYTES = 5 * 1000 * 1000 * 1000;
+const MEDIA_STORE_BUDGET = 3.5 * 1000 * 1000 * 1000;
+const FREE_EDGE_CALLS = 500_000;
+const FREE_DB_BYTES = 500 * 1000 * 1000;
+const QUOTA_ALERT_LEVEL = 0.7;
 const CONFIG_FIELDS = {
   min_supported_version: "string",
   force_update_message: "string",
@@ -50,6 +55,7 @@ let jwksCache = { keys: null, expires: 0 };
 let accessTokenCache = { token: null, expires: 0 };
 let configCache = { pub: null, priv: null, expires: 0 };
 let usageCache = { value: null, expires: 0 };
+let lastAlertCheck = 0;
 const chatCache = new Map();
 const notifiedMessages = new Map();
 
@@ -64,11 +70,15 @@ const worker = {
         info.realtime = { url: env.REALTIME_URL, key: env.REALTIME_PUBLIC_KEY };
       }
       info.features = { register: hasSupabase(env), media: hasMedia(env) };
-      if (hasSupabase(env)) info.saver = (await usageState(env)).saver;
+      if (hasSupabase(env)) {
+        addUsage(env, "calls", 1);
+        info.saver = (await usageState(env)).saver;
+      }
       if (info.configured && url.searchParams.get("check") === "deep") info.checks = await deepCheck(env);
       return json(info);
     }
     if (request.method !== "POST") return json({ error: "Yöntem desteklenmiyor" }, 405);
+    addUsage(env, "calls", 1);
 
     try {
       if (path.includes("/admin/")) return await handleAdmin(request, env, path);
@@ -318,6 +328,64 @@ async function requireMember(ctx, chatId) {
   }
 }
 
+/**
+ * Fotoğraf depoları: 0 = fotoğraf projesi (MEDIA_URL), 1 = ana projenin kendi deposu (SUPABASE_URL).
+ * Her sohbet sabit bir depoya düşer (veri çıkışı iki projeye bölünür); depo dolmaya yaklaşırsa
+ * ya da yanıt vermezse diğerine geçilir.
+ */
+function mediaStores(env) {
+  const out = [];
+  if (env.MEDIA_URL && env.MEDIA_SERVICE_KEY) out.push({ id: 0, url: env.MEDIA_URL, key: env.MEDIA_SERVICE_KEY });
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY && env.MEDIA_SECOND_STORE !== "off") {
+    out.push({ id: 1, url: env.SUPABASE_URL, key: env.SUPABASE_SERVICE_KEY });
+  }
+  return out;
+}
+
+function storeById(env, id) {
+  return mediaStores(env).find((s) => s.id === id) || null;
+}
+
+function storeFetch(store, path, init = {}) {
+  return fetch(`${store.url}/storage/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: store.key,
+      Authorization: `Bearer ${store.key}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+}
+
+function hashString(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Sohbet için denenecek depolar: tercih edilen önce, dolmak üzere olan sona. */
+async function storeOrder(env, chatId) {
+  const stores = mediaStores(env);
+  if (stores.length < 2) return stores;
+  const preferred = hashString(chatId) % stores.length;
+  const ordered = [stores[preferred], ...stores.filter((_, i) => i !== preferred)];
+  const { summary } = await usageState(env);
+  const month = summary.month || {};
+  const full = (s) => (Number(month[`media_down_${s.id}`]) || 0) >= 0.85 * MEDIA_STORE_BUDGET;
+  return [...ordered.filter((s) => !full(s)), ...ordered.filter(full)];
+}
+
+async function mediaRow(env, path) {
+  const rows = await supabaseFetch(env, `media_objects?select=bytes,store&path=eq.${encodeURIComponent(path)}`)
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => []);
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
 async function handleMediaUpload(request, ctx) {
   if (!hasMedia(ctx.env)) throw httpError(503, "Fotoğraf sunucusu yapılandırılmamış");
   const body = await readJson(request);
@@ -326,17 +394,28 @@ async function handleMediaUpload(request, ctx) {
   if (bytes <= 0 || bytes > MAX_MEDIA_BYTES) throw httpError(413, "Fotoğraf çok büyük");
   await requireMember(ctx, chatId);
 
-  const res = await mediaFetch(ctx.env, `object/upload/sign/media/${path}`, { method: "POST", body: "{}" });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Yükleme adresi alınamadı: ${res.status} ${text.slice(0, 300)}`);
-  const signed = JSON.parse(text);
-  await supabaseFetch(ctx.env, "media_objects?on_conflict=path", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ path, chat_id: chatId, sender_uid: ctx.uid, bytes }),
-  }).catch(() => {});
-  addUsage(ctx.env, "media_up", bytes);
-  return json({ ok: true, url: `${ctx.env.MEDIA_URL}/storage/v1${signed.url}` });
+  let lastError = "";
+  for (const store of await storeOrder(ctx.env, chatId)) {
+    try {
+      const res = await storeFetch(store, `object/upload/sign/media/${path}`, { method: "POST", body: "{}" });
+      const text = await res.text();
+      if (!res.ok) {
+        lastError = `${store.id}: ${res.status} ${text.slice(0, 200)}`;
+        continue;
+      }
+      const signed = JSON.parse(text);
+      await supabaseFetch(ctx.env, "media_objects?on_conflict=path", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ path, chat_id: chatId, sender_uid: ctx.uid, bytes, store: store.id }),
+      }).catch(() => {});
+      addUsage(ctx.env, "media_up", bytes);
+      return json({ ok: true, url: `${store.url}/storage/v1${signed.url}`, store: store.id });
+    } catch (e) {
+      lastError = `${store.id}: ${String((e && e.message) || e).slice(0, 200)}`;
+    }
+  }
+  throw new Error(`Yükleme adresi alınamadı: ${lastError}`);
 }
 
 async function handleMediaDownload(request, ctx) {
@@ -345,20 +424,24 @@ async function handleMediaDownload(request, ctx) {
   const { chatId, path } = mediaPath(body);
   await requireMember(ctx, chatId);
 
-  const res = await mediaFetch(ctx.env, `object/sign/media/${path}`, {
-    method: "POST",
-    body: JSON.stringify({ expiresIn: 600 }),
-  });
-  if (res.status === 400 || res.status === 404) return json({ ok: false, expired: true }, 404);
-  const text = await res.text();
-  if (!res.ok) throw new Error(`İndirme adresi alınamadı: ${res.status} ${text.slice(0, 300)}`);
-  const signed = JSON.parse(text);
-  const row = await supabaseFetch(ctx.env, `media_objects?select=bytes&path=eq.${encodeURIComponent(path)}`)
-    .then((r) => (r.ok ? r.json() : []))
-    .catch(() => []);
-  const bytes = Array.isArray(row) && row[0] ? Number(row[0].bytes) || 0 : 0;
-  addUsage(ctx.env, "media_down", bytes);
-  return json({ ok: true, url: `${ctx.env.MEDIA_URL}/storage/v1${signed.signedURL}` });
+  const row = await mediaRow(ctx.env, path);
+  const known = row ? storeById(ctx.env, Number(row.store) || 0) : null;
+  const candidates = known ? [known] : mediaStores(ctx.env);
+  for (const store of candidates) {
+    const res = await storeFetch(store, `object/sign/media/${path}`, {
+      method: "POST",
+      body: JSON.stringify({ expiresIn: 600 }),
+    });
+    if (res.status === 400 || res.status === 404) continue;
+    const text = await res.text();
+    if (!res.ok) throw new Error(`İndirme adresi alınamadı: ${res.status} ${text.slice(0, 300)}`);
+    const signed = JSON.parse(text);
+    const bytes = row ? Number(row.bytes) || 0 : 0;
+    addUsage(ctx.env, "media_down", bytes);
+    addUsage(ctx.env, `media_down_${store.id}`, bytes);
+    return json({ ok: true, url: `${store.url}/storage/v1${signed.signedURL}` });
+  }
+  return json({ ok: false, expired: true }, 404);
 }
 
 async function handleMediaDelete(request, ctx) {
@@ -366,15 +449,21 @@ async function handleMediaDelete(request, ctx) {
   const body = await readJson(request);
   const { chatId, path } = mediaPath(body);
   await requireMember(ctx, chatId);
-  await deleteMediaPaths(ctx.env, [path]);
+  const row = await mediaRow(ctx.env, path);
+  await deleteMediaPaths(ctx.env, [{ path, store: row ? Number(row.store) || 0 : null }]);
   return json({ ok: true });
 }
 
-async function deleteMediaPaths(env, paths) {
-  if (paths.length === 0) return;
-  const res = await mediaFetch(env, "object/media", { method: "DELETE", body: JSON.stringify({ prefixes: paths }) });
-  if (!res.ok && res.status !== 404) throw new Error(`Fotoğraf silinemedi: ${res.status} ${await res.text()}`);
-  const list = paths.map((p) => `"${p}"`).join(",");
+/** items: [{ path, store }]; store null ise iki depodan da silinir. */
+async function deleteMediaPaths(env, items) {
+  if (items.length === 0) return;
+  for (const store of mediaStores(env)) {
+    const paths = items.filter((i) => i.store === null || i.store === undefined || i.store === store.id).map((i) => i.path);
+    if (paths.length === 0) continue;
+    const res = await storeFetch(store, "object/media", { method: "DELETE", body: JSON.stringify({ prefixes: paths }) });
+    if (!res.ok && res.status !== 404) throw new Error(`Fotoğraf silinemedi: ${res.status} ${await res.text()}`);
+  }
+  const list = items.map((i) => `"${i.path}"`).join(",");
   await supabaseFetch(env, `media_objects?path=in.(${encodeURIComponent(list)})`, { method: "DELETE" }).catch(() => {});
 }
 
@@ -394,7 +483,8 @@ function addUsage(env, metric, value) {
 
 /**
  * Tasarruf seviyesi: 0 = normal, 1 = fotoğraflar daha küçük, 2 = fotoğraflar küçük + "yazıyor" kapalı.
- * Fotoğraf projesinin aylık 5 GB veri çıkışı günlere bölünür; bütçe aşılmaya başlarsa seviye yükselir.
+ * Her fotoğraf deposunun aylık 5 GB veri çıkışından MEDIA_STORE_BUDGET kadarı fotoğraflara ayrılır ve
+ * günlere bölünür; bütçe aşılmaya başlarsa seviye yükselir.
  */
 async function usageState(env) {
   if (usageCache.value && Date.now() < usageCache.expires) return usageCache.value;
@@ -403,13 +493,86 @@ async function usageState(env) {
     const res = await supabaseFetch(env, "rpc/dakk_usage_summary", { method: "POST", body: "{}" });
     if (res.ok) summary = (await res.json()) || summary;
   } catch (_) {}
+  const budget = MEDIA_STORE_BUDGET * Math.max(1, mediaStores(env).length);
   const today = Number((summary.today || {}).media_down) || 0;
   const month = Number((summary.month || {}).media_down) || 0;
   let saver = 0;
-  if (today >= 0.7 * MEDIA_DAILY_BUDGET || month >= 0.6 * MEDIA_MONTHLY_BUDGET) saver = 1;
-  if (today >= MEDIA_DAILY_BUDGET || month >= 0.85 * MEDIA_MONTHLY_BUDGET) saver = 2;
+  if (today >= (0.7 * budget) / 30 || month >= 0.6 * budget) saver = 1;
+  if (today >= budget / 30 || month >= 0.85 * budget) saver = 2;
   usageCache = { value: { saver, summary }, expires: Date.now() + 60_000 };
+  if (Date.now() - lastAlertCheck > 60 * 60_000) {
+    lastAlertCheck = Date.now();
+    checkQuotaAlerts(null, env).catch(() => {});
+  }
   return usageCache.value;
+}
+
+/** Ücretsiz kotaların bu ayki doluluk oranları (0–1). */
+async function quotaLevels(env) {
+  const { summary } = await usageState(env);
+  const month = summary.month || {};
+  const n = (k) => Number(month[k]) || 0;
+  const unassigned = Math.max(0, n("media_down") - n("media_down_0") - n("media_down_1"));
+  const levels = {
+    "Fotoğraf deposu 1 (veri çıkışı)": (n("media_down_0") + unassigned) / FREE_EGRESS_BYTES,
+    "Fotoğraf deposu 2 (veri çıkışı)": n("media_down_1") / FREE_EGRESS_BYTES,
+    "Sunucu çağrıları": n("calls") / FREE_EDGE_CALLS,
+  };
+  try {
+    const res = await supabaseFetch(env, "rpc/dakk_db_size", { method: "POST", body: "{}" });
+    if (res.ok) levels["Veritabanı boyutu"] = (Number(await res.json()) || 0) / FREE_DB_BYTES;
+  } catch (_) {}
+  return levels;
+}
+
+/**
+ * Bir kota %70'i geçince kuruculara bir kez (ay başına, kota başına) bildirim gönderir.
+ * Kurucular, Kurucu panelini açtıklarında app_config/founders belgesine kendilerini yazar.
+ */
+async function checkQuotaAlerts(ctx, env = ctx && ctx.env) {
+  if (!hasSupabase(env) || !isConfigured(env)) return [];
+  const levels = await quotaLevels(env);
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const sent = [];
+  for (const [name, level] of Object.entries(levels)) {
+    if (!(level >= QUOTA_ALERT_LEVEL)) continue;
+    const res = await supabaseFetch(env, "rpc/dakk_flag_once", {
+      method: "POST",
+      body: JSON.stringify({ p_key: `quota70:${name}:${monthKey}` }),
+    });
+    if (!res.ok || (await res.json()) !== true) continue;
+    const c = ctx || { env, sa: serviceAccount(env), uid: null, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
+    await notifyFounders(c, "Dakk kota uyarısı ⚠️", `${name}: bu ayın ücretsiz kotasının %${Math.round(level * 100)}'i kullanıldı.`);
+    sent.push(name);
+  }
+  return sent;
+}
+
+async function notifyFounders(ctx, title, body) {
+  const doc = (await getDoc(ctx, "app_config/founders").catch(() => null)) || {};
+  const uids = Array.isArray(doc.uids) ? doc.uids.filter((u) => typeof u === "string").slice(0, 10) : [];
+  if (uids.length === 0) return 0;
+  const tokens = (await allPushTokens(ctx)).filter((t) => uids.includes(t.uid));
+  const url = `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`;
+  let sent = 0;
+  for (const { token } of tokens) {
+    const res = await googleFetch(ctx, url, {
+      method: "POST",
+      body: JSON.stringify({
+        message: {
+          token,
+          notification: { title, body },
+          data: { type: "announce" },
+          android: {
+            priority: "HIGH",
+            notification: { channel_id: "dakk_messages", icon: "ic_stat_dakk", color: "#FFCC00", tag: "dakk_quota" },
+          },
+        },
+      }),
+    });
+    if (res.ok) sent++;
+  }
+  return sent;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -423,7 +586,8 @@ async function handleAdmin(request, env, path) {
   if (path.endsWith("/admin/broadcast")) return await handleBroadcast(request, ctx);
   if (path.endsWith("/admin/rules")) return await handleRules(request, ctx);
   if (path.endsWith("/admin/config")) return await handleConfig(request, ctx);
-  if (path.endsWith("/admin/usage")) return json({ ok: true, ...(await usageState(env)) });
+  if (path.endsWith("/admin/usage")) return json({ ok: true, ...(await usageState(env)), quotas: await quotaLevels(env) });
+  if (path.endsWith("/admin/alerts")) return json({ ok: true, sent: await checkQuotaAlerts(ctx) });
   if (path.endsWith("/admin/cleanup")) return await handleCleanup(ctx);
   return json({ error: "Bulunamadı" }, 404);
 }
@@ -573,17 +737,18 @@ async function handleCleanup(ctx) {
     for (let round = 0; round < 20; round++) {
       const res = await supabaseFetch(
         ctx.env,
-        `media_objects?select=path&created_at=lt.${encodeURIComponent(cutoff)}&limit=100`
+        `media_objects?select=path,store&created_at=lt.${encodeURIComponent(cutoff)}&limit=100`
       );
       if (!res.ok) break;
       const rows = await res.json();
       if (!rows.length) break;
-      await deleteMediaPaths(ctx.env, rows.map((r) => r.path));
+      await deleteMediaPaths(ctx.env, rows.map((r) => ({ path: r.path, store: Number(r.store) || 0 })));
       result.media += rows.length;
     }
     // Fotoğraf projesi boşta kalıp duraklatılmasın diye her gün bir istek de yapılmış olur.
     await mediaFetch(ctx.env, "bucket/media", { method: "GET" }).catch(() => {});
   }
+  result.alerts = await checkQuotaAlerts(ctx).catch((e) => String((e && e.message) || e).slice(0, 200));
   if (hasSupabase(ctx.env)) {
     const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     await supabaseFetch(ctx.env, `usage_daily?day=lt.${old}`, { method: "DELETE" }).catch(() => {});

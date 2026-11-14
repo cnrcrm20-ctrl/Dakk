@@ -27,6 +27,8 @@ import com.example.data.ChatDoc
 import com.example.data.ChatIds
 import com.example.data.ChatPrefs
 import com.example.data.LocalMessageStore
+import com.example.data.Mailbox
+import com.example.data.RestoreBundle
 import com.example.data.LocalPhoto
 import com.example.data.PollView
 import com.example.push.TypingClient
@@ -35,6 +37,7 @@ import com.example.util.Disappearing
 import com.example.util.MuteOptions
 import com.example.util.Polls
 import com.example.util.SystemNotes
+import com.example.util.TurkishSuffix
 import com.example.util.TypingText
 import com.example.data.ChatSummary
 import com.example.data.Contact
@@ -68,7 +71,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -79,6 +84,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -92,12 +98,14 @@ sealed class Screen {
     data class NewGroup(val preselected: List<String> = emptyList(), val addToGroup: String? = null) : Screen()
     object Assistant : Screen()
     object FounderPanel : Screen()
+    /** Ayarlar → İzinler. */
+    object Permissions : Screen()
 
     /** Geçiş animasyonu için ekran derinliği. */
     val depth: Int
         get() = when (this) {
             Home -> 0
-            is Chat, Assistant, FounderPanel -> 1
+            is Chat, Assistant, FounderPanel, Permissions -> 1
             is ChatInfo, is NewGroup -> 2
         }
 }
@@ -157,7 +165,7 @@ data class UpdateUiState(
     val signatureMismatch: Boolean = false
 )
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     private val auth = Firebase.auth
@@ -174,6 +182,27 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private val typingClient = TypingClient(viewModelScope)
 
     val appVersion: String = BuildConfig.VERSION_NAME
+
+    /**
+     * Bu kurulum 2.5.0 ile mi başladı (ilk kurulum veya yeniden kurulum)? Sihirbazın tamamı ve tanıtım turu
+     * yalnızca yeni kurulumlarda gösterilir; var olan kullanıcılar yalnızca yeni adımları görür.
+     */
+    val isNewInstall: Boolean = prefs.getString(PREF_INSTALL_KIND, null)?.let { it == "new" } ?: run {
+        val existing = crypto.hasStoredKey() || prefs.contains(PREF_LOCAL_OWNER) ||
+            prefs.contains("notification_permission_asked")
+        prefs.edit().putString(PREF_INSTALL_KIND, if (existing) "existing" else "new").apply()
+        !existing
+    }
+
+    private val _wizardDone = MutableStateFlow(prefs.getStringSet(PREF_WIZARD_DONE, emptySet()).orEmpty().toSet())
+    /** Tamamlanan (veya atlanan) kurulum sihirbazı adımları. */
+    val wizardDone: StateFlow<Set<String>> = _wizardDone
+
+    private val _tutorialVisible = MutableStateFlow(false)
+    val tutorialVisible: StateFlow<Boolean> = _tutorialVisible
+
+    /** Android 12+: Dakk Güncelleyici onay sormadan kurar. */
+    val silentUpdates: Boolean get() = updater.supportsSilentInstall
 
     private val _user = MutableStateFlow<FirebaseUser?>(auth.currentUser)
     val user: StateFlow<FirebaseUser?> = _user
@@ -234,6 +263,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     /** Şu an uygulanan tasarruf seviyesi: 0 normal, 1 küçük fotoğraf + grup fotoğrafı dokununca, 2 ayrıca "yazıyor…" kapalı. */
     private val _saverLevel = MutableStateFlow(0)
     val saverLevel: StateFlow<Int> = _saverLevel
+
+    /** Sohbet yedeği: arkadaşlar yeniden kurulumda geçmişi geri gönderir, ben de onlara gönderirim. */
+    private val _chatBackup = MutableStateFlow(prefs.getBoolean(PREF_CHAT_BACKUP, true))
+    val chatBackup: StateFlow<Boolean> = _chatBackup
 
     /** Dokunarak indirilmesi istenen grup fotoğrafları. */
     private val manualDownloads = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -377,6 +410,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private var serverReady = false
     private var checkedServerUrl: String? = null
     private val decryptCache = HashMap<String, String?>()
+    private val sweptIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val restoreMutex = Mutex()
 
     private val authListener = FirebaseAuth.AuthStateListener { a -> onAuthChanged(a.currentUser) }
 
@@ -469,6 +504,11 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
             launch { refreshFounderStatus() }
             launch { runCatching { media.cleanupExpiredUploads() } }
+            launch(Dispatchers.Default) {
+                // Anahtarı değişen kişiler: bekleyen mesajlar yeni anahtarla yeniden gönderilir,
+                // Sohbet yedeği açıksa ortak geçmiş geri gönderilir.
+                _profiles.debounce(1_500).collect { profiles -> onProfilesChanged(profiles, uid) }
+            }
         }
         ensureProfile(uid)
         pendingInvite?.let { link ->
@@ -552,6 +592,9 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         try {
             privateConfig = configRepo.loadPrivateIfFounder()
             _isFounder.value = privateConfig != null
+            // Sunucu, kota %70'i geçince bu listedeki kuruculara bildirim gönderir.
+            val uid = sessionUid
+            if (privateConfig != null && uid != null) runCatching { repo.registerFounder(uid) }
         } catch (e: Exception) {
             Log.w(TAG, "Kurucu durumu alınamadı", e)
         }
@@ -564,16 +607,89 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 ?: user.displayName?.ifBlank { null }
                 ?: user.email?.substringBefore("@")
                 ?: "Dakk Kullanıcısı"
+            val restoreAt = restoreRequestFor(user.uid, publicKey)
             repo.publishProfile(
                 uid = user.uid,
                 displayName = name,
                 email = user.email.orEmpty(),
                 photoUrl = user.photoUrl?.toString().orEmpty(),
-                publicKey = publicKey
+                publicKey = publicKey,
+                caps = CAPS,
+                backup = _chatBackup.value,
+                restoreAt = restoreAt
             )
         } catch (e: Exception) {
             Log.e(TAG, "Profil yayınlanamadı", e)
         }
+    }
+
+    /**
+     * Yeniden kurulumu algılar: anahtar bu kurulumda üretildiyse ve sunucudaki profilde başka bir anahtar
+     * varsa, arkadaşlardan geçmiş istenir (Sohbet yedeği açıksa). İstek zamanı bir kez belirlenir.
+     */
+    private suspend fun restoreRequestFor(uid: String, publicKey: String): Long {
+        val at = computeRestoreRequest(uid, publicKey)
+        _restorePending.value = at > 0L
+        return at
+    }
+
+    private suspend fun computeRestoreRequest(uid: String, publicKey: String): Long {
+        val saved = prefs.getLong(PREF_RESTORE_AT + uid, -1L)
+        if (saved >= 0L) return if (_chatBackup.value) saved else 0L
+        if (crypto.keyCreatedAt() == 0L) {
+            prefs.edit().putLong(PREF_RESTORE_AT + uid, 0L).apply()
+            return 0L
+        }
+        val previous = runCatching { repo.getProfile(uid) }.getOrNull() ?: return 0L
+        val at = if (previous.publicKey.isNotBlank() && previous.publicKey != publicKey) System.currentTimeMillis() else 0L
+        prefs.edit().putLong(PREF_RESTORE_AT + uid, at).apply()
+        return if (_chatBackup.value) at else 0L
+    }
+
+    fun markWizardStep(id: String) {
+        _wizardDone.update { it + id }
+        prefs.edit().putStringSet(PREF_WIZARD_DONE, _wizardDone.value).apply()
+    }
+
+    fun unmarkWizardStep(id: String) {
+        _wizardDone.update { it - id }
+        prefs.edit().putStringSet(PREF_WIZARD_DONE, _wizardDone.value).apply()
+    }
+
+    /** Sihirbaz bitti: yeni kurulumsa 30 saniyelik tanıtım turu başlar. */
+    fun finishWizard(ids: List<String>) {
+        _wizardDone.update { it + ids }
+        prefs.edit().putStringSet(PREF_WIZARD_DONE, _wizardDone.value).apply()
+        if (isNewInstall && !prefs.getBoolean(PREF_TUTORIAL_DONE, false)) {
+            _tab.value = HomeTab.CHATS
+            _tutorialVisible.value = true
+        }
+    }
+
+    fun finishTutorial() {
+        prefs.edit().putBoolean(PREF_TUTORIAL_DONE, true).apply()
+        _tutorialVisible.value = false
+    }
+
+    /** Ayarlar → "Tanıtım turunu izle". */
+    fun replayTutorial() {
+        _screen.value = Screen.Home
+        _tab.value = HomeTab.CHATS
+        _tutorialVisible.value = true
+    }
+
+    private val _restorePending = MutableStateFlow(false)
+    /** Bu kurulum arkadaşlardan sohbet geçmişi istedi mi? (Sihirbazın geri yükleme adımı için.) */
+    val restorePending: StateFlow<Boolean> = _restorePending
+
+    fun openPermissions() {
+        _screen.value = Screen.Permissions
+    }
+
+    fun setChatBackup(enabled: Boolean) {
+        _chatBackup.value = enabled
+        prefs.edit().putBoolean(PREF_CHAT_BACKUP, enabled).apply()
+        auth.currentUser?.let { u -> viewModelScope.launch { publishMyProfile(u) } }
     }
 
     private fun ensureProfile(uid: String) {
@@ -616,6 +732,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 2.4.0'a geçişte her sohbetin geçmişi bir kez tamamen alınır; sonra yalnızca son mesajlar dinlenir.
             val synced = withContext(Dispatchers.IO) { runCatching { localStore.isSynced(chatId) }.getOrDefault(false) }
+            // Posta kutusu kararı üyelerin sürümüne bağlı; profiller gelmeden pencere işlenmesin.
+            awaitMemberProfiles(chatId, myUid)
             _chatDocs
                 .map { docs -> docs.any { it.chatId == chatId } }
                 .distinctUntilChanged()
@@ -626,24 +744,34 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                         else -> repo.observeMessages(chatId).retrying("Mesajlar", myUid)
                     }
                 }
-                .collect { window ->
-                    if (window == null) {
+                .collect { serverWindow ->
+                    if (serverWindow == null) {
                         lastActiveDocs = local
                         rebuildActiveMessages(chatId, myUid)
                         return@collect
                     }
-                    val complete = !synced || window.size < LocalMessageStore.LIVE_WINDOW
-                    val merged = LocalMessageStore.merge(local, window, complete)
+                    val complete = !synced || serverWindow.size < LocalMessageStore.LIVE_WINDOW
+                    val restored = consumeRestoreNotes(chatId, myUid, serverWindow)
+                    if (restored.isNotEmpty()) {
+                        // Geri yüklenen geçmiş sunucuda yok; bu sohbette arşiv artık telefondadır.
+                        prefs.edit().putBoolean(PREFIX_MAILBOX + chatId, true).apply()
+                        val restoredIds = restored.map { it.id }.toSet()
+                        local = (local.filter { it.id !in restoredIds } + restored).sortedBy { it.createdAt }
+                    }
+                    val mailbox = isMailboxChat(chatId, myUid)
+                    val window = preferReadableLocal(serverWindow, local, myUid)
+                    val merged = LocalMessageStore.merge(local, window, complete, mailbox)
                     lastActiveDocs = merged
                     rebuildActiveMessages(chatId, myUid)
                     if (isForeground) markIncomingAsRead(chatId, myUid, window)
                     local = merged.filterNot { it.isPending }
                     withContext(Dispatchers.IO) {
                         runCatching {
-                            if (synced) localStore.applyWindow(chatId, window, complete)
-                            else localStore.replaceAll(chatId, window)
+                            if (synced) localStore.applyWindow(chatId, window, complete, mailbox)
+                            else localStore.replaceAll(chatId, window, mailbox)
                         }.onFailure { Log.w(TAG, "Mesajlar telefona kaydedilemedi", it) }
                     }
+                    if (mailbox) sweepMailbox(chatId, myUid, window)
                 }
         }
         expiryTicker?.cancel()
@@ -654,6 +782,298 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 val now = System.currentTimeMillis()
                 if (lastActiveDocs.any { Disappearing.isExpired(it.expiresAt, now) }) rebuildActiveMessages(chatId, myUid)
             }
+        }
+    }
+
+    private fun membersOf(chatId: String): List<String>? =
+        chatDoc(chatId)?.memberUids?.takeIf { it.isNotEmpty() }
+            ?: if (ChatIds.isGroup(chatId)) null else chatId.split("_").takeIf { it.size == 2 }
+
+    /** Sohbetteki herkes 2.5.0+ mı? (Sıkıştırma, WebP aktarımı ve sunucudan kaldırma buna bağlı.) */
+    private fun allMembersSupportV2(chatId: String, myUid: String): Boolean {
+        val members = membersOf(chatId) ?: return false
+        val profiles = _profiles.value
+        return members.all { it == myUid || (profiles[it]?.caps ?: 0) >= CAPS }
+    }
+
+    /**
+     * Posta kutusu sohbeti: sunucu yalnızca teslim edilmemiş mesajları tutar, arşiv telefondadır. Bir kez
+     * öyle olduğu görülen sohbet bu cihazda öyle kalır (sunucudan kaldırılan mesajlar silinmiş sanılmasın).
+     */
+    private fun isMailboxChat(chatId: String, myUid: String): Boolean {
+        if (prefs.getBoolean(PREFIX_MAILBOX + chatId, false)) return true
+        if (!allMembersSupportV2(chatId, myUid)) return false
+        prefs.edit().putBoolean(PREFIX_MAILBOX + chatId, true).apply()
+        return true
+    }
+
+    private suspend fun awaitMemberProfiles(chatId: String, myUid: String) {
+        val members = (membersOf(chatId) ?: return).filter { it != myUid }
+        members.forEach { ensureProfile(it) }
+        withTimeoutOrNull(4_000) { _profiles.first { p -> members.all { it in p } } }
+    }
+
+    /** Okunmuş ve günü geçmiş kendi mesajlarımı sunucudan kaldırır (telefonlarda kalırlar). */
+    private fun sweepMailbox(chatId: String, myUid: String, window: List<MessageDoc>) {
+        if (!allMembersSupportV2(chatId, myUid)) return
+        val isGroup = ChatIds.isGroup(chatId)
+        val now = System.currentTimeMillis()
+        val fromWindow = Mailbox.sweepable(window, myUid, isGroup, now).filter { it !in sweptIds }
+        // Birebir sohbette okuduğum ve telefonuma kaydettiğim gelen mesajlar da (gönderen çevrimdışı kalsa bile).
+        val peerUid = if (isGroup) null else membersOf(chatId)?.firstOrNull { it != myUid }
+        val received = if (peerUid == null) emptyList()
+        else Mailbox.receivedSweepable(window, myUid, now).filter { it !in sweptIds }
+        val deepDue = now - prefs.getLong(PREFIX_SWEPT + chatId, 0L) > SWEEP_INTERVAL_MS
+        if (fromWindow.isEmpty() && received.isEmpty() && !deepDue) return
+        sweptIds += fromWindow
+        sweptIds += received
+        viewModelScope.launch {
+            runCatching { repo.deleteMessages(chatId, fromWindow) }
+                .onFailure { Log.w(TAG, "Teslim edilen mesajlar sunucudan kaldırılamadı", it) }
+            runCatching { repo.deleteMessages(chatId, received) }
+                .onFailure { Log.w(TAG, "Okunan mesajlar sunucudan kaldırılamadı", it) }
+            if (!deepDue) return@launch
+            prefs.edit().putLong(PREFIX_SWEPT + chatId, now).apply()
+            // Pencerenin dışında kalan eski mesajlar: haftada bir, en fazla 200 tanesi.
+            runCatching {
+                val mine = repo.myOldMessages(chatId, myUid, if (isGroup) null else "READ", 200)
+                val ids = Mailbox.sweepable(mine, myUid, isGroup, now).filter { it !in sweptIds }
+                sweptIds += ids
+                ids.chunked(400).forEach { repo.deleteMessages(chatId, it) }
+            }.onFailure { Log.w(TAG, "Eski mesajlar sunucudan kaldırılamadı", it) }
+            if (peerUid != null) runCatching {
+                // Yalnızca telefonda zaten olanlar silinir.
+                val stored = withContext(Dispatchers.IO) { localStore.load(chatId) }.map { it.id }.toSet()
+                val theirs = repo.myOldMessages(chatId, peerUid, "READ", 200).filter { it.id in stored }
+                val ids = Mailbox.receivedSweepable(theirs, myUid, now).filter { it !in sweptIds }
+                sweptIds += ids
+                ids.chunked(400).forEach { repo.deleteMessages(chatId, it) }
+            }.onFailure { Log.w(TAG, "Eski gelen mesajlar sunucudan kaldırılamadı", it) }
+        }
+    }
+
+    /**
+     * Profiller değişince: anahtarı değişen kişilere bekleyen mesajları yeniden gönder; yeni kurulumda
+     * geçmiş isteyenlere (Sohbet yedeği açıksa) ortak sohbetleri geri gönder.
+     */
+    private suspend fun onProfilesChanged(profiles: Map<String, UserProfile>, myUid: String) {
+        if (sessionUid != myUid) return
+        val changed = ArrayList<Triple<UserProfile, String, String>>()
+        val editor = prefs.edit()
+        profiles.values.forEach { p ->
+            if (p.uid == myUid || p.publicKey.isBlank()) return@forEach
+            val known = prefs.getString(PREFIX_PEER_KEY + p.uid, null)
+            if (known != p.publicKey) editor.putString(PREFIX_PEER_KEY + p.uid, p.publicKey)
+            if (known != null && known != p.publicKey) changed += Triple(p, known, p.publicKey)
+        }
+        editor.apply()
+        changed.forEach { (p, old, new) ->
+            runCatching { resendPendingTo(p, old, new, myUid) }.onFailure { Log.w(TAG, "Bekleyen mesajlar yeniden gönderilemedi", it) }
+        }
+        val now = System.currentTimeMillis()
+        profiles.values
+            .filter { it.uid != myUid }
+            .filter { RestoreBundle.shouldServe(it, prefs.getLong(PREFIX_RESTORE_SERVED + it.uid, 0L), _chatBackup.value, now) }
+            .forEach { p ->
+                restoreMutex.withLock {
+                    runCatching { serveRestore(p, myUid) }.onFailure { Log.w(TAG, "Sohbet geçmişi gönderilemedi", it) }
+                }
+            }
+    }
+
+    /**
+     * Karşı taraf uygulamayı yeniden kurduysa eski anahtarla şifrelenmiş ve henüz okunmamış mesajlarımı açamaz.
+     * Bu mesajlar (telefonumda çözülebildikleri için) yeni anahtarla yeniden şifrelenip yerinde güncellenir.
+     */
+    private suspend fun resendPendingTo(peer: UserProfile, oldKey: String, newKey: String, myUid: String) {
+        val myKey = withContext(Dispatchers.Default) { crypto.publicKeyBase64() }
+        val pack = peer.caps >= CAPS
+        val direct = ChatIds.of(myUid, peer.uid)
+        if (chatDoc(direct) != null) {
+            val docs = repo.recentMessagesOnce(direct, 100)
+            var resent = 0
+            docs.filter {
+                it.senderId == myUid && it.recipientKey == oldKey && it.senderKey == myKey && it.deliveryStatus == "SENT" &&
+                    !it.deleted && it.messageType in RESENDABLE_TYPES
+            }.forEach { d ->
+                val plain = crypto.decryptMessage(d.content, d.senderKey, d.recipientKey) ?: return@forEach
+                val fields = HashMap<String, Any>()
+                fields["content"] = withContext(Dispatchers.Default) { crypto.encrypt(plain, newKey, pack) }
+                fields["recipientKey"] = newKey
+                d.replyPreview?.let { q ->
+                    crypto.decryptMessage(q, d.senderKey, d.recipientKey)?.let { fields["replyPreview"] = crypto.encrypt(it, newKey) }
+                }
+                runCatching { repo.updateMessageFields(direct, d.id, fields) }.onSuccess { resent++ }
+            }
+            val chat = chatDoc(direct)
+            if (chat != null && chat.lastMessageSenderId == myUid && chat.lastMessageRecipientKey == oldKey) {
+                crypto.decryptMessage(chat.lastMessage, chat.lastMessageSenderKey, chat.lastMessageRecipientKey)?.let { preview ->
+                    repo.sendPreviewOnly(direct, myUid, peer.uid, crypto.encrypt(preview, newKey, pack), myKey, newKey)
+                }
+            }
+            if (resent > 0) Log.i(TAG, "$resent bekleyen mesaj yeni anahtarla yeniden gönderildi")
+        }
+        // Gruplar: son 7 gündeki mesajlarımın anahtarı bu kişi için yeniden sarılır.
+        val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        _chatDocs.value.filter { isGroupDoc(it) && peer.uid in it.memberUids && myUid in it.memberUids }.forEach { g ->
+            runCatching {
+                repo.recentMessagesOnce(g.chatId, 60)
+                    .filter { it.senderId == myUid && it.createdAt >= weekAgo && !it.deleted && peer.uid in it.keys }
+                    .forEach { d ->
+                        val key = messageKey(d, myUid) ?: return@forEach
+                        repo.updateMessageFields(g.chatId, d.id, mapOf("keys.${peer.uid}" to crypto.wrapKey(key, newKey)))
+                    }
+            }
+        }
+    }
+
+    /** Ortak sohbetlerin geçmişini, yeniden kurulum yapan kişinin yeni anahtarıyla şifreleyip gönderir. */
+    private suspend fun serveRestore(peer: UserProfile, myUid: String) {
+        val server = media.mediaServer
+        if (server.isBlank()) return
+        val chats = buildList {
+            val direct = ChatIds.of(myUid, peer.uid)
+            if (chatDoc(direct) != null) add(direct)
+            _chatDocs.value.filter { isGroupDoc(it) && peer.uid in it.memberUids && myUid in it.memberUids }.forEach { add(it.chatId) }
+        }
+        val myKey = withContext(Dispatchers.Default) { crypto.publicKeyBase64() }
+        val myName = myDisplayName(myUid)
+        for (chatId in chats) {
+            // Başka bir üye (veya diğer cihazım) zaten göndermişse tekrar gönderilmez.
+            val already = runCatching { repo.recentMessagesOnce(chatId, 40) }.getOrDefault(emptyList()).any {
+                it.restoreTo == peer.uid && it.createdAt >= peer.restoreAt
+            }
+            if (already) continue
+            val entries = withContext(Dispatchers.Default) {
+                val docs = withContext(Dispatchers.IO) { runCatching { localStore.load(chatId) }.getOrDefault(emptyList()) }
+                docs.filter { !it.deleted && it.restoreTo == null && it.createdAt < peer.restoreAt }.mapNotNull { d -> restoreEntry(d, myUid) }
+            }
+            if (entries.isEmpty()) continue
+            val (packed, count) = withContext(Dispatchers.Default) { RestoreBundle.encodeWithinLimit(chatId, entries) } ?: continue
+            val encrypted = withContext(Dispatchers.Default) { crypto.encryptBytes(packed, peer.publicKey) }
+            val mediaId = media.newMediaId()
+            if (!push.uploadMedia(server, chatId, mediaId, encrypted)) continue
+            val pointer = crypto.encrypt(RestoreBundle.encodePointer(RestoreBundle.Pointer(mediaId, count)), peer.publicKey)
+            val peerName = resolveName(peer.uid, chatDoc(chatId)?.nicknames.orEmpty(), _profiles.value, _rawContacts.value)
+            repo.sendRestoreNote(
+                chatId = chatId,
+                myUid = myUid,
+                senderName = myName,
+                systemText = "${TurkishSuffix.dative(peerName)} sohbet geçmişi gönderildi · güvenlik numarası değişti",
+                restoreTo = peer.uid,
+                encryptedPointer = pointer,
+                senderKey = myKey,
+                recipientKey = peer.publicKey
+            )
+            Log.i(TAG, "$count mesajlık geçmiş gönderildi")
+        }
+        prefs.edit().putLong(PREFIX_RESTORE_SERVED + peer.uid, peer.restoreAt).apply()
+    }
+
+    /** Arşivdeki bir mesajın geri yükleme paketindeki hali (fotoğraflar ve anketler kısa metin olarak). */
+    private fun restoreEntry(d: MessageDoc, myUid: String): RestoreBundle.Entry? {
+        val (kind, text) = when (d.messageType) {
+            SystemNotes.MESSAGE_TYPE -> "S" to (d.systemText ?: return null)
+            ScreenshotNotice.MESSAGE_TYPE -> return null
+            "IMAGE" -> "T" to "📷 Fotoğraf"
+            Polls.MESSAGE_TYPE -> "T" to ("📊 " + (Polls.parse(decryptContent(d, myUid))?.question ?: return null))
+            else -> "T" to (decryptContent(d, myUid) ?: return null)
+        }
+        return RestoreBundle.Entry(d.id, d.senderId, d.senderName, d.createdAt, kind, text)
+    }
+
+    /**
+     * Pencerede bana gönderilmiş bir geri yükleme notu varsa paketi indirir, çözer ve mesajları telefondaki
+     * arşive ekler. Mesajlar arşivde yalnızca bu cihazın anahtarıyla çözülebilecek şekilde yeniden şifrelenir.
+     */
+    private suspend fun consumeRestoreNotes(chatId: String, myUid: String, window: List<MessageDoc>): List<MessageDoc> {
+        val notes = window.filter { it.restoreTo == myUid && it.content.isNotBlank() && !it.isPending }
+        if (notes.isEmpty()) return emptyList()
+        val done = prefs.getStringSet(PREF_RESTORED_NOTES, emptySet()).orEmpty()
+        val fresh = notes.filter { it.id !in done }
+        if (fresh.isEmpty()) return emptyList()
+        val server = media.mediaServer.ifBlank { return emptyList() }
+        val myKey = withContext(Dispatchers.Default) { crypto.publicKeyBase64() }
+        val out = ArrayList<MessageDoc>()
+        for (note in fresh) {
+            if (note.recipientKey != myKey) {
+                markRestoreNote(note.id)
+                continue
+            }
+            val pointer = RestoreBundle.decodePointer(crypto.decryptMessage(note.content, note.senderKey, note.recipientKey))
+            if (pointer == null) {
+                markRestoreNote(note.id)
+                continue
+            }
+            val bytes = when (val fetched = push.downloadMedia(server, chatId, pointer.mediaId)) {
+                is PushClient.MediaFetch.Ok -> fetched.bytes
+                PushClient.MediaFetch.Expired -> {
+                    markRestoreNote(note.id)
+                    continue
+                }
+                PushClient.MediaFetch.Failed -> continue
+            }
+            val docs = withContext(Dispatchers.Default) {
+                val plain = crypto.decryptBytes(bytes, note.senderKey, note.recipientKey) ?: return@withContext null
+                val (bundleChat, entries) = RestoreBundle.decode(plain) ?: return@withContext null
+                if (bundleChat != chatId) return@withContext null
+                restoredDocs(chatId, entries, myKey)
+            }
+            markRestoreNote(note.id)
+            if (docs == null) continue
+            withContext(Dispatchers.IO) { runCatching { localStore.upsert(chatId, docs) } }
+            runCatching { push.deleteMedia(server, chatId, pointer.mediaId) }
+            out += docs
+            _events.tryEmit("Sohbet geçmişi geri yüklendi (${docs.size} mesaj)")
+        }
+        return out
+    }
+
+    /**
+     * Sunucudaki kopya bu cihazda çözülemiyor ama telefondaki (ör. arkadaşlardan geri yüklenen) kopya
+     * çözülebiliyorsa telefondaki kopya kullanılır; yoksa okunabilen geçmiş "çözülemedi" satırına dönerdi.
+     */
+    private fun preferReadableLocal(window: List<MessageDoc>, local: List<MessageDoc>, myUid: String): List<MessageDoc> {
+        if (local.isEmpty()) return window
+        val byId = local.associateBy { it.id }
+        return window.map { w ->
+            val l = byId[w.id] ?: return@map w
+            if (w.deleted || w.isPending || w.content.isBlank() || l.content.isBlank()) return@map w
+            if (decryptContent(w, myUid) == null && decryptContent(l, myUid) != null) l else w
+        }
+    }
+
+    private fun markRestoreNote(id: String) {
+        val done = prefs.getStringSet(PREF_RESTORED_NOTES, emptySet()).orEmpty()
+        prefs.edit().putStringSet(PREF_RESTORED_NOTES, (done + id).toList().takeLast(200).toSet()).apply()
+    }
+
+    private fun restoredDocs(chatId: String, entries: List<RestoreBundle.Entry>, myKey: String): List<MessageDoc> {
+        val isGroup = ChatIds.isGroup(chatId)
+        val groupKey = if (isGroup) crypto.newMessageKey() else null
+        val myUid = sessionUid ?: return emptyList()
+        val keys = if (groupKey != null) mapOf(myUid to crypto.wrapKey(groupKey, myKey)) else emptyMap()
+        return entries.map { e ->
+            val system = e.kind == "S"
+            val content = when {
+                system -> ""
+                groupKey != null -> crypto.encryptWithKey(e.text, groupKey, pack = true)
+                else -> crypto.encrypt(e.text, myKey, pack = true)
+            }
+            MessageDoc(
+                id = e.id,
+                senderId = e.senderId,
+                content = content,
+                senderKey = myKey,
+                recipientKey = if (isGroup) "" else myKey,
+                deliveryStatus = "READ",
+                createdAt = e.createdAt,
+                isPending = false,
+                messageType = if (system) SystemNotes.MESSAGE_TYPE else "TEXT",
+                keys = if (system) emptyMap() else keys,
+                systemText = if (system) e.text else null,
+                senderName = e.senderName
+            )
         }
     }
 
@@ -721,7 +1141,9 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             if (doc.isPending) return@forEach
             downloadsInFlight += image.mediaId
             viewModelScope.launch {
-                val meta = ImageMeta(image.mediaId, image.chunks, image.width, image.height, image.size, null, image.remote)
+                val meta = ImageMeta(
+                    image.mediaId, image.chunks, image.width, image.height, image.size, null, image.remote, image.transitWebp
+                )
                 val result = if (doc.keys.isNotEmpty()) {
                     // Grup fotoğrafını birden çok kişi indirir; parçalar gönderici tarafından 7 gün sonra silinir.
                     val key = messageKey(doc, myUid)
@@ -800,7 +1222,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         pendingApk?.let { apk ->
             if (updater.canInstallPackages()) {
                 pendingApk = null
-                runCatching { updater.install(apk) }
+                viewModelScope.launch(Dispatchers.IO) { runCatching { updater.installWithSession(apk) } }
             }
         }
     }
@@ -845,7 +1267,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         if (messageType == SystemNotes.MESSAGE_TYPE) {
             return UiMessage(
                 id = id, text = null, isFromMe = fromMe, timestamp = createdAt, status = pendingStatus,
-                senderUid = senderId, systemText = systemText ?: ""
+                senderUid = senderId, systemText = restoreTo?.let { restoreNoteText(this, it, myUid) } ?: systemText ?: ""
             )
         }
         if (messageType == ScreenshotNotice.MESSAGE_TYPE) {
@@ -872,6 +1294,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     thumbBase64 = meta.thumbBase64,
                     localPath = if (local) media.localFile(meta.mediaId).absolutePath else null,
                     remote = meta.remote,
+                    transitWebp = meta.transitWebp,
                     state = when {
                         local -> ImageState.READY
                         else -> _imageStates.value[meta.mediaId] ?: if (
@@ -909,6 +1332,19 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 else "🔒 Bu mesaj sen gruba katılmadan önce gönderildi."
             } else null
         )
+    }
+
+    /** Geri yükleme notu her kişiye kendi açısından gösterilir. */
+    private fun restoreNoteText(doc: MessageDoc, to: String, myUid: String): String {
+        val chatId = activeChatId(myUid)
+        val nick = chatId?.let { chatDoc(it)?.nicknames }.orEmpty()
+        val sender = if (doc.senderId == myUid) "Sen" else resolveName(doc.senderId, nick, _profiles.value, _rawContacts.value)
+        val target = resolveName(to, nick, _profiles.value, _rawContacts.value)
+        return when (myUid) {
+            to -> "$sender sohbet geçmişini geri gönderdi · güvenlik numaran değişti"
+            doc.senderId -> "${TurkishSuffix.dative(target)} sohbet geçmişi gönderildi · güvenlik numarası değişti"
+            else -> "${TurkishSuffix.genitive(target)} güvenlik numarası değişti"
+        }
     }
 
     private fun pollView(doc: MessageDoc, myUid: String, plain: String?): PollView? {
@@ -952,7 +1388,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         if (ChatIds.isGroup(chatId)) return
         val ids = docs.filter {
             it.senderId != myUid && it.deliveryStatus != "READ" && !it.isPending && it.id !in readRequested &&
-                it.messageType != SystemNotes.MESSAGE_TYPE
+                it.messageType != SystemNotes.MESSAGE_TYPE && !it.deleted
         }.map { it.id }
         if (ids.isNotEmpty()) {
             readRequested.addAll(ids)
@@ -1023,17 +1459,19 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val expiresAt = if (messageType == ScreenshotNotice.MESSAGE_TYPE) 0L
         else Disappearing.expiryFor(chatDoc(chatId)?.disappearSeconds ?: 0L, System.currentTimeMillis())
 
+        // Karşı taraf 2.5.0+ ise metin şifrelemeden önce sıkıştırılır.
+        val pack = peer.caps >= CAPS
         viewModelScope.launch {
             try {
                 val (content, encPreview, myKey) = withContext(Dispatchers.Default) {
                     Triple(
-                        crypto.encrypt(plain, peer.publicKey),
-                        crypto.encrypt(preview, peer.publicKey),
+                        crypto.encrypt(plain, peer.publicKey, pack),
+                        crypto.encrypt(preview, peer.publicKey, pack),
                         crypto.publicKeyBase64()
                     )
                 }
                 val replyFields = reply?.let {
-                    val encQuote = withContext(Dispatchers.Default) { crypto.encrypt(it.snippet, peer.publicKey) }
+                    val encQuote = withContext(Dispatchers.Default) { crypto.encrypt(it.snippet, peer.publicKey, pack) }
                     FirestoreRepository.ReplyFields(it.messageId, it.senderUid, encQuote)
                 }
                 repo.sendMessage(
@@ -1093,17 +1531,18 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val members = doc.memberUids
                 val publicKeys = memberPublicKeys(members, myUid)
+                val pack = allMembersSupportV2(chatId, myUid)
                 val messageKey = presetKey ?: crypto.newMessageKey()
                 val encrypted = withContext(Dispatchers.Default) {
                     val keys = publicKeys.mapValues { (_, pub) -> crypto.wrapKey(messageKey, pub) }
                     Triple(
-                        crypto.encryptWithKey(plain, messageKey),
-                        crypto.encryptWithKey(preview, messageKey),
+                        crypto.encryptWithKey(plain, messageKey, pack),
+                        crypto.encryptWithKey(preview, messageKey, pack),
                         keys
                     )
                 }
                 val replyFields = reply?.let {
-                    FirestoreRepository.ReplyFields(it.messageId, it.senderUid, crypto.encryptWithKey(it.snippet, messageKey))
+                    FirestoreRepository.ReplyFields(it.messageId, it.senderUid, crypto.encryptWithKey(it.snippet, messageKey, pack))
                 }
                 repo.sendGroupMessage(
                     chatId = chatId,
@@ -1227,7 +1666,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 if (serverReady) launch { push.refreshIfStale(_config.value.serverUrl); refreshSaver() }
-                val prepared = media.prepare(uri, saver = _saverLevel.value >= 1)
+                // WebP yalnızca yolda: alıcıların hepsi 2.5.0+ ise; saklanan ve paylaşılan hal her zaman JPEG.
+                val prepared = media.prepare(uri, saver = _saverLevel.value >= 1, transitWebp = allMembersSupportV2(chatId, myUid))
                 val placeholder = UiMessage(
                     id = placeholderId,
                     text = null,
@@ -1519,7 +1959,9 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val image = _activeMessages.value.firstOrNull { it.id == messageId }?.image
         viewModelScope.launch {
             try {
-                repo.deleteMessage(chatId, messageId)
+                // 2.5.0+ sohbetlerde mesaj arşivi telefonlarda: silme, boş bir kayıtla herkese iletilir.
+                if (allMembersSupportV2(chatId, myUid)) repo.tombstoneMessage(chatId, messageId, myUid, myDisplayName(myUid))
+                else repo.deleteMessage(chatId, messageId)
                 withContext(Dispatchers.IO) { runCatching { localStore.delete(chatId, listOf(messageId)) } }
                 if (image != null) {
                     media.deleteMedia(chatId, ImageMeta(image.mediaId, image.chunks, 0, 0, 0, null, image.remote))
@@ -2051,7 +2493,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _update.update { it.copy(downloading = false, progress = 100, showDialog = false) }
                 if (updater.canInstallPackages()) {
-                    updater.install(apk)
+                    withContext(Dispatchers.IO) { updater.installWithSession(apk) }
                 } else {
                     pendingApk = apk
                     _events.tryEmit("Güncellemeyi yüklemek için Dakk'a izin verin, ardından geri dönün.")
@@ -2314,6 +2756,20 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         private const val PREFIX_AI_CONSENT = "ai_consent_"
         private const val PREFIX_AI_COUNT = "ai_count_"
         private const val PREF_SEEN_ANNOUNCEMENTS = "seen_announcements"
+        const val PREF_CHAT_BACKUP = "chat_backup"
+        private const val PREF_INSTALL_KIND = "install_kind"
+        private const val PREF_WIZARD_DONE = "wizard_done_steps"
+        private const val PREF_TUTORIAL_DONE = "tutorial_done"
+        private const val PREF_RESTORE_AT = "restore_at_"
+        private const val PREF_RESTORED_NOTES = "restored_notes"
+        private const val PREFIX_PEER_KEY = "peer_key_"
+        private const val PREFIX_RESTORE_SERVED = "restore_served_"
+        private const val PREFIX_MAILBOX = "mailbox_"
+        private const val PREFIX_SWEPT = "swept_"
+        /** Bu sürümün özellik düzeyi (profilde "caps"): 1 = sıkıştırma, posta kutusu, WebP aktarımı, geri yükleme. */
+        const val CAPS = 1
+        private const val SWEEP_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
+        private val RESENDABLE_TYPES = setOf("TEXT", "POLL")
         private const val CHAT_CONTEXT_MESSAGES = 30
         const val MAX_MESSAGE_BYTES = 3_500
         const val MAX_MESSAGE_CHARS = 2_000

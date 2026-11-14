@@ -72,8 +72,9 @@ import kotlinx.coroutines.launch
 
 const val PRIVACY_POLICY_URL = "https://github.com/cnrcrm20-ctrl/Dakk/blob/main/PRIVACY_POLICY.md"
 
+/** [header]: kurulum sihirbazında ilerleme noktaları ve "Geri" (yeni kurulumlarda). */
 @Composable
-fun AuthScreen() {
+fun AuthScreen(header: (@Composable () -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(false) }
@@ -96,6 +97,10 @@ fun AuthScreen() {
                 .padding(horizontal = 24.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (header != null) {
+                header()
+                Spacer(Modifier.height(20.dp))
+            }
             Box(
                 modifier = Modifier
                     .size(116.dp)
