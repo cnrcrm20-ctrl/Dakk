@@ -49,6 +49,9 @@ mesajı sadece sen ve karşındaki kişi açabilir.
 - 📉 **Veri tasarrufu** — Ayarlar → *Veri tasarrufu*: Normal / Tasarruf / Otomatik. Otomatik, sunucu yoğunlaşınca
   kendiliğinden küçük fotoğraflara geçer.
 - 💾 **Telefonda mesaj arşivi** — Sohbetler internet beklemeden açılır; sunucudan yalnızca son mesajlar dinlenir.
+  2.5.0'dan itibaren sunucu yalnızca posta kutusudur: teslim edilen mesajlar telefonlarda saklanır.
+- ♻️ **Sohbet yedeği** — Dakk'ı yeniden kurarsan, yedeği açık arkadaşların sohbet geçmişini şifreli olarak geri gönderir.
+- 🧭 **Kurulum sihirbazı ve tanıtım turu** — İzinler ve ayarlar ilk açılışta adım adım; Ayarlar → *İzinler*'den sonra da yönetilebilir.
 - ✨ **Dakk Asistan** — Uygulama içi yapay zekâ asistanı. Bir sohbette `@dakk` yazarak onu sohbete çağırabilirsin. Yapay zekâ tarafından işlenir; ilk kullanımda uyarı gösterilir.
 - 😂 **Tepkiler** — Mesaja uzun bas, 😂 ❤️ ⭐ 👌 tepkilerinden birini bırak. Tepkiler de şifrelidir.
 - ↩️ **Yanıtla** — Bir mesajı alıntılayarak yanıt ver.
@@ -112,7 +115,10 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
 - Xiaomi/Redmi/POCO gibi telefonlarda bildirimlerin uygulama kapalıyken de gelmesi için Dakk'ın
   **Otomatik başlatma** izni açık, pil tasarrufu **Kısıtlama yok** olmalıdır.
 - Bir hesap aynı anda tek cihazda kullanılabilir. Yeni bir cihazda giriş yapıldığında eski cihazdaki
-  mesajlar o cihazda okunamaz hale gelir (anahtarlar cihazdan dışarı çıkmaz).
+  mesajlar o cihazda okunamaz hale gelir (anahtarlar cihazdan dışarı çıkmaz). Sohbet geçmişi yalnızca
+  *Sohbet yedeği* açık olan arkadaşlarla olan sohbetler için, 14 gün içinde geri gelir.
+- Mesaj sıkıştırma, WebP fotoğraf aktarımı ve posta kutusu, yalnızca sohbetteki herkes 2.5.0 veya
+  üzerini kullanıyorsa devreye girer.
 - "Ekran görüntüsü aldı" bilgisi yalnızca ekran görüntüsünü alan kişinin telefonu **Android 14 veya
   üzeriyse** gönderilir. Daha eski Android sürümleri bunu uygulamalara bildirmez. Ekran kaydı algılanmaz.
 - Şimdilik yazı, fotoğraf ve anket gönderilebilir. Video ve sesli mesaj yoktur.

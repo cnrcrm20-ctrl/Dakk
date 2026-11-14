@@ -43,14 +43,20 @@ class LocalMessageStore(context: Context) :
     fun isSynced(chatId: String): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM synced WHERE chat_id = ?", arrayOf(chatId)).use { it.moveToFirst() }
 
-    /** Sunucudan alınan tam geçmişle yerel kopyayı eşitler. */
+    /**
+     * Sunucudan alınan tam geçmişle yerel kopyayı eşitler. [mailbox] (2.5.0+ sohbet) ise sunucuda artık
+     * olmayan mesajlar silinmez: sunucu yalnızca teslim edilmemiş mesajları tutar, arşiv telefondadır.
+     */
     @Synchronized
-    fun replaceAll(chatId: String, docs: List<MessageDoc>) {
+    fun replaceAll(chatId: String, docs: List<MessageDoc>, mailbox: Boolean = false) {
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.delete("messages", "chat_id = ?", arrayOf(chatId))
-            docs.filterNot { it.isPending }.forEach { insert(db, chatId, it) }
+            if (!mailbox) db.delete("messages", "chat_id = ?", arrayOf(chatId))
+            docs.filterNot { it.isPending }.forEach { doc ->
+                if (doc.deleted) db.delete("messages", "chat_id = ? AND id = ?", arrayOf(chatId, doc.id))
+                else insert(db, chatId, doc)
+            }
             db.insertWithOnConflict(
                 "synced", null,
                 ContentValues().apply { put("chat_id", chatId); put("at", System.currentTimeMillis()) },
@@ -67,7 +73,11 @@ class LocalMessageStore(context: Context) :
      * kapsadığı zaman aralığında sunucuda artık olmayanlar (silinen/kaybolan) yerelden de silinir.
      */
     @Synchronized
-    fun applyWindow(chatId: String, window: List<MessageDoc>, windowIsComplete: Boolean) {
+    fun applyWindow(chatId: String, window: List<MessageDoc>, windowIsComplete: Boolean, mailbox: Boolean = false) {
+        if (mailbox) {
+            upsert(chatId, window)
+            return
+        }
         val stable = window.filterNot { it.isPending }
         val db = writableDatabase
         db.beginTransaction()
@@ -89,6 +99,24 @@ class LocalMessageStore(context: Context) :
                 }
             }
             stable.forEach { insert(db, chatId, it) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /** Mesajları ekler/günceller; silinmiş (boş kayıt) olanları arşivden çıkarır. Başka hiçbir şeyi silmez. */
+    @Synchronized
+    fun upsert(chatId: String, docs: List<MessageDoc>) {
+        val stable = docs.filterNot { it.isPending }
+        if (stable.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            stable.forEach { doc ->
+                if (doc.deleted) db.delete("messages", "chat_id = ? AND id = ?", arrayOf(chatId, doc.id))
+                else insert(db, chatId, doc)
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -133,13 +161,28 @@ class LocalMessageStore(context: Context) :
         /** Sunucudan canlı dinlenen son mesaj sayısı. */
         const val LIVE_WINDOW = 150L
 
-        /** Birleştirme: yerel kopyadaki eski mesajlar + sunucudaki güncel pencere. */
-        fun merge(local: List<MessageDoc>, window: List<MessageDoc>, windowIsComplete: Boolean): List<MessageDoc> {
-            if (windowIsComplete) return window
+        /**
+         * Birleştirme: yerel kopyadaki eski mesajlar + sunucudaki güncel pencere.
+         * [mailbox] (2.5.0+ sohbet): sunucudan kaldırılan (teslim edilmiş) mesajlar telefonda kalır; yalnızca
+         * "herkesten silindi" işaretli kayıtlar düşer.
+         */
+        fun merge(
+            local: List<MessageDoc>,
+            window: List<MessageDoc>,
+            windowIsComplete: Boolean,
+            mailbox: Boolean = false
+        ): List<MessageDoc> {
+            if (mailbox) {
+                val byId = LinkedHashMap<String, MessageDoc>()
+                local.forEach { byId[it.id] = it }
+                window.forEach { byId[it.id] = it }
+                return byId.values.filterNot { it.deleted }.sortedBy { it.createdAt }
+            }
+            if (windowIsComplete) return window.filterNot { it.deleted }
             val from = window.filterNot { it.isPending }.minOfOrNull { it.createdAt } ?: return (local + window).distinctBy { it.id }
             val windowIds = window.map { it.id }.toSet()
             val older = local.filter { it.createdAt < from && it.id !in windowIds }
-            return older + window
+            return (older + window).filterNot { it.deleted }
         }
     }
 }

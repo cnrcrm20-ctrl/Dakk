@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,7 +88,8 @@ fun UpdateDialog(
     signatureMismatch: Boolean,
     onUpdate: () -> Unit,
     onOpenReleasePage: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    silentInstall: Boolean = false
 ) {
     Dialog(
         onDismissRequest = { if (!downloading) onDismiss() },
@@ -112,7 +114,7 @@ fun UpdateDialog(
                 if (signatureMismatch) {
                     ReinstallContent(release, onOpenReleasePage, onDismiss)
                 } else {
-                    UpdateContent(release, currentVersion, downloading, progress, onUpdate, onDismiss)
+                    UpdateContent(release, currentVersion, downloading, progress, silentInstall, onUpdate, onDismiss)
                 }
             }
         }
@@ -125,6 +127,7 @@ private fun UpdateContent(
     currentVersion: String,
     downloading: Boolean,
     progress: Int,
+    silentInstall: Boolean,
     onUpdate: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -140,8 +143,11 @@ private fun UpdateContent(
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                if (downloading) "İndirme bitince kurulum ekranı açılır. Mesajların ve kişilerin olduğu gibi kalır."
-                else "Daha sonra",
+                when {
+                    !downloading -> "Daha sonra"
+                    silentInstall -> "İndirme bitince Dakk kendini günceller; bildirime dokunarak yeniden açabilirsin. Mesajların olduğu gibi kalır."
+                    else -> "İndirme bitince tek dokunuşla kurulur. Mesajların ve kişilerin olduğu gibi kalır."
+                },
                 color = if (downloading) DakkTextTertiaryDark else DakkTextSecondaryDark,
                 fontSize = if (downloading) 12.sp else 15.sp,
                 fontWeight = if (downloading) FontWeight.Normal else FontWeight.SemiBold,
@@ -154,8 +160,12 @@ private fun UpdateContent(
             )
         }
     ) {
+        UpdaterHeader()
+        Spacer(Modifier.height(14.dp))
         GlowingLogo()
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
+        OfficialBadge()
+        Spacer(Modifier.height(14.dp))
         Pill("YENİ SÜRÜM HAZIR")
         Spacer(Modifier.height(14.dp))
         Text(
@@ -250,6 +260,42 @@ private fun ReinstallContent(release: ReleaseInfo, onOpenReleasePage: () -> Unit
             fontSize = 12.sp,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+/** "Dakk Güncelleyici" başlığı: küçük logo + ad. */
+@Composable
+internal fun UpdaterHeader() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(painter = painterResource(R.drawable.dakk_logo), contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("Dakk Güncelleyici", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Güncellemenin yalnızca Dakk'ın imza anahtarıyla imzalanmışsa kurulacağını anlatan rozet. */
+@Composable
+internal fun OfficialBadge() {
+    val green = Color(0xFF34C759)
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(green.copy(alpha = 0.14f))
+            .border(1.dp, green.copy(alpha = 0.45f), RoundedCornerShape(50))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.VerifiedUser, null, tint = green, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Resmi Dakk imzalı", color = green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

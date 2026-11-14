@@ -32,7 +32,16 @@ class FirestoreRepository(context: Context) {
 
     private val estimate = DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
 
-    suspend fun publishProfile(uid: String, displayName: String, email: String, photoUrl: String, publicKey: String) {
+    suspend fun publishProfile(
+        uid: String,
+        displayName: String,
+        email: String,
+        photoUrl: String,
+        publicKey: String,
+        caps: Int,
+        backup: Boolean,
+        restoreAt: Long
+    ) {
         val payload = mapOf(
             "userId" to uid,
             "displayName" to displayName.trim().ifBlank { "Dakk Kullanıcısı" }.take(60),
@@ -40,6 +49,9 @@ class FirestoreRepository(context: Context) {
             "photoUrl" to photoUrl.take(1000),
             "status" to "online",
             "publicKey" to publicKey,
+            "caps" to caps,
+            "backup" to backup,
+            "restoreAt" to restoreAt,
             "createdAt" to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp()
         )
@@ -66,7 +78,10 @@ class FirestoreRepository(context: Context) {
             displayName = getString("displayName").orEmpty(),
             email = getString("email").orEmpty(),
             photoUrl = getString("photoUrl").orEmpty(),
-            publicKey = getString("publicKey").orEmpty()
+            publicKey = getString("publicKey").orEmpty(),
+            caps = (getLong("caps") ?: 0L).toInt(),
+            backup = getBoolean("backup") ?: false,
+            restoreAt = getLong("restoreAt") ?: 0L
         )
     }
 
@@ -209,7 +224,9 @@ class FirestoreRepository(context: Context) {
         expiresAt = getTimestamp("expiresAt")?.toDate()?.time ?: 0L,
         systemText = getString("systemText")?.ifBlank { null },
         votes = stringMap("votes"),
-        senderName = getString("senderName").orEmpty()
+        senderName = getString("senderName").orEmpty(),
+        deleted = getBoolean("del") ?: false,
+        restoreTo = getString("restoreTo")?.ifBlank { null }
     )
 
     /** Yanıtlanan mesaj bilgisi (alıntı metni şifrelidir). */
@@ -674,6 +691,100 @@ class FirestoreRepository(context: Context) {
             .documents
             .map { it.toMessage() }
             .firstOrNull { it.senderId != myUid && it.messageType != "SCREENSHOT" && it.messageType != "SYSTEM" }
+
+    /** Son [limit] mesajı bir kez sunucudan okur (anahtar değişince bekleyen mesajları yeniden göndermek için). */
+    suspend fun recentMessagesOnce(chatId: String, limit: Long): List<MessageDoc> =
+        db.collection("chats").document(chatId).collection("messages")
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(limit)
+            .get(Source.SERVER).await()
+            .documents
+            .map { it.toMessage() }
+
+    /** Benim gönderdiğim mesajlar (posta kutusu temizliği için; yalnızca eşitlik filtresi, ek dizin gerekmez). */
+    suspend fun myOldMessages(chatId: String, myUid: String, deliveryStatus: String?, limit: Long): List<MessageDoc> {
+        var q: Query = db.collection("chats").document(chatId).collection("messages").whereEqualTo("senderId", myUid)
+        if (deliveryStatus != null) q = q.whereEqualTo("deliveryStatus", deliveryStatus)
+        return q.limit(limit).get(Source.SERVER).await().documents.map { it.toMessage() }
+    }
+
+    /** Kendi mesajımın alanlarını değiştirir (kurallar gönderenin kendi mesajını değiştirmesine izin verir). */
+    suspend fun updateMessageFields(chatId: String, messageId: String, fields: Map<String, Any>) {
+        db.collection("chats").document(chatId).collection("messages").document(messageId).update(fields).await()
+    }
+
+    /**
+     * 2.5.0+ sohbetlerde "herkesten sil": belge boş bir kayda çevrilir, böylece telefonunda saklayan
+     * herkes mesajı kendi arşivinden de siler. Boş kayıtlar 30 gün sonra gönderen tarafından kaldırılır.
+     */
+    suspend fun tombstoneMessage(chatId: String, messageId: String, myUid: String, senderName: String) {
+        val ref = db.collection("chats").document(chatId).collection("messages").document(messageId)
+        // Zaman güncellenir ki boş kayıt herkesin dinlediği son mesajlar penceresine girsin.
+        try {
+            ref.update(
+                mapOf(
+                    "content" to "",
+                    "del" to true,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "replyPreview" to FieldValue.delete(),
+                    "reactions" to FieldValue.delete(),
+                    "votes" to FieldValue.delete(),
+                    "keys" to FieldValue.delete()
+                )
+            ).await()
+        } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+            if (e.code != com.google.firebase.firestore.FirebaseFirestoreException.Code.NOT_FOUND) throw e
+            // Mesaj teslim edilip sunucudan kaldırılmıştı: aynı kimlikle boş bir kayıt bırakılır.
+            ref.set(
+                mapOf(
+                    "chatId" to chatId,
+                    "senderId" to myUid,
+                    "senderName" to senderName.ifBlank { "Dakk" }.take(60),
+                    "content" to "",
+                    "deliveryStatus" to "SENT",
+                    "messageType" to "TEXT",
+                    "del" to true,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+    }
+
+    /**
+     * Sohbet geçmişi geri yükleme notu. [systemText] eski sürümlerde de görünür; [encryptedPointer] yalnızca
+     * geçmişin gönderildiği kişinin yeni anahtarıyla çözülebilir (fotoğraf deposundaki paketin bilgisi).
+     */
+    suspend fun sendRestoreNote(
+        chatId: String,
+        myUid: String,
+        senderName: String,
+        systemText: String,
+        restoreTo: String,
+        encryptedPointer: String,
+        senderKey: String,
+        recipientKey: String
+    ) {
+        val payload = mapOf(
+            "chatId" to chatId,
+            "senderId" to myUid,
+            "senderName" to senderName.ifBlank { "Dakk" }.take(60),
+            "content" to encryptedPointer,
+            "systemText" to systemText.take(300),
+            "deliveryStatus" to "SENT",
+            "messageType" to "SYSTEM",
+            "restoreTo" to restoreTo,
+            "senderKey" to senderKey,
+            "recipientKey" to recipientKey,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("chats").document(chatId).collection("messages").document().set(payload).await()
+    }
+
+    /** Kurucunun kimliğini sunucunun kota uyarıları için kaydeder (yalnızca kurucular yazabilir). */
+    suspend fun registerFounder(uid: String) {
+        db.collection("app_config").document("founders")
+            .set(mapOf("uids" to FieldValue.arrayUnion(uid)), SetOptions.merge()).await()
+    }
 
     suspend fun deleteMessage(chatId: String, messageId: String) {
         db.collection("chats").document(chatId).collection("messages").document(messageId)

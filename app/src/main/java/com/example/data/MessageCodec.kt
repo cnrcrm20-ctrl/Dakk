@@ -30,6 +30,7 @@ object MessageCodec {
         doc.systemText?.let { o.put("st", it) }
         if (doc.votes.isNotEmpty()) o.put("v", JSONObject(doc.votes))
         if (doc.senderName.isNotEmpty()) o.put("n", doc.senderName)
+        doc.restoreTo?.let { o.put("ro", it) }
         return deflate(o.toString().toByteArray(Charsets.UTF_8))
     }
 
@@ -54,7 +55,8 @@ object MessageCodec {
             expiresAt = o.optLong("x"),
             systemText = o.optString("st").ifBlank { null },
             votes = o.optJSONObject("v").toStringMap(),
-            senderName = o.optString("n")
+            senderName = o.optString("n"),
+            restoreTo = o.optString("ro").ifBlank { null }
         )
     } catch (_: Exception) {
         null

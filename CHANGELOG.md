@@ -2,6 +2,36 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.5.0] - 2026-11-15
+
+### Yeni
+- **Kurulum sihirbazı:** İlk açılışta Dakk adım adım tanıtılıyor: Google ile giriş, sohbet geçmişini geri
+  alma, profil, bildirim izni, sohbet yedeği, güncelleme izni ve pil ayarı. Verilmiş izinlerin adımları
+  atlanıyor. Mevcut kullanıcılar yalnızca yeni adımları (ör. sohbet yedeği) bir kez görüyor.
+- **Kısa tanıtım turu:** Yeni kullanıcılara ana ekranda yaklaşık 30 saniyelik bir tur: kişi ekleme, yeni
+  sohbet, grup kurma ve ayarlar.
+- **Sohbet yedeği (arkadaşlardan geri yükleme):** Ayarlar → *Sohbet yedeği* (varsayılan açık). Telefonu sıfırlarsan veya
+  Dakk'ı yeniden kurarsan, yedeği açık olan arkadaşlarının telefonları seninle olan sohbet geçmişini
+  yeni anahtarına şifreleyip geri gönderiyor (en fazla 14 gün içinde). Sunucu içeriği göremez.
+- **İzinler ekranı:** Ayarlar → *İzinler*: bildirim, kamera, güncelleme yükleme ve pil izinlerinin durumu
+  tek yerde; Xiaomi/Redmi/POCO için otomatik başlatma rehberi.
+
+### İyileştirildi
+- **Sunucu artık posta kutusu:** Herkes 2.5.0 kullandığında, teslim edilip okunan mesajlar telefonlarda
+  saklanıp sunucudan kaldırılıyor (birebir sohbette okunduktan sonra, gruplarda 30 gün sonra). Anketler
+  sunucuda kalıyor. Sohbetler daha hızlı açılıyor, sunucu kotası çok daha geç doluyor.
+- **Sıkıştırılmış mesajlar:** Mesajlar şifrelenmeden önce Türkçeye göre ayarlanmış bir sözlükle
+  sıkıştırılıyor; kısa mesajlar yaklaşık üçte bir daha küçük. (Sohbetteki herkes 2.5.0 kullanıyorsa.)
+- **Daha küçük fotoğraflar:** Fotoğraflar mümkünse WebP olarak aktarılıyor; telefonda yine JPEG
+  olarak kaydediliyor.
+- **Daha kolay güncelleme:** Android 12 ve üzerinde güncelleme çoğu zaman ek onay istemeden kuruluyor;
+  bittiğinde "Dakk güncellendi ✓" bildirimi geliyor. Kurulum başarısız olursa klasik yükleyiciye geçiliyor.
+- **Anahtar değişince yeniden gönderim:** Arkadaşın Dakk'ı yeniden kurduysa, ona gönderdiğin son mesajlar
+  yeni anahtarıyla yeniden şifreleniyor; okunamayan mesaj kalmıyor.
+- **Fotoğraf deposu yedekli:** Fotoğraflar iki depoya dağıtılıyor; biri dolarsa veya yanıt vermezse diğeri
+  kullanılıyor.
+- Sistem notlarında Türkçe ekler artık doğru ("Ali'ye", "Can'ın", "Ayşe'ye" …).
+
 ## [2.4.1] - 2026-11-15
 
 ### İyileştirildi

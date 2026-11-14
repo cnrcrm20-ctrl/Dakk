@@ -31,4 +31,21 @@ class MessageCodecTest {
         val window = listOf(doc("b", 2))
         assertEquals(listOf("b"), LocalMessageStore.merge(local, window, windowIsComplete = true).map { it.id })
     }
+
+    @Test
+    fun mailboxKeepsDeliveredMessagesAndAppliesTombstones() {
+        val local = listOf(doc("a", 1), doc("b", 2), doc("c", 3))
+        // Sunucuda yalnızca teslim edilmemiş mesajlar ve "b" için boş kayıt kaldı.
+        val window = listOf(doc("b", 5).copy(deleted = true, content = ""), doc("d", 4))
+        assertEquals(
+            listOf("a", "c", "d"),
+            LocalMessageStore.merge(local, window, windowIsComplete = true, mailbox = true).map { it.id }
+        )
+    }
+
+    @Test
+    fun restoreNoteRoundTrip() {
+        val d = doc("m2", 77L).copy(messageType = "SYSTEM", systemText = "Ali'ye sohbet geçmişi gönderildi", restoreTo = "u9")
+        assertEquals(d, MessageCodec.decode("m2", MessageCodec.encode(d)))
+    }
 }

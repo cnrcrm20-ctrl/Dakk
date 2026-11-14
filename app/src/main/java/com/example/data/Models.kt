@@ -6,7 +6,13 @@ data class UserProfile(
     val displayName: String,
     val email: String,
     val photoUrl: String,
-    val publicKey: String
+    val publicKey: String,
+    /** Uygulamanın desteklediği özellik düzeyi: 0 = 2.4.x ve öncesi, 1 = 2.5.0+ (sıkıştırma, posta kutusu, WebP aktarımı). */
+    val caps: Int = 0,
+    /** Sohbet yedeği açık mı? Açıksa arkadaşların telefonları, yeniden kurulumda sohbet geçmişini geri gönderir. */
+    val backup: Boolean = false,
+    /** Bu hesabın yeni kurulumda geçmiş istediği zaman (0 = istemiyor). */
+    val restoreAt: Long = 0L
 )
 
 /** Firestore: users/{me}/contacts/{uid} */
@@ -80,7 +86,11 @@ data class MessageDoc(
     /** Anket oyları: kullanıcı kimliği → şifreli seçim. */
     val votes: Map<String, String> = emptyMap(),
     /** Gönderenin o anki adı. */
-    val senderName: String = ""
+    val senderName: String = "",
+    /** Mesaj herkesten silindi (2.5.0+ sohbetlerde silinen mesajın yerinde kalan boş kayıt). */
+    val deleted: Boolean = false,
+    /** Sohbet geçmişi geri yükleme notuysa geçmişin gönderildiği kişi. */
+    val restoreTo: String? = null
 )
 
 enum class MessageStatus { PENDING, SENT, READ }
@@ -101,7 +111,9 @@ data class ImageAttachment(
     val localPath: String?,
     val state: ImageState,
     /** Fotoğraf deposunda mı (true) yoksa Firestore parçalarında mı? */
-    val remote: Boolean = false
+    val remote: Boolean = false,
+    /** Yolda WebP olarak taşındı mı? (Alıcı JPEG olarak saklar.) */
+    val transitWebp: Boolean = false
 )
 
 /**

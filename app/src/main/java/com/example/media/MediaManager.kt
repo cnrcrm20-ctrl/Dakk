@@ -24,7 +24,17 @@ import java.io.File
 import java.util.UUID
 
 /** Gönderilmeye hazır, sıkıştırılmış fotoğraf. */
-class PreparedImage(val jpeg: ByteArray, val width: Int, val height: Int, val thumbBase64: String?)
+/**
+ * Gönderime hazır fotoğraf. [jpeg] telefonda saklanan ve galeriye kaydedilen haldir. [transit] doluysa
+ * yalnızca yolda kullanılan daha küçük WebP kopyasıdır; alıcı onu açıp JPEG olarak saklar (2.5.0+).
+ */
+class PreparedImage(
+    val jpeg: ByteArray,
+    val width: Int,
+    val height: Int,
+    val thumbBase64: String?,
+    val transit: ByteArray? = null
+)
 
 /** Şifreli mesaj içeriğinde taşınan fotoğraf bilgisi. */
 data class ImageMeta(
@@ -35,7 +45,9 @@ data class ImageMeta(
     val size: Long,
     val thumbBase64: String?,
     /** true: şifreli fotoğraf ayrı fotoğraf deposunda; false: Firestore parçalarında (eski yöntem). */
-    val remote: Boolean = false
+    val remote: Boolean = false,
+    /** true: yolda WebP olarak taşındı; alıcı JPEG'e çevirip saklar. */
+    val transitWebp: Boolean = false
 ) {
     fun toJson(): String = JSONObject()
         .put("v", 1)
@@ -43,6 +55,7 @@ data class ImageMeta(
         .put("mediaId", mediaId)
         .put("chunks", chunks)
         .apply { if (remote) put("st", "r") }
+        .apply { if (transitWebp) put("tf", "webp") }
         .put("mime", "image/jpeg")
         .put("w", width)
         .put("h", height)
@@ -63,7 +76,8 @@ data class ImageMeta(
                     height = o.optInt("h"),
                     size = o.optLong("size"),
                     thumbBase64 = o.optString("thumb").ifBlank { null },
-                    remote = o.optString("st") == "r"
+                    remote = o.optString("st") == "r",
+                    transitWebp = o.optString("tf") == "webp"
                 )
             }
         } catch (_: Exception) {
@@ -107,7 +121,8 @@ class MediaManager(
 
     fun hasLocal(mediaId: String): Boolean = localFile(mediaId).let { it.isFile && it.length() > 0 }
 
-    suspend fun prepare(uri: Uri, saver: Boolean = false): PreparedImage = withContext(Dispatchers.IO) {
+    /** [transitWebp]: alıcıların hepsi 2.5.0+ ise yol için ayrıca daha küçük bir WebP kopyası üretilir. */
+    suspend fun prepare(uri: Uri, saver: Boolean = false, transitWebp: Boolean = false): PreparedImage = withContext(Dispatchers.IO) {
         val maxDimension = if (saver) SAVER_DIMENSION else MAX_DIMENSION
         val targetBytes = if (saver) SAVER_TARGET_BYTES else TARGET_BYTES
         val resolver = appContext.contentResolver
@@ -152,7 +167,9 @@ class MediaManager(
         val thumb = Base64.encodeToString(compress(thumbBitmap, 45), Base64.NO_WRAP)
             .takeIf { it.length <= MAX_THUMB_CHARS }
 
-        val result = PreparedImage(jpeg, oriented.width, oriented.height, thumb)
+        val transit = if (transitWebp) runCatching { webp(oriented, quality) }.getOrNull()?.takeIf { it.size < jpeg.size * 9 / 10 }
+        else null
+        val result = PreparedImage(jpeg, oriented.width, oriented.height, thumb, transit)
         if (thumbBitmap !== oriented) thumbBitmap.recycle()
         if (oriented !== scaled) oriented.recycle()
         if (scaled !== decoded) scaled.recycle()
@@ -170,6 +187,25 @@ class MediaManager(
             (source.height * ratio).toInt().coerceAtLeast(1),
             true
         )
+    }
+
+    /** JPEG kalitesine denk düşen WebP: aynı görüntü için genellikle %25–35 daha küçük. */
+    @Suppress("DEPRECATION")
+    private fun webp(bitmap: Bitmap, jpegQuality: Int): ByteArray =
+        ByteArrayOutputStream().use { out ->
+            val format = if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+            bitmap.compress(format, (jpegQuality - 6).coerceIn(40, 90), out)
+            out.toByteArray()
+        }
+
+    /** Yolda WebP gelen fotoğrafı telefonda saklamak için JPEG'e çevirir. */
+    private fun webpToJpeg(bytes: ByteArray): ByteArray? {
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        return try {
+            compress(bitmap, RECEIVED_JPEG_QUALITY)
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun compress(bitmap: Bitmap, quality: Int): ByteArray =
@@ -195,13 +231,17 @@ class MediaManager(
         image: PreparedImage,
         encrypt: (ByteArray) -> ByteArray
     ): ImageMeta {
-        val encrypted = withContext(Dispatchers.Default) { encrypt(image.jpeg) }
+        val wire = image.transit ?: image.jpeg
+        val encrypted = withContext(Dispatchers.Default) { encrypt(wire) }
         withContext(Dispatchers.IO) { localFile(mediaId).writeBytes(image.jpeg) }
         val server = mediaServer
         if (server.isNotBlank() && encrypted.size <= PushClient.MAX_MEDIA_BYTES) {
             val uploaded = runCatching { push.uploadMedia(server, chatId, mediaId, encrypted) }.getOrDefault(false)
             if (uploaded) {
-                return ImageMeta(mediaId, 1, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64, remote = true)
+                return ImageMeta(
+                    mediaId, 1, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64,
+                    remote = true, transitWebp = image.transit != null
+                )
             }
             Log.w(TAG, "Fotoğraf deposuna yüklenemedi; Firestore'a yükleniyor")
         }
@@ -214,7 +254,10 @@ class MediaManager(
             repo.uploadBlob(chatId, mediaId, index, parts.size, myUid, part)
         }
         rememberUpload(chatId, mediaId, parts.size)
-        return ImageMeta(mediaId, parts.size, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64)
+        return ImageMeta(
+            mediaId, parts.size, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64,
+            transitWebp = image.transit != null
+        )
     }
 
     /** Grup veya kişi fotoğrafı için küçük, kare kırpılmış JPEG üretir. */
@@ -289,7 +332,11 @@ class MediaManager(
                 }
                 out.toByteArray()
             }
-            val plain = withContext(Dispatchers.Default) { decrypt(encrypted) } ?: return DownloadResult.Failed
+            val decrypted = withContext(Dispatchers.Default) { decrypt(encrypted) } ?: return DownloadResult.Failed
+            // Kaydedilen ve paylaşılan fotoğraflar her zaman JPEG'dir; WebP yalnızca yolda kullanılır.
+            val plain = if (meta.transitWebp) {
+                withContext(Dispatchers.Default) { webpToJpeg(decrypted) } ?: return DownloadResult.Failed
+            } else decrypted
             val file = localFile(meta.mediaId)
             withContext(Dispatchers.IO) {
                 val tmp = File(dir, "${meta.mediaId}.part")
@@ -387,6 +434,7 @@ class MediaManager(
         const val JPEG_QUALITY = 78
         const val SAVER_JPEG_QUALITY = 68
         const val MAX_JPEG_BYTES = 1_200_000
+        const val RECEIVED_JPEG_QUALITY = 88
         const val MAX_THUMB_CHARS = 2_400
         const val CHUNK_BYTES = 700_000
         const val MAX_CHUNKS = 4

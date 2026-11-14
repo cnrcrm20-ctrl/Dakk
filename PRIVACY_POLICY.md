@@ -1,6 +1,6 @@
 # Dakk Gizlilik Politikası
 
-**Son güncelleme:** 15 Kasım 2026 • **Geçerli sürüm:** Dakk 2.4 ve sonrası
+**Son güncelleme:** 15 Kasım 2026 • **Geçerli sürüm:** Dakk 2.5 ve sonrası
 
 Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları [GitHub deposunda](https://github.com/cnrcrm20-ctrl/Dakk) doğrulayabilirsin.
 
@@ -36,6 +36,8 @@ Cihazın bir anahtar çifti üretir:
   - bir mesaja kimin tepki bıraktığı ve bir ankette kimin oy verdiği (hangi tepki veya hangi seçenek olduğu değil), yanıtlanan mesajın kimliği,
   - kaybolan mesajlarda mesajın silineceği zaman.
 - Sohbet içinde ortada görünen kısa **sistem notları** (ör. "Ali takma adını … yaptı", "Ayşe gruba katıldı", "kaybolan mesajlar açıldı") şifrelenmeden saklanır.
+- **Sunucu yalnızca posta kutusudur (2.5 ve sonrası):** Sohbetteki herkes 2.5 veya üzerini kullanıyorsa, teslim edilen mesajlar alıcının telefonuna kaydedilir ve sunucudan silinir. Birebir sohbette gönderen, mesaj okunduktan 24 saat sonra; alıcı da okuduğu mesajları 3 gün sonra sunucudan siler (gönderen uzun süre çevrimdışı kalırsa diye). Gruplarda mesajlar 30 gün, sistem notları 7 gün sonra silinir. Anketler, oyların taşınabilmesi için sunucuda kalır. *Herkesten sil* dediğin bir mesajın yerine 30 gün boyunca içeriksiz bir "silindi" kaydı kalır.
+- Mesajlar şifrelenmeden önce telefonunda sıkıştırılabilir. Bu, şifrelemeyi zayıflatmaz; sunucu yine yalnızca şifreli metni görür.
 - **Kaybolan mesajlar** açıksa mesajlar seçilen süre (24 saat veya 7 gün) dolunca sohbetteki bir cihaz tarafından sunucudan silinir.
 - Bir sohbette ekran görüntüsü aldığında (Android 14 ve üzeri) karşı tarafa sohbet içinde "ekran görüntüsü aldı" bilgisi gönderilir. Ekran görüntüsünün kendisi hiçbir yere gönderilmez.
 
@@ -44,6 +46,12 @@ Cihazın bir anahtar çifti üretir:
 - **Takma adlar** sohbetteki herkesin görebilmesi için sohbet bilgisiyle birlikte şifrelenmeden saklanır.
 - Grup **davet bağlantısı** yalnızca yöneticiler açarsa çalışır. Bağlantıya sahip olan herkes gruba katılabilir; bağlantı istenince yenilenebilir.
 - **Sessize alma** ayarı ve birebir sohbette kişiye verdiğin **özel fotoğraf** yalnızca senin telefonunda saklanır, kimseye gönderilmez.
+
+### 4a. Sohbet yedeği (arkadaşlardan geri yükleme)
+- Ayarlar → *Sohbet yedeği* açıksa profilinde bunu belirten bir işaret yayınlanır. Varsayılan olarak açıktır; kurulum sihirbazında sorulur ve istediğin zaman kapatabilirsin. Kapatırsan arkadaşlarına da geçmiş göndermezsin.
+- Dakk'ı yeniden kurduğunda yeni şifreleme anahtarın oluşur ve profilinde "geçmiş istiyor" zamanı yayınlanır (yalnızca yedeğin açıksa).
+- Yedeği açık olan arkadaşlarının telefonları, seninle olan sohbetin kendilerinde kayıtlı geçmişini **yeni açık anahtarına şifreleyerek** geçici olarak fotoğraf deposuna yükler ve sohbete kısa bir "sohbet geçmişi gönderildi" notu ekler. Telefonun paketi indirip çözdükten sonra depodan siler; açılmayan paketler en geç 7 günde silinir.
+- İstek 14 gün sonra geçersiz olur. Sunucu, paketin içeriğini okuyamaz.
 
 ### 5. "Yazıyor…" bilgisi
 Bir sohbette yazarken, o an uygulaması açık olan sohbet üyelerine "yazıyor" sinyali gönderilir. Sinyal yalnızca kullanıcı kimliğini ve "yazıyor / bıraktı" bilgisini taşır; yazdığın metni **taşımaz**. Sinyal Dakk sunucusunun anlık iletim kanalı (Supabase Realtime) üzerinden geçer ve **hiçbir yerde saklanmaz**. Kanal adları sohbete özel gizli bir değerden türetilir, sohbet dışındaki biri kanalı bulamaz.
@@ -74,7 +82,7 @@ Kısa şifreli mesajlar artık bildirimin içinde (şifreli olarak) iletilir, b�
 - ayarların,
 - şifreli özel anahtarın,
 - aldığın ve gönderdiğin fotoğraflar,
-- **mesaj arşivin:** sohbetlerin hızlı açılması için mesajlar telefonunda da saklanır (içerik şifreli haliyle). Çıkış yapınca bu arşiv silinir,
+- **mesaj arşivin:** mesajlar telefonunda da saklanır (içerik şifreli haliyle). 2.5 ve sonrasında teslim edilen mesajların asıl kopyası budur. Çıkış yapınca bu arşiv silinir,
 - veri tasarrufu ayarın,
 - Dakk Asistan sohbet geçmişin.
 
@@ -103,7 +111,8 @@ Dakk Asistan isteğe bağlıdır ve ilk kullanımda seni uyarır.
 | Depolama (yalnızca Android 9 ve öncesi) | Bir fotoğrafı galeriye kaydetmek istediğinde |
 | Bildirimler | Yeni mesajları haber vermek; bildirimden yanıt, "Görüldü" ve ❤️ |
 | Ekran görüntüsü algılama (Android 14+) | Sohbette ekran görüntüsü alındığını karşı tarafa bildirmek. Görüntüye erişilmez. |
-| Uygulama yükleme | Uygulama içi güncellemeyi kurmak (yalnızca sen onaylarsan) |
+| Uygulama yükleme | Uygulama içi güncellemeyi kurmak (yalnızca sen başlatırsan) |
+| Pil optimizasyonundan muafiyet (isteğe bağlı) | Bildirimlerin uygulama kapalıyken de gecikmeden gelmesi |
 
 ## Üçüncü taraf hizmetler
 
