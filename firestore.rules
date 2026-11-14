@@ -53,13 +53,144 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    // ---------------------------------------------------------------- Gruplar
+
+    function isGroupId(chatId) {
+      return chatId.matches('^g_[A-Za-z0-9]{16,40}$');
+    }
+
+    function isGroupAdmin(data) {
+      return request.auth.uid in data.get('admins', []);
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function isValidNicknameChange() {
+      let before = resource.data.get('nicknames', {});
+      let after = request.resource.data.get('nicknames', {});
+      let target = request.resource.data.get('nickTarget', '');
+      return !('nicknames' in changedKeys()) ||
+             (after is map && after.size() <= 50 &&
+              target is string && target in request.resource.data.memberUids &&
+              after.diff(before).affectedKeys().hasOnly([target]) &&
+              (!(target in after) || (after[target] is string && after[target].size() >= 1 && after[target].size() <= 40)));
+    }
+
+    function isValidDisappearing(data) {
+      return !('disappearSeconds' in data) || data.disappearSeconds in [0, 86400, 604800];
+    }
+
+    function isValidGroupFields(data) {
+      return data.isGroup == true &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 50 &&
+             data.admins is list && data.admins.size() >= 1 &&
+             data.admins.toSet().difference(data.memberUids.toSet()).size() == 0 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 50 &&
+             (!('photo' in data) || (data.photo is string && data.photo.size() <= 60000)) &&
+             data.inviteEnabled is bool &&
+             data.inviteCode is string && data.inviteCode.size() >= 8 && data.inviteCode.size() <= 40 &&
+             data.typingKey is string && data.typingKey.size() >= 16 && data.typingKey.size() <= 64 &&
+             isValidDisappearing(data) &&
+             (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 1000)) &&
+             (!('lastMessageKeys' in data) || (data.lastMessageKeys is map && data.lastMessageKeys.size() <= 51));
+    }
+
+    function isValidGroupCreate(chatId) {
+      let data = request.resource.data;
+      return isGroupId(chatId) && data.chatId == chatId &&
+             isValidGroupFields(data) &&
+             request.auth.uid in data.memberUids &&
+             data.admins == [request.auth.uid] &&
+             data.createdBy == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // Herhangi bir üye: son mesaj önizlemesi.
+    function isGroupPreviewUpdate() {
+      return changedKeys().hasOnly(['lastMessage', 'lastMessageSenderId', 'lastMessageSenderKey', 'lastMessageKeys',
+                                    'lastMessageTimestamp', 'lastMessageExpiresAt', 'updatedAt']) &&
+             request.resource.data.lastMessageSenderId == request.auth.uid;
+    }
+
+    // Herhangi bir üye kendine, yönetici herkese takma ad verebilir.
+    function isGroupNicknameUpdate() {
+      return changedKeys().hasOnly(['nicknames', 'nickTarget', 'updatedAt']) &&
+             isValidNicknameChange() &&
+             (request.resource.data.nickTarget == request.auth.uid || isGroupAdmin(resource.data));
+    }
+
+    // Herhangi bir üye: kaybolan mesajlar.
+    function isGroupDisappearingUpdate() {
+      return changedKeys().hasOnly(['disappearSeconds', 'updatedAt']);
+    }
+
+    // Yalnızca yöneticiler: ad, fotoğraf, üyeler, yöneticiler, davet bağlantısı, yazıyor anahtarı.
+    function isGroupAdminUpdate() {
+      return isGroupAdmin(resource.data) &&
+             changedKeys().hasOnly(['name', 'photo', 'memberUids', 'admins', 'inviteEnabled', 'inviteCode',
+                                    'typingKey', 'disappearSeconds', 'updatedAt']);
+    }
+
+    // Her üye gruptan ayrılabilir.
+    function isGroupLeave() {
+      let me = [request.auth.uid].toSet();
+      return changedKeys().hasOnly(['memberUids', 'admins', 'updatedAt']) &&
+             request.resource.data.memberUids.toSet() == resource.data.memberUids.toSet().difference(me) &&
+             request.resource.data.get('admins', []).toSet() == resource.data.get('admins', []).toSet().difference(me);
+    }
+
+    // Davet bağlantısıyla katılma: bağlantı açık, kod doğru, yalnızca kendini ekler.
+    function isGroupJoin() {
+      return resource.data.get('inviteEnabled', false) == true &&
+             changedKeys().hasOnly(['memberUids', 'joinCode', 'updatedAt']) &&
+             request.resource.data.joinCode == resource.data.inviteCode &&
+             request.resource.data.memberUids.size() <= 50 &&
+             request.resource.data.memberUids.toSet() == resource.data.memberUids.toSet().union([request.auth.uid].toSet());
+    }
+
+    function isValidGroupUpdate() {
+      let isMember = request.auth.uid in resource.data.memberUids;
+      return request.resource.data.isGroup == true &&
+             !('createdBy' in changedKeys()) && !('isGroup' in changedKeys()) && !('chatId' in changedKeys()) &&
+             ((isMember && isValidGroupFields(request.resource.data) &&
+               (isGroupPreviewUpdate() || isGroupNicknameUpdate() || isGroupDisappearingUpdate() || isGroupAdminUpdate())) ||
+              (isMember && isGroupLeave()) ||
+              (!isMember && isGroupJoin()));
+    }
+
+    // ---------------------------------------------------------------- Birebir sohbetler
+
+    function isValidDirectCreate(chatId) {
+      return !isGroupId(chatId) &&
+             request.resource.data.get('isGroup', false) == false &&
+             request.resource.data.memberUids.size() == 2 &&
+             isValidChat(request.resource.data) &&
+             isValidDisappearing(request.resource.data);
+    }
+
+    function isValidDirectUpdate() {
+      return request.auth.uid in resource.data.memberUids &&
+             resource.data.get('isGroup', false) == false &&
+             request.resource.data.get('isGroup', false) == false &&
+             request.resource.data.memberUids.toSet() == resource.data.memberUids.toSet() &&
+             isValidChat(request.resource.data) &&
+             isValidDisappearing(request.resource.data) &&
+             isValidNicknameChange();
+    }
+
     function isValidChatMessage(data) {
       return data.chatId is string && data.chatId.size() >= 1 &&
              data.senderId == request.auth.uid &&
              data.senderName is string && data.senderName.size() <= 60 &&
              data.content is string && data.content.size() <= 5000 &&
              data.deliveryStatus is string && (data.deliveryStatus in ['SENT', 'DELIVERED', 'READ']) &&
-             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE', 'SCREENSHOT']) &&
+             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE', 'SCREENSHOT', 'POLL', 'SYSTEM']) &&
+             (!('systemText' in data) || (data.messageType == 'SYSTEM' && data.systemText is string && data.systemText.size() <= 300)) &&
+             (!('keys' in data) || (data.keys is map && data.keys.size() <= 51)) &&
+             (!('expiresAt' in data) || data.expiresAt is timestamp) &&
+             !('votes' in data) &&
              (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 2000)) &&
              (!('isAssistant' in data) || data.isAssistant is bool) &&
              (!('replyTo' in data) || (data.replyTo is string && data.replyTo.size() <= 64)) &&
@@ -77,6 +208,21 @@ service cloud.firestore {
              after.diff(before).affectedKeys().hasOnly([request.auth.uid]) &&
              (!(request.auth.uid in after) ||
               (after[request.auth.uid] is string && after[request.auth.uid].size() <= 300));
+    }
+
+    function isOwnVoteChange() {
+      let before = resource.data.get('votes', {});
+      let after = request.resource.data.get('votes', {});
+      return resource.data.messageType == 'POLL' &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']) &&
+             after is map && after.size() <= 50 &&
+             after.diff(before).affectedKeys().hasOnly([request.auth.uid]) &&
+             (!(request.auth.uid in after) ||
+              (after[request.auth.uid] is string && after[request.auth.uid].size() <= 300));
+    }
+
+    function isExpired(data) {
+      return 'expiresAt' in data && data.expiresAt is timestamp && data.expiresAt <= request.time;
     }
 
     function isValidBlob(data) {
@@ -104,9 +250,12 @@ service cloud.firestore {
 
     match /chats/{chatId} {
       allow read: if isSignedIn() && request.auth.uid in resource.data.memberUids;
-      allow create: if isSignedIn() && isValidChat(request.resource.data);
-      allow update: if isSignedIn() && request.auth.uid in resource.data.memberUids && isValidChat(request.resource.data);
-      allow delete: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+      allow create: if isSignedIn() && (isValidGroupCreate(chatId) || isValidDirectCreate(chatId));
+      allow update: if isSignedIn() &&
+                       ((resource.data.get('isGroup', false) == true && isValidGroupUpdate()) ||
+                        (resource.data.get('isGroup', false) != true && isValidDirectUpdate()));
+      allow delete: if isSignedIn() && request.auth.uid in resource.data.memberUids &&
+                       resource.data.get('isGroup', false) == false;
 
       match /messages/{messageId} {
         allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids;
@@ -117,8 +266,11 @@ service cloud.firestore {
                          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids &&
                          (resource.data.senderId == request.auth.uid ||
                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deliveryStatus']) ||
-                          isOwnReactionChange());
-        allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+                          isOwnReactionChange() ||
+                          isOwnVoteChange());
+        allow delete: if isSignedIn() &&
+                         (resource.data.senderId == request.auth.uid ||
+                          (isExpired(resource.data) && isChatMember(chatId)));
       }
 
       match /blobs/{blobId} {

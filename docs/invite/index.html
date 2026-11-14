@@ -47,6 +47,38 @@
   var uid = (params.get('u') || params.get('uid') || '').trim();
   var valid = /^[A-Za-z0-9]{20,128}$/.test(uid);
   var open = document.getElementById('open');
+  var releases = 'https://github.com/cnrcrm20-ctrl/Dakk/releases/latest';
+  var isAndroid = /android/i.test(navigator.userAgent);
+
+  function findApk() {
+    // Doğrudan APK bağlantısı
+    fetch('https://api.github.com/repos/cnrcrm20-ctrl/Dakk/releases/latest')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        var apk = rel && (rel.assets || []).find(function (a) { return /\.apk$/i.test(a.name); });
+        if (apk) document.getElementById('download').href = apk.browser_download_url;
+      })
+      .catch(function () {});
+  }
+
+  // Grup daveti: ?g=<grup>&c=<kod>
+  var group = (params.get('g') || '').trim();
+  var code = (params.get('c') || '').trim();
+  if (/^g_[A-Za-z0-9]{16,40}$/.test(group) && /^[A-Za-z0-9]{8,40}$/.test(code)) {
+    var query = 'g=' + group + '&c=' + code;
+    document.title = "Dakk grubuna davet edildin";
+    document.querySelector('h1').textContent = "Dakk'ta bir gruba davet edildin";
+    document.getElementById('lead').textContent =
+      'Gruba katılmak için Dakk uygulamasını kullan. Uygulama yüklü değilse önce indir, sonra bu bağlantıyı tekrar aç.';
+    open.textContent = 'Dakk\'ta gruba katıl';
+    var groupLink = isAndroid
+      ? 'intent://invite?' + query + '#Intent;scheme=dakk;package=dakk.android.co;S.browser_fallback_url=' + encodeURIComponent(releases) + ';end'
+      : 'dakk://invite?' + query;
+    open.href = groupLink;
+    findApk();
+    if (isAndroid) setTimeout(function () { location.href = groupLink; }, 400);
+    return;
+  }
 
   if (!valid) {
     document.getElementById('lead').textContent =
@@ -55,8 +87,6 @@
     return;
   }
 
-  var releases = 'https://github.com/cnrcrm20-ctrl/Dakk/releases/latest';
-  var isAndroid = /android/i.test(navigator.userAgent);
   var appLink = isAndroid
     ? 'intent://add?u=' + uid + '#Intent;scheme=dakk;package=dakk.android.co;S.browser_fallback_url=' + encodeURIComponent(releases) + ';end'
     : 'dakk://add?u=' + uid;
@@ -71,14 +101,7 @@
       .catch(function () { btn.textContent = 'Kopyalanamadı'; });
   });
 
-  // Doğrudan APK bağlantısı
-  fetch('https://api.github.com/repos/cnrcrm20-ctrl/Dakk/releases/latest')
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (rel) {
-      var apk = rel && (rel.assets || []).find(function (a) { return /\.apk$/i.test(a.name); });
-      if (apk) document.getElementById('download').href = apk.browser_download_url;
-    })
-    .catch(function () {});
+  findApk();
 
   // Android'de uygulamayı otomatik açmayı dene
   if (isAndroid) setTimeout(function () { location.href = appLink; }, 400);
