@@ -3,13 +3,14 @@
 Dakk — 30 saniyelik dikey tanıtım videosu (1080x1920, 30 fps).
 
 Kullanım:
-    python3 -m venv .venv && .venv/bin/pip install pillow numpy imageio-ffmpeg
+    python3 -m venv .venv && .venv/bin/pip install pillow numpy imageio-ffmpeg qrcode
     .venv/bin/python promo/build_promo.py               # promo/render/ altına iki video üretir
     .venv/bin/python promo/build_promo.py --frames 2,6  # yalnızca o saniyelerden PNG önizleme
 
-Ekran kayıtları promo/clips/ altına konur (1_sohbet.mp4, 2_qr.mp4 ...). Eksik olan klibin yerine
-etiketli bir yer tutucu ekran çizilir. Klip ayarı (başlangıç saniyesi, hız) promo/clips/ayar.json'da:
-    {"1_sohbet": {"start": 1.2, "speed": 1.3}}
+Telefon ekranları promo/mock_screens.py'de çizilir: Dakk arayüzünün sadeleştirilmiş, animasyonlu hali
+(Google tanıtım reklamlarındaki gibi). İstenirse bir sahne gerçek ekran kaydıyla değiştirilebilir:
+promo/clips/<sahne>.mp4 (1_sohbet, 2_qr, 3_anket, 4_tepki, 5_yedek) konursa o kullanılır; ayarı
+promo/clips/ayar.json'da:  {"1_sohbet": {"start": 1.2, "speed": 1.3}}
 """
 import argparse
 import json
@@ -22,6 +23,9 @@ import wave
 
 import imageio_ffmpeg
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mock_screens  # noqa: E402
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -241,26 +245,6 @@ def make_phone_parts():
     return body, screen_mask, overlay, shadow_img, margin
 
 
-def placeholder_screen(idx, scene):
-    img = Image.new("RGB", (SW, SH), SCREEN_BG)
-    d = ImageDraw.Draw(img)
-    d.rectangle((0, 0, SW, 150), fill=(28, 28, 30))
-    d.text((40, 82), "Dakk", font=font(44, 700), fill=YELLOW)
-    cy = SH // 2 - 120
-    d.ellipse((SW // 2 - 80, cy - 80, SW // 2 + 80, cy + 80), fill=YELLOW)
-    num = str(idx + 1)
-    f = font(96, 700)
-    d.text((SW // 2 - f.getlength(num) / 2, cy - 62), num, font=f, fill=(20, 20, 20))
-    f2 = font(52, 600)
-    d.text((SW // 2 - f2.getlength(scene["label"]) / 2, cy + 130), scene["label"], font=f2, fill=(255, 255, 255))
-    f3 = font(32, 400)
-    d.text((SW // 2 - f3.getlength(scene["hint"]) / 2, cy + 210), scene["hint"], font=f3, fill=(170, 170, 170))
-    f4 = font(28, 400)
-    msg = f"promo/clips/{scene['clip']}.mp4"
-    d.text((SW // 2 - f4.getlength(msg) / 2, SH - 160), msg, font=f4, fill=(110, 110, 110))
-    return img
-
-
 class ClipReader:
     """Ekran kaydını ekran boyutuna kırpıp sırayla kare kare okur; bitince son karede durur."""
 
@@ -444,7 +428,6 @@ class Renderer:
                               forced_lines=[[w] for w in INTRO["lines"]])
         self.titles = [Headline(s["title"].split(), 84, 600, 960, 285, hl=s["hl"], line_h=100) for s in SCENES]
         self.subs = [text_img(s["sub"], 40, 400, SUBINK) for s in SCENES]
-        self.placeholders = [placeholder_screen(i, s) for i, s in enumerate(SCENES)]
         self.readers = {}
         self.outro_words = Headline(OUTRO["words"].split(), 60, 600, 980, 1475)
         bf = font(50, 600)
@@ -459,7 +442,7 @@ class Renderer:
         s = SCENES[idx]
         path = find_clip(s["clip"])
         if not path:
-            return self.placeholders[idx]
+            return mock_screens.SCENE_FUNCS[s["clip"]](t - s["start"])
         if idx not in self.readers:
             cfg = self.settings.get(s["clip"], {})
             n = int((s["end"] - s["start"] + 1.0) * FPS)
