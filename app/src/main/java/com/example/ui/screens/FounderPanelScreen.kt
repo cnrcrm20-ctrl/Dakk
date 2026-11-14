@@ -78,10 +78,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// -------------------------------------------------------------------------------------------
 // Şema modeli — panelin içeriği uygulamada değil, Firestore'daki app_config/admin_panel
 // belgesinde (kaynağı: depodaki cloud/admin_panel.json) tanımlıdır. Uygulama yalnızca çizer.
-// -------------------------------------------------------------------------------------------
 
 private data class PanelOption(val value: String, val label: String)
 
@@ -142,8 +140,6 @@ private val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.forLanguage
 private fun formatDate(ms: Long): String = if (ms <= 0) "" else dateFormat.format(Date(ms))
 private fun parseDate(text: String): Long? =
     if (text.isBlank()) 0L else runCatching { dateFormat.parse(text.trim())?.time }.getOrNull()
-
-// -------------------------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

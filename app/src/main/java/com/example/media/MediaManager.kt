@@ -14,6 +14,7 @@ import android.util.Base64
 import android.util.Log
 import com.example.crypto.CryptoEngine
 import com.example.data.FirestoreRepository
+import com.example.push.PushClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -32,13 +33,16 @@ data class ImageMeta(
     val width: Int,
     val height: Int,
     val size: Long,
-    val thumbBase64: String?
+    val thumbBase64: String?,
+    /** true: şifreli fotoğraf ayrı fotoğraf deposunda; false: Firestore parçalarında (eski yöntem). */
+    val remote: Boolean = false
 ) {
     fun toJson(): String = JSONObject()
         .put("v", 1)
         .put("type", "image")
         .put("mediaId", mediaId)
         .put("chunks", chunks)
+        .apply { if (remote) put("st", "r") }
         .put("mime", "image/jpeg")
         .put("w", width)
         .put("h", height)
@@ -58,7 +62,8 @@ data class ImageMeta(
                     width = o.optInt("w"),
                     height = o.optInt("h"),
                     size = o.optLong("size"),
-                    thumbBase64 = o.optString("thumb").ifBlank { null }
+                    thumbBase64 = o.optString("thumb").ifBlank { null },
+                    remote = o.optString("st") == "r"
                 )
             }
         } catch (_: Exception) {
@@ -76,11 +81,21 @@ sealed class DownloadResult {
 /**
  * Fotoğraf gönderme/alma.
  *
- * Firebase Storage ücretsiz planda kullanılamadığı için fotoğraflar şifrelenip parçalar halinde
- * Firestore'a (chats/{chatId}/blobs) yazılır. Alıcı fotoğrafı indirip kendi cihazına kaydettiği anda
- * parçalar sunucudan silinir. Hiç indirilmeyen fotoğraflar 7 gün sonra gönderici tarafından silinir.
+ * Fotoğraf telefonda küçültülüp (1280 px, tasarrufta 960 px JPEG) şifrelenir ve Dakk'ın fotoğraf deposuna
+ * yüklenir; sunucu yalnızca kısa ömürlü imzalı adres verir ve içeriği göremez. Birebir sohbette alıcı
+ * indirince fotoğraf depodan silinir; gruplarda ve hiç indirilmeyenlerde sunucu 7 gün sonra siler.
+ * Fotoğraf deposu kullanılamıyorsa eski yönteme (Firestore parçaları) dönülür.
  */
-class MediaManager(context: Context, private val repo: FirestoreRepository, private val crypto: CryptoEngine) {
+class MediaManager(
+    context: Context,
+    private val repo: FirestoreRepository,
+    private val crypto: CryptoEngine,
+    private val push: PushClient
+) {
+
+    /** Fotoğraf deposu için kullanılacak Dakk sunucusu; boşsa Firestore parçaları kullanılır. */
+    @Volatile
+    var mediaServer: String = ""
 
     private val appContext = context.applicationContext
     private val dir = File(appContext.filesDir, "media").apply { mkdirs() }
@@ -92,16 +107,16 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
 
     fun hasLocal(mediaId: String): Boolean = localFile(mediaId).let { it.isFile && it.length() > 0 }
 
-    // ------------------------------------------------------------------ Hazırlama
-
-    suspend fun prepare(uri: Uri): PreparedImage = withContext(Dispatchers.IO) {
+    suspend fun prepare(uri: Uri, saver: Boolean = false): PreparedImage = withContext(Dispatchers.IO) {
+        val maxDimension = if (saver) SAVER_DIMENSION else MAX_DIMENSION
+        val targetBytes = if (saver) SAVER_TARGET_BYTES else TARGET_BYTES
         val resolver = appContext.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Fotoğraf okunamadı" }
 
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_DIMENSION) sample *= 2
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxDimension) sample *= 2
         val decoded = resolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: error("Fotoğraf okunamadı")
@@ -119,15 +134,17 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
             0f
         }
 
-        val scaled = scaleDown(decoded, MAX_DIMENSION)
+        val scaled = scaleDown(decoded, maxDimension)
         val oriented = if (rotation != 0f) {
             Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, Matrix().apply { postRotate(rotation) }, true)
         } else scaled
 
-        var quality = JPEG_QUALITY
+        // Hedef boyuta inene kadar kalite adım adım düşürülür (çoğu fotoğraf ilk denemede 60–150 KB olur).
+        var quality = if (saver) SAVER_JPEG_QUALITY else JPEG_QUALITY
+        val minQuality = if (saver) 45 else 50
         var jpeg = compress(oriented, quality)
-        while (jpeg.size > MAX_JPEG_BYTES && quality > 50) {
-            quality -= 10
+        while ((jpeg.size > targetBytes || jpeg.size > MAX_JPEG_BYTES) && quality > minQuality) {
+            quality -= 6
             jpeg = compress(oriented, quality)
         }
 
@@ -161,8 +178,6 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
             out.toByteArray()
         }
 
-    // ------------------------------------------------------------------ Gönderme
-
     /** Fotoğrafı şifreleyip parçalar halinde yükler ve mesajda taşınacak bilgiyi döner. */
     suspend fun upload(
         chatId: String,
@@ -181,20 +196,26 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
         encrypt: (ByteArray) -> ByteArray
     ): ImageMeta {
         val encrypted = withContext(Dispatchers.Default) { encrypt(image.jpeg) }
+        withContext(Dispatchers.IO) { localFile(mediaId).writeBytes(image.jpeg) }
+        val server = mediaServer
+        if (server.isNotBlank() && encrypted.size <= PushClient.MAX_MEDIA_BYTES) {
+            val uploaded = runCatching { push.uploadMedia(server, chatId, mediaId, encrypted) }.getOrDefault(false)
+            if (uploaded) {
+                return ImageMeta(mediaId, 1, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64, remote = true)
+            }
+            Log.w(TAG, "Fotoğraf deposuna yüklenemedi; Firestore'a yükleniyor")
+        }
         val parts = (encrypted.indices step CHUNK_BYTES).map { start ->
             val end = minOf(start + CHUNK_BYTES, encrypted.size)
             Base64.encodeToString(encrypted, start, end - start, Base64.NO_WRAP)
         }
         require(parts.size <= MAX_CHUNKS) { "Fotoğraf çok büyük" }
-        withContext(Dispatchers.IO) { localFile(mediaId).writeBytes(image.jpeg) }
         parts.forEachIndexed { index, part ->
             repo.uploadBlob(chatId, mediaId, index, parts.size, myUid, part)
         }
         rememberUpload(chatId, mediaId, parts.size)
         return ImageMeta(mediaId, parts.size, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64)
     }
-
-    // ------------------------------------------------------------------ Profil/grup fotoğrafı
 
     /** Grup veya kişi fotoğrafı için küçük, kare kırpılmış JPEG üretir. */
     suspend fun prepareAvatar(uri: Uri): ByteArray = withContext(Dispatchers.IO) {
@@ -232,8 +253,6 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
         withContext(Dispatchers.IO) { customPhotoFile(peerUid).delete() }
     }
 
-    // ------------------------------------------------------------------ Alma
-
     /**
      * Fotoğrafı indirir, çözer ve cihaza kaydeder.
      * deleteAfter = true ise (alıcı) parçalar indirildikten sonra sunucudan silinir.
@@ -255,12 +274,22 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
     ): DownloadResult {
         if (hasLocal(meta.mediaId)) return DownloadResult.Ok(localFile(meta.mediaId))
         return try {
-            val out = ByteArrayOutputStream()
-            for (i in 0 until meta.chunks) {
-                val part = repo.getBlob(chatId, meta.mediaId, i) ?: return DownloadResult.Expired
-                out.write(Base64.decode(part, Base64.NO_WRAP))
+            val encrypted = if (meta.remote) {
+                val server = mediaServer.ifBlank { null } ?: return DownloadResult.Failed
+                when (val fetched = push.downloadMedia(server, chatId, meta.mediaId)) {
+                    is PushClient.MediaFetch.Ok -> fetched.bytes
+                    PushClient.MediaFetch.Expired -> return DownloadResult.Expired
+                    PushClient.MediaFetch.Failed -> return DownloadResult.Failed
+                }
+            } else {
+                val out = ByteArrayOutputStream()
+                for (i in 0 until meta.chunks) {
+                    val part = repo.getBlob(chatId, meta.mediaId, i) ?: return DownloadResult.Expired
+                    out.write(Base64.decode(part, Base64.NO_WRAP))
+                }
+                out.toByteArray()
             }
-            val plain = withContext(Dispatchers.Default) { decrypt(out.toByteArray()) } ?: return DownloadResult.Failed
+            val plain = withContext(Dispatchers.Default) { decrypt(encrypted) } ?: return DownloadResult.Failed
             val file = localFile(meta.mediaId)
             withContext(Dispatchers.IO) {
                 val tmp = File(dir, "${meta.mediaId}.part")
@@ -268,8 +297,8 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
                 tmp.renameTo(file)
             }
             if (deleteAfter) {
-                runCatching { repo.deleteBlobs(chatId, meta.mediaId, meta.chunks) }
-                    .onFailure { Log.w(TAG, "Fotoğraf parçaları silinemedi", it) }
+                runCatching { removeRemote(chatId, meta) }
+                    .onFailure { Log.w(TAG, "Fotoğraf sunucudan silinemedi", it) }
             }
             DownloadResult.Ok(file)
         } catch (e: Exception) {
@@ -277,8 +306,6 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
             DownloadResult.Failed
         }
     }
-
-    // ------------------------------------------------------------------ Temizlik
 
     private fun loadUploads(): JSONArray =
         runCatching { JSONArray(prefs.getString(PREF_UPLOADS, "[]")) }.getOrDefault(JSONArray())
@@ -309,8 +336,16 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
 
     /** Silinen bir fotoğraf mesajının sunucudaki parçalarını ve yerel kopyasını kaldırır. */
     suspend fun deleteMedia(chatId: String, meta: ImageMeta) {
-        runCatching { repo.deleteBlobs(chatId, meta.mediaId, meta.chunks) }
+        runCatching { removeRemote(chatId, meta) }
         withContext(Dispatchers.IO) { localFile(meta.mediaId).delete() }
+    }
+
+    private suspend fun removeRemote(chatId: String, meta: ImageMeta) {
+        if (meta.remote) {
+            mediaServer.ifBlank { null }?.let { push.deleteMedia(it, chatId, meta.mediaId) }
+        } else {
+            repo.deleteBlobs(chatId, meta.mediaId, meta.chunks)
+        }
     }
 
     /** Fotoğrafı telefonun galerisine (Pictures/Dakk) kopyalar. */
@@ -344,9 +379,13 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
     companion object {
         private const val TAG = "DakkMedia"
         private const val PREF_UPLOADS = "uploads"
-        const val MAX_DIMENSION = 1600
+        const val MAX_DIMENSION = 1280
+        const val SAVER_DIMENSION = 960
+        const val TARGET_BYTES = 180_000
+        const val SAVER_TARGET_BYTES = 110_000
         const val THUMB_DIMENSION = 40
-        const val JPEG_QUALITY = 80
+        const val JPEG_QUALITY = 78
+        const val SAVER_JPEG_QUALITY = 68
         const val MAX_JPEG_BYTES = 1_200_000
         const val MAX_THUMB_CHARS = 2_400
         const val CHUNK_BYTES = 700_000

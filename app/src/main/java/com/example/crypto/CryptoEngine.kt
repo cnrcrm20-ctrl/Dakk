@@ -52,9 +52,7 @@ class CryptoEngine(context: Context) {
         private const val GCM_IV_BYTES = 12
     }
 
-    // --------------------------------------------------------------------------------------
     // Kimlik anahtarı
-    // --------------------------------------------------------------------------------------
 
     @Synchronized
     fun getOrCreateKeyPair(): KeyPair {
@@ -146,9 +144,7 @@ class CryptoEngine(context: Context) {
         return cipher.doFinal(body)
     }
 
-    // --------------------------------------------------------------------------------------
     // Mesaj şifreleme
-    // --------------------------------------------------------------------------------------
 
     private fun sharedKey(peerPublicKeyBase64: String): SecretKeySpec =
         sharedKeyCache.getOrPut(peerPublicKeyBase64) {
@@ -251,13 +247,11 @@ class CryptoEngine(context: Context) {
         }
     }
 
-    // --------------------------------------------------------------------------------------
     // Grup şifreleme
     //
     // Her grup mesajı için rastgele bir AES-256 mesaj anahtarı üretilir. İçerik bu anahtarla şifrelenir;
     // anahtar ise her üye için, gönderici ile o üye arasındaki ECDH anahtarıyla ayrı ayrı sarılır.
     // Böylece yalnızca mesaj gönderildiği anda grupta olan üyeler mesajı çözebilir.
-    // --------------------------------------------------------------------------------------
 
     /** Yeni, rastgele 32 baytlık mesaj anahtarı. */
     fun newMessageKey(): ByteArray = ByteArray(32).also { secureRandom.nextBytes(it) }

@@ -2,6 +2,40 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.4.0] - 2026-11-15
+
+### Yeni
+- **Veri tasarrufu:** Ayarlar → *Veri tasarrufu* → Normal / Tasarruf / Otomatik (varsayılan Otomatik).
+  Tasarrufta fotoğraflar 960 piksel gönderilir ve grup fotoğrafları dokununca iner. Otomatik, sunucunun
+  aylık kotası dolmaya yaklaşınca kendiliğinden tasarrufa geçer; kota iyice daralırsa "yazıyor…" da
+  geçici olarak kapanır. Mesajlaşma hiçbir zaman durmaz.
+- **Telefonda mesaj arşivi:** Mesajlar telefonda da (şifreli haliyle, sıkıştırılarak) saklanıyor. Sohbet
+  açılınca mesajlar internet beklemeden anında geliyor; sunucudan yalnızca son 150 mesaj dinleniyor.
+  İlk açılışta her sohbetin geçmişi bir kez telefona aktarılıyor.
+
+### İyileştirildi
+- **Fotoğraflar:** Artık ayrı, şifreli bir fotoğraf deposuna gidiyor. Fotoğraflar 1280 piksel JPEG
+  (genelde 60–150 KB) olarak gönderiliyor, eskisinden çok daha hızlı yükleniyor ve iniyor. Birebir
+  sohbette karşı taraf indirince sunucudan siliniyor; gruplarda ve açılmayanlarda 7 gün sonra siliniyor.
+  Kayıtlı fotoğraflar her zaman JPEG.
+- **Daha hızlı bildirimler:** Kısa grup mesajları da artık bildirimin içinde (şifreli) geliyor; telefon
+  mesajı ayrıca indirmek zorunda kalmıyor.
+- **Daha az sunucu yükü:** Bildirim jetonları Firestore yerine Dakk sunucusunda tutuluyor. Engellenen
+  kişilerden gelen bildirimler telefonda sessizce düşürülüyor.
+
+### Düzeltildi
+- Ankette art arda hızlı dokununca oyların kaybolması.
+- *Takım kur*'da aynı adı taşıyan iki oyuncudan birinin listeden düşmesi.
+- Gruptan ayrılan kişilerin oylarının sayılmaya devam etmesi.
+- *Takım kur*'a ikinci kez basılınca takımların sorulmadan yeniden yazılması (artık "Yeniden karıştırılsın
+  mı?" diye soruluyor).
+- Gruba sonradan katılan kişinin eski anketlerde "çözülemedi" görmesi (artık "Bu anket sen gruba
+  katılmadan önce açıldı" yazıyor).
+- Anket seçeneklerinin bazı durumlarda kayarak yanlış seçeneğe oy sayılabilmesi.
+
+### Önemli
+- 2.4.0 ile gönderilen fotoğrafları 2.3.0 kullananlar açamaz. Herkesin güncellemesi önerilir.
+
 ## [2.3.0] - 2026-11-14
 
 ### Yeni

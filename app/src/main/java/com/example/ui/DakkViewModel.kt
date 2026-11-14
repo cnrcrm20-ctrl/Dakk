@@ -26,9 +26,11 @@ import com.example.crypto.CryptoEngine
 import com.example.data.ChatDoc
 import com.example.data.ChatIds
 import com.example.data.ChatPrefs
+import com.example.data.LocalMessageStore
 import com.example.data.LocalPhoto
 import com.example.data.PollView
 import com.example.push.TypingClient
+import com.example.util.DataSaver
 import com.example.util.Disappearing
 import com.example.util.MuteOptions
 import com.example.util.Polls
@@ -75,6 +77,8 @@ import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -163,14 +167,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private val updater = GitHubUpdateManager(app)
     private val prefs = app.getSharedPreferences("dakk_prefs", Context.MODE_PRIVATE)
     val configRepo = ConfigRepository(app)
-    private val media = MediaManager(app, repo, crypto)
     private val assistant = AssistantEngine(app)
     private val push = PushClient(repo)
+    private val media = MediaManager(app, repo, crypto, push)
+    private val localStore = LocalMessageStore(app)
     private val typingClient = TypingClient(viewModelScope)
 
     val appVersion: String = BuildConfig.VERSION_NAME
-
-    // ------------------------------------------------------------------ Durum
 
     private val _user = MutableStateFlow<FirebaseUser?>(auth.currentUser)
     val user: StateFlow<FirebaseUser?> = _user
@@ -223,6 +226,17 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _autoUpdate = MutableStateFlow(prefs.getBoolean(PREF_AUTO_UPDATE, true))
     val autoUpdate: StateFlow<Boolean> = _autoUpdate
+
+    /** Veri tasarrufu ayarı (Normal / Tasarruf / Otomatik). */
+    private val _dataSaver = MutableStateFlow(DataSaver.fromPref(prefs.getInt(PREF_DATA_SAVER, DataSaver.AUTO.pref)))
+    val dataSaver: StateFlow<DataSaver> = _dataSaver
+
+    /** Şu an uygulanan tasarruf seviyesi: 0 normal, 1 küçük fotoğraf + grup fotoğrafı dokununca, 2 ayrıca "yazıyor…" kapalı. */
+    private val _saverLevel = MutableStateFlow(0)
+    val saverLevel: StateFlow<Int> = _saverLevel
+
+    /** Dokunarak indirilmesi istenen grup fotoğrafları. */
+    private val manualDownloads = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events
@@ -340,13 +354,15 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             if (chat == null) emptyList() else typing[chat.key].orEmpty().mapNotNull { chat.member(it) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // ------------------------------------------------------------------ Oturum
-
     private var sessionUid: String? = null
     private var sessionJob: Job? = null
     private val profileJobs = mutableMapOf<String, Job>()
     private var activeChatJob: Job? = null
     private var lastActiveDocs: List<MessageDoc> = emptyList()
+
+    /** Sunucuya henüz yazılmamış kendi oylarım: mesaj kimliği → seçimler. Hızlı dokunuşlarda oy kaybolmasın diye. */
+    private val pendingVotes = java.util.concurrent.ConcurrentHashMap<String, Set<Int>>()
+    private val voteMutex = Mutex()
     private val readRequested = mutableSetOf<String>()
     private var notificationsPrimed = false
     private var isForeground = false
@@ -398,11 +414,18 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _mutes.value = loadMarks(ChatPrefs.PREFIX_MUTE)
         notificationsPrimed = false
 
+        // Telefondaki arşiv başka bir hesaba aitse temizlenir.
+        if (prefs.getString(PREF_LOCAL_OWNER, null) != uid) {
+            runCatching { localStore.clearAll() }
+            prefs.edit().putString(PREF_LOCAL_OWNER, uid).apply()
+        }
+
         sessionJob = viewModelScope.launch {
             launch { publishMyProfile(user) }
             launch {
                 repo.observeContacts(uid).retrying("Kişiler", uid).collect { list ->
                     _rawContacts.value = list
+                    AppState.rememberBlocked(getApplication(), list.filter { it.isBlocked }.map { it.uid }.toSet())
                     list.forEach { ensureProfile(it.uid) }
                 }
             }
@@ -435,16 +458,16 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                             updatePushActive()
                             typingClient.configure(if (serverReady) push.realtime else null, uid)
                             typingClient.setActive(isForeground)
+                            refreshSaver()
+                            // Jeton, sunucunun ne desteklediği öğrenildikten sonra kaydedilir.
+                            pushTokenRegistered = push.registerToken(uid, if (serverReady) cfg.serverUrl else "")
+                            updatePushActive()
                         }
                     }
                     if (cfg.requiresUpdate(appVersion) && _update.value.release == null) checkForUpdates(manual = false)
                 }
             }
             launch { refreshFounderStatus() }
-            launch {
-                pushTokenRegistered = push.registerToken(uid)
-                updatePushActive()
-            }
             launch { runCatching { media.cleanupExpiredUploads() } }
         }
         ensureProfile(uid)
@@ -501,6 +524,27 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         // Bildirimden yanıt verilirken (uygulama kapalıyken) kullanılacak sunucu adresi.
         val server = if (_config.value.hasServer && serverReady) _config.value.serverUrl else ""
         AppState.rememberServer(getApplication<Application>(), server)
+        media.mediaServer = if (push.supportsMedia) server else ""
+    }
+
+    fun setDataSaver(mode: DataSaver) {
+        _dataSaver.value = mode
+        prefs.edit().putInt(PREF_DATA_SAVER, mode.pref).apply()
+        refreshSaver()
+    }
+
+    /** Ayara ve (Otomatik'te) sunucunun bildirdiği kota durumuna göre tasarruf seviyesini belirler. */
+    private fun refreshSaver() {
+        val level = when (_dataSaver.value) {
+            DataSaver.NORMAL -> 0
+            DataSaver.SAVER -> 1
+            DataSaver.AUTO -> if (serverReady) push.serverSaver else 0
+        }
+        if (level >= 2) sendTypingStop()
+        _saverLevel.value = level
+        val myUid = sessionUid ?: return
+        val chatId = activeChatId(myUid) ?: return
+        viewModelScope.launch { rebuildActiveMessages(chatId, myUid) }
     }
 
     /** Kurucu yetkisini Firestore kurallarına sorar (yalnızca kurucular app_config/private okuyabilir). */
@@ -542,8 +586,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ------------------------------------------------------------------ Gezinme
-
     fun setTab(tab: HomeTab) {
         _tab.value = tab
     }
@@ -566,17 +608,42 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         markChatRead(chatId, 0L)
 
         activeChatJob = viewModelScope.launch {
+            // Önce telefondaki arşiv: sohbet internet beklemeden açılır.
+            var local = withContext(Dispatchers.IO) { runCatching { localStore.load(chatId) }.getOrDefault(emptyList()) }
+            if (local.isNotEmpty()) {
+                lastActiveDocs = local
+                rebuildActiveMessages(chatId, myUid)
+            }
+            // 2.4.0'a geçişte her sohbetin geçmişi bir kez tamamen alınır; sonra yalnızca son mesajlar dinlenir.
+            val synced = withContext(Dispatchers.IO) { runCatching { localStore.isSynced(chatId) }.getOrDefault(false) }
             _chatDocs
                 .map { docs -> docs.any { it.chatId == chatId } }
                 .distinctUntilChanged()
                 .flatMapLatest { exists ->
-                    if (exists) repo.observeMessages(chatId).retrying("Mesajlar", myUid)
-                    else flowOf(emptyList())
+                    when {
+                        !exists -> flowOf<List<MessageDoc>?>(null)
+                        synced -> repo.observeRecentMessages(chatId, LocalMessageStore.LIVE_WINDOW).retrying("Mesajlar", myUid)
+                        else -> repo.observeMessages(chatId).retrying("Mesajlar", myUid)
+                    }
                 }
-                .collect { docs ->
-                    lastActiveDocs = docs
+                .collect { window ->
+                    if (window == null) {
+                        lastActiveDocs = local
+                        rebuildActiveMessages(chatId, myUid)
+                        return@collect
+                    }
+                    val complete = !synced || window.size < LocalMessageStore.LIVE_WINDOW
+                    val merged = LocalMessageStore.merge(local, window, complete)
+                    lastActiveDocs = merged
                     rebuildActiveMessages(chatId, myUid)
-                    if (isForeground) markIncomingAsRead(chatId, myUid, docs)
+                    if (isForeground) markIncomingAsRead(chatId, myUid, window)
+                    local = merged.filterNot { it.isPending }
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            if (synced) localStore.applyWindow(chatId, window, complete)
+                            else localStore.replaceAll(chatId, window)
+                        }.onFailure { Log.w(TAG, "Mesajlar telefona kaydedilemedi", it) }
+                    }
                 }
         }
         expiryTicker?.cancel()
@@ -639,6 +706,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
             runCatching { repo.deleteMessages(chatId, fresh.map { it.id }) }
                 .onFailure { Log.w(TAG, "Kaybolan mesajlar silinemedi", it) }
+            withContext(Dispatchers.IO) { runCatching { localStore.delete(chatId, fresh.map { it.id }) } }
         }
     }
 
@@ -653,7 +721,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             if (doc.isPending) return@forEach
             downloadsInFlight += image.mediaId
             viewModelScope.launch {
-                val meta = ImageMeta(image.mediaId, image.chunks, image.width, image.height, image.size, null)
+                val meta = ImageMeta(image.mediaId, image.chunks, image.width, image.height, image.size, null, image.remote)
                 val result = if (doc.keys.isNotEmpty()) {
                     // Grup fotoğrafını birden çok kişi indirir; parçalar gönderici tarafından 7 gün sonra silinir.
                     val key = messageKey(doc, myUid)
@@ -677,6 +745,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     /** İndirilemeyen bir fotoğrafı yeniden dener. */
     fun retryImage(peerUid: String, mediaId: String) {
         val myUid = sessionUid ?: return
+        manualDownloads += mediaId
         _imageStates.update { it - mediaId }
         viewModelScope.launch { rebuildActiveMessages(chatIdFor(peerUid, myUid), myUid) }
     }
@@ -735,8 +804,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-
-    // ------------------------------------------------------------------ Şifre çözme
 
     /** Grup mesajının bu cihaz için sarılmış anahtarını açar (önbellekli). */
     private fun messageKey(doc: MessageDoc, myUid: String): ByteArray? {
@@ -804,7 +871,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     size = meta.size,
                     thumbBase64 = meta.thumbBase64,
                     localPath = if (local) media.localFile(meta.mediaId).absolutePath else null,
-                    state = if (local) ImageState.READY else _imageStates.value[meta.mediaId] ?: ImageState.DOWNLOADING
+                    remote = meta.remote,
+                    state = when {
+                        local -> ImageState.READY
+                        else -> _imageStates.value[meta.mediaId] ?: if (
+                            keys.isNotEmpty() && !fromMe && _saverLevel.value >= 1 && meta.mediaId !in manualDownloads
+                        ) ImageState.TAP_TO_DOWNLOAD else ImageState.DOWNLOADING
+                    }
                 )
             }
         } else null
@@ -830,23 +903,31 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             reply = replyQuote(this, myUid),
             senderUid = senderId,
             poll = poll,
-            expiresAt = expiresAt
+            expiresAt = expiresAt,
+            lockedText = if (plain == null && isGroupMessage && myUid !in keys) {
+                if (messageType == Polls.MESSAGE_TYPE) "🔒 Bu anket sen gruba katılmadan önce açıldı."
+                else "🔒 Bu mesaj sen gruba katılmadan önce gönderildi."
+            } else null
         )
     }
 
     private fun pollView(doc: MessageDoc, myUid: String, plain: String?): PollView? {
         val spec = Polls.parse(plain) ?: return null
-        val byOption = HashMap<Int, MutableList<String>>()
-        var mine = emptySet<Int>()
+        // Gruptan ayrılan üyelerin oyları sayılmaz.
+        val members = activeChatId(myUid)?.let { id -> _chatDocs.value.firstOrNull { it.chatId == id } }
+            ?.memberUids?.toSet()?.takeIf { it.isNotEmpty() }
+        val choicesByUid = LinkedHashMap<String, Set<Int>>()
         doc.votes.forEach { (uid, cipher) ->
-            val choices = Polls.decodeVote(
+            if (members != null && uid !in members) return@forEach
+            choicesByUid[uid] = Polls.decodeVote(
                 decryptField(doc, myUid, cipher, "v:${doc.id}:$uid:${cipher.hashCode()}"),
                 spec.options.size
             ).let { if (spec.multi) it else it.take(1).toSet() }
-            if (uid == myUid) mine = choices
-            choices.forEach { byOption.getOrPut(it) { mutableListOf() }.add(uid) }
         }
-        return PollView(spec.question, spec.options, spec.multi, spec.isMatch, byOption, mine)
+        pendingVotes[doc.id]?.let { choicesByUid[myUid] = it }
+        val byOption = HashMap<Int, MutableList<String>>()
+        choicesByUid.forEach { (uid, choices) -> choices.forEach { byOption.getOrPut(it) { mutableListOf() }.add(uid) } }
+        return PollView(spec.question, spec.options, spec.multi, spec.isMatch, byOption, choicesByUid[myUid].orEmpty())
     }
 
     private fun decryptReactions(doc: MessageDoc, myUid: String): Map<String, String> =
@@ -886,8 +967,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _readMarks.update { it + (chatId to mark) }
         prefs.edit().putLong(PREFIX_READ + chatId, mark).apply()
     }
-
-    // ------------------------------------------------------------------ Mesajlaşma
 
     /** Gönderim kuyruğa alındıysa true döner (giriş alanı temizlenebilir). */
     fun sendMessage(peerUid: String, rawText: String, replyTo: UiMessage? = null): Boolean {
@@ -1147,7 +1226,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val placeholderId = "upload_$mediaId"
         viewModelScope.launch {
             try {
-                val prepared = media.prepare(uri)
+                if (serverReady) launch { push.refreshIfStale(_config.value.serverUrl); refreshSaver() }
+                val prepared = media.prepare(uri, saver = _saverLevel.value >= 1)
                 val placeholder = UiMessage(
                     id = placeholderId,
                     text = null,
@@ -1182,11 +1262,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ------------------------------------------------------------------ "Yazıyor…"
-
     /** Giriş alanı değiştikçe çağrılır; yazma durumu sohbetin diğer üyelerine iletilir. */
     fun onDraftChanged(key: String, text: String) {
         val myUid = sessionUid ?: return
+        if (_saverLevel.value >= 2 && text.isNotBlank()) return
         typingClient.sendTyping(chatIdFor(key, myUid), text.isNotBlank())
     }
 
@@ -1209,8 +1288,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 topic?.let { doc.chatId to it }
             }.toMap()
 
-    // ------------------------------------------------------------------ Anketler
-
     /** Gruba anket gönderir. */
     fun sendPoll(key: String, spec: Polls.Spec): Boolean {
         if (!ChatIds.isGroup(key)) return false
@@ -1225,20 +1302,41 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         if (doc.isPending) return
         val poll = _activeMessages.value.firstOrNull { it.id == messageId }?.poll ?: return
         if (option !in poll.options.indices) return
-        val next = Polls.toggle(poll.myChoices, option, poll.multi)
+        // Ekrandaki seçim, sunucuya henüz ulaşmamış önceki dokunuşu da içerir.
+        val current = pendingVotes[messageId] ?: poll.myChoices
+        val next = Polls.toggle(current, option, poll.multi)
+        pendingVotes[messageId] = next
         viewModelScope.launch {
-            try {
-                val cipher = if (next.isEmpty()) null else withContext(Dispatchers.Default) {
-                    encryptForDoc(doc, myUid, Polls.encodeVote(next))
-                } ?: run {
-                    _events.tryEmit("Bu ankete oy verilemiyor (farklı bir cihazda şifrelenmiş).")
-                    return@launch
+            rebuildActiveMessages(chatId, myUid)
+            voteMutex.withLock {
+                // Arka arkaya dokunuşlarda yalnızca en son seçim yazılır.
+                if (pendingVotes[messageId] != next) return@withLock
+                try {
+                    val cipher = if (next.isEmpty()) null else withContext(Dispatchers.Default) {
+                        encryptForDoc(doc, myUid, Polls.encodeVote(next))
+                    } ?: run {
+                        pendingVotes.remove(messageId, next)
+                        _events.tryEmit("Bu ankete oy verilemiyor (farklı bir cihazda şifrelenmiş).")
+                        return@withLock
+                    }
+                    repo.setVote(chatId, messageId, myUid, cipher)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Oy kaydedilemedi", e)
+                    _events.tryEmit("Oy gönderilemedi.")
                 }
-                repo.setVote(chatId, messageId, myUid, cipher)
-            } catch (e: Exception) {
-                Log.w(TAG, "Oy kaydedilemedi", e)
-                _events.tryEmit("Oy gönderilemedi.")
+                pendingVotes.remove(messageId, next)
             }
+            rebuildActiveMessages(chatId, myUid)
+        }
+    }
+
+    /** Bu maç anketi için takımlar daha önce kurulmuş mu? (Anketten sonra gelen bir "Takımlar hazır" mesajı.) */
+    fun teamsAlreadyBuilt(messageId: String): Boolean {
+        val myUid = sessionUid ?: return false
+        val poll = lastActiveDocs.firstOrNull { it.id == messageId } ?: return false
+        return lastActiveDocs.any { d ->
+            d.createdAt >= poll.createdAt && d.id != poll.id && d.messageType == "TEXT" &&
+                decryptContent(d, myUid)?.startsWith(Polls.TEAMS_HEADER) == true
         }
     }
 
@@ -1251,13 +1349,11 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             _events.tryEmit("Takım kurmak için en az 2 kişinin \"${poll.options.firstOrNull() ?: "Geliyorum"}\" demesi gerekiyor.")
             return
         }
-        val names = coming.map { uid -> chat.member(uid)?.name ?: "Dakk Kullanıcısı" }
-        val (a, b) = Polls.splitTeams(names)
-        val text = Polls.teamsMessage(a, b)
+        val (a, b) = Polls.splitTeams(coming.distinct())
+        val nameOf = { uid: String -> chat.member(uid)?.name ?: "Dakk Kullanıcısı" }
+        val text = Polls.teamsMessage(a.map(nameOf), b.map(nameOf))
         sendEncrypted(key, text, previewOf(text), "TEXT", isAssistant = false)
     }
-
-    // ------------------------------------------------------------------ Dakk Asistan
 
     fun hasAiConsent(scope: String): Boolean = prefs.getBoolean(PREFIX_AI_CONSENT + scope, false)
 
@@ -1385,8 +1481,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         return text.substring(0, end.coerceAtLeast(0)).trimEnd() + "…"
     }
 
-    // ------------------------------------------------------------------ Duyurular & Kurucu paneli
-
     fun dismissAnnouncement(announcement: Announcement) {
         if (_previewAnnouncement.value != null) {
             _previewAnnouncement.value = null
@@ -1426,8 +1520,9 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 repo.deleteMessage(chatId, messageId)
+                withContext(Dispatchers.IO) { runCatching { localStore.delete(chatId, listOf(messageId)) } }
                 if (image != null) {
-                    media.deleteMedia(chatId, ImageMeta(image.mediaId, image.chunks, 0, 0, 0, null))
+                    media.deleteMedia(chatId, ImageMeta(image.mediaId, image.chunks, 0, 0, 0, null, image.remote))
                 }
                 if (!wasLast) return@launch
                 if (isGroup) {
@@ -1506,8 +1601,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val key = _profiles.value[peerUid]?.publicKey?.ifBlank { null } ?: return null
         return runCatching { crypto.safetyNumber(key) }.getOrNull()
     }
-
-    // ------------------------------------------------------------------ Gruplar
 
     /** Seçilen kişilerle yeni grup kurar ve grubu açar. */
     fun createGroup(name: String, photoUri: Uri?, members: List<String>) {
@@ -1717,8 +1810,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ------------------------------------------------------------------ Sohbet ayarları
-
     /** Birebir sohbet belgesi henüz yoksa oluşturur (takma ad, kaybolan mesaj gibi ayarlar için). */
     private suspend fun ensureChatFor(key: String, myUid: String): String {
         val chatId = chatIdFor(key, myUid)
@@ -1803,8 +1894,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             .associate { it.name.removeSuffix(".jpg") to it.lastModified() }
     }
 
-    // ------------------------------------------------------------------ Kişi ekleme
-
     fun myInviteLink(): String? = sessionUid?.let { InviteLinks.build(BuildConfig.INVITE_BASE_URL, it) }
 
     fun handleIncomingLink(link: String) {
@@ -1874,8 +1963,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _addContact.value = AddContactState()
     }
 
-    // ------------------------------------------------------------------ Hesap
-
     fun updateDisplayName(name: String) {
         val user = _user.value ?: return
         val clean = name.trim().take(60)
@@ -1889,12 +1976,12 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     fun signOut() {
         viewModelScope.launch {
-            sessionUid?.let { uid -> withContext(Dispatchers.IO) { push.unregister(uid) } }
+            val server = if (serverReady) _config.value.serverUrl else ""
+            sessionUid?.let { uid -> withContext(Dispatchers.IO) { push.unregister(uid, server) } }
+            withContext(Dispatchers.IO) { runCatching { localStore.clearAll() } }
             GoogleAuth.signOut(getApplication())
         }
     }
-
-    // ------------------------------------------------------------------ Güncelleme
 
     fun setAutoUpdate(enabled: Boolean) {
         _autoUpdate.value = enabled
@@ -1977,8 +2064,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-
-    // ------------------------------------------------------------------ Yardımcılar
 
     private fun peerOf(doc: ChatDoc, myUid: String): String? =
         doc.memberUids.firstOrNull { it != myUid } ?: doc.memberUids.firstOrNull()
@@ -2220,6 +2305,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val TAG = "DakkViewModel"
         private const val PREF_AUTO_UPDATE = "auto_update"
+        private const val PREF_DATA_SAVER = "data_saver"
+        private const val PREF_LOCAL_OWNER = "local_store_owner"
         private const val PREF_NAME_PREFIX = "display_name_"
         private const val PREFIX_READ = "read_"
         private const val PREFIX_CLEARED = "cleared_"

@@ -121,6 +121,10 @@ fun ImageMessageContent(
                         StatusLabel(Icons.Default.Refresh, "Yüklenemedi\nTekrar denemek için dokunun")
                     }
                     ImageState.READY -> StatusLabel(Icons.Default.BrokenImage, "Fotoğraf bulunamadı")
+                    ImageState.TAP_TO_DOWNLOAD -> Box(Modifier.clickable(onClick = onRetry).padding(12.dp)) {
+                        val kb = (image.size / 1024).coerceAtLeast(1)
+                        StatusLabel(Icons.Default.Download, "Fotoğraf · $kb KB\nİndirmek için dokunun")
+                    }
                 }
             }
         }

@@ -86,7 +86,9 @@ data class MessageDoc(
 enum class MessageStatus { PENDING, SENT, READ }
 
 /** Fotoğrafın bu cihazdaki durumu. */
-enum class ImageState { READY, UPLOADING, DOWNLOADING, EXPIRED, FAILED }
+enum class ImageState { READY, UPLOADING, DOWNLOADING, EXPIRED, FAILED,
+    /** Veri tasarrufu: grup fotoğrafı dokunulunca indirilir. */
+    TAP_TO_DOWNLOAD }
 
 /** Mesajdaki fotoğraf. localPath doluysa fotoğraf cihazda hazırdır. */
 data class ImageAttachment(
@@ -97,7 +99,9 @@ data class ImageAttachment(
     val size: Long,
     val thumbBase64: String?,
     val localPath: String?,
-    val state: ImageState
+    val state: ImageState,
+    /** Fotoğraf deposunda mı (true) yoksa Firestore parçalarında mı? */
+    val remote: Boolean = false
 )
 
 /**
@@ -125,7 +129,9 @@ data class UiMessage(
     /** Anket mesajı. */
     val poll: PollView? = null,
     /** Kaybolan mesajsa silineceği zaman (0 = süresiz). */
-    val expiresAt: Long = 0L
+    val expiresAt: Long = 0L,
+    /** Mesaj bu cihazda açılamıyorsa gösterilecek açıklama (ör. gruba katılmadan önce gönderilmiş). */
+    val lockedText: String? = null
 )
 
 /** Ekranda gösterilen anket. votes: seçenek sırası → oy veren kişi kimlikleri. */

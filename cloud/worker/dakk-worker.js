@@ -1,19 +1,28 @@
 /**
  * Dakk sunucusu.
  *
- *   POST /notify     Uygulama kapalıyken mesaj bildirimi.
- *   POST /assistant  Kurucu panelinde "Özel API" seçildiyse OpenAI uyumlu uç noktaya vekillik.
- *   POST /admin/broadcast  (yalnızca kurucular) Herkese bildirim, ör. "yeni sürüm çıktı".
- *   POST /admin/rules      (yalnızca kurucular) Firestore kurallarını derleyip yayınlar.
+ *   GET  /                 Durum, anlık sinyal kanalı ve tasarruf seviyesi.
+ *   POST /notify           Uygulama kapalıyken mesaj bildirimi.
+ *   POST /register         Bildirim jetonunu kaydeder (2.4.0+; Supabase tablosunda tutulur).
+ *   POST /unregister       Bildirim jetonunu siler.
+ *   POST /media/upload     Fotoğraf için tek kullanımlık yükleme adresi (2. Supabase projesi).
+ *   POST /media/download   Fotoğraf için kısa ömürlü indirme adresi.
+ *   POST /media/delete     Fotoğrafı sunucudan siler (alıcı indirince).
+ *   POST /assistant        Kurucu panelinde "Özel API" seçildiyse OpenAI uyumlu uç noktaya vekillik.
+ *   POST /admin/broadcast  Herkese bildirim, ör. "yeni sürüm çıktı".
+ *   POST /admin/rules      Firestore kurallarını derleyip yayınlar.
+ *   POST /admin/config     Uygulama ayarlarını okur / izinli alanları değiştirir.
+ *   POST /admin/usage      Günlük ve aylık kullanım özeti.
+ *   POST /admin/cleanup    7 günden eski fotoğrafları siler (pg_cron her gün çağırır).
  *
  * Güvenlik:
  *   - Her istek Firebase kimlik jetonuyla doğrulanır.
  *   - /notify yalnızca isteği yapan kişinin gerçekten gönderdiği bir mesaj için, sohbetin diğer
- *     üyelerine (grupta tüm üyelere) bildirim gönderir. İçerik şifreli iletilir; sunucu okuyamaz.
- *   - Alıcı göndereni engellediyse bildirim gönderilmez.
- *   - Özel API anahtarı uygulamalara gitmez.
- *   - /admin/* uçları yalnızca sunucu gizlisinde (DAKK_ADMIN_KEY) tutulan anahtarla çalışır; anahtar
- *     depoda veya uygulamada yer almaz. Anahtar tanımlı değilse bu uçlar tamamen kapalıdır.
+ *     üyelerine bildirim gönderir. İçerik şifreli iletilir; sunucu okuyamaz.
+ *   - Fotoğraflar telefonda şifrelenir; sunucu yalnızca şifreli baytları geçici olarak tutar ve
+ *     adresleri yalnızca sohbetin üyelerine verir.
+ *   - Özel API anahtarı ve Supabase gizli anahtarları uygulamalara gitmez.
+ *   - /admin/* uçları yalnızca sunucu gizlisinde (DAKK_ADMIN_KEY) tutulan anahtarla çalışır.
  */
 
 const DEFAULT_DATABASE_ID = "ai-studio-android-e2d067e8-8aba-4fce-a486-b836129f76c1";
@@ -23,11 +32,25 @@ const SCOPES =
 const MAX_FCM_CONTENT = 3000;
 const MAX_MESSAGE_AGE_MS = 15 * 60 * 1000;
 const MAX_GROUP_MEMBERS = 50;
+const MAX_MEDIA_BYTES = 2 * 1024 * 1024;
+const MEDIA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Fotoğraf projesinin aylık ücretsiz veri çıkışı 5 GB; %20 pay bırakılır.
+const MEDIA_MONTHLY_BUDGET = 4 * 1000 * 1000 * 1000;
+const MEDIA_DAILY_BUDGET = MEDIA_MONTHLY_BUDGET / 30;
+const CONFIG_FIELDS = {
+  min_supported_version: "string",
+  force_update_message: "string",
+  maintenance_enabled: "boolean",
+  maintenance_message: "string",
+  images_enabled: "boolean",
+};
 
 // İzolat (Worker örneği) yaşadığı sürece tutulan önbellekler.
 let jwksCache = { keys: null, expires: 0 };
 let accessTokenCache = { token: null, expires: 0 };
 let configCache = { pub: null, priv: null, expires: 0 };
+let usageCache = { value: null, expires: 0 };
+const chatCache = new Map();
 const notifiedMessages = new Map();
 
 const worker = {
@@ -40,6 +63,8 @@ const worker = {
       if (env.REALTIME_URL && env.REALTIME_PUBLIC_KEY) {
         info.realtime = { url: env.REALTIME_URL, key: env.REALTIME_PUBLIC_KEY };
       }
+      info.features = { register: hasSupabase(env), media: hasMedia(env) };
+      if (hasSupabase(env)) info.saver = (await usageState(env)).saver;
       if (info.configured && url.searchParams.get("check") === "deep") info.checks = await deepCheck(env);
       return json(info);
     }
@@ -51,6 +76,11 @@ const worker = {
       const uid = await verifyIdToken(request, sa.project_id);
       const ctx = { env, sa, uid, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
       if (path.endsWith("/notify")) return await handleNotify(request, ctx);
+      if (path.endsWith("/register")) return await handleRegister(request, ctx);
+      if (path.endsWith("/unregister")) return await handleUnregister(ctx);
+      if (path.endsWith("/media/upload")) return await handleMediaUpload(request, ctx);
+      if (path.endsWith("/media/download")) return await handleMediaDownload(request, ctx);
+      if (path.endsWith("/media/delete")) return await handleMediaDelete(request, ctx);
       if (path.endsWith("/assistant")) return await handleAssistant(request, ctx);
       return json({ error: "Bulunamadı" }, 404);
     } catch (e) {
@@ -139,21 +169,37 @@ async function handleNotify(request, ctx) {
     recipientKey: String(msg.recipientKey || ""),
     assistant: msg.isAssistant === true ? "1" : "0",
   };
+  const content = String(msg.content || "");
+  const keys = msg.keys && typeof msg.keys === "object" ? msg.keys : {};
   if (isGroup) {
-    // Grup içeriği her üye için ayrı sarılmış anahtarla şifrelidir; telefon mesajı Firestore'dan okur.
     data.group = "1";
     data.groupName = String(chat.name || "Grup").slice(0, 60);
-  } else {
-    const content = String(msg.content || "");
+  } else if (content.length + data.senderKey.length + data.recipientKey.length <= MAX_FCM_CONTENT) {
     // FCM veri sınırı 4 KB; sığmayan içeriği telefon Firestore'dan kendisi okur.
-    if (content.length + data.senderKey.length + data.recipientKey.length <= MAX_FCM_CONTENT) {
-      data.content = content;
-    }
+    data.content = content;
   }
 
-  const results = await Promise.all(recipients.map((r) => pushTo(ctx, r, data)));
+  // 2.4.0+ telefonlar jetonlarını Supabase'e kaydeder: engelleme kontrolünü telefon kendisi yapar ve
+  // grup içeriği de bildirimin içinde gelir. Eski sürümler için Firestore'daki jetona düşülür.
+  const fresh = await supabaseTokens(ctx.env, recipients);
+  const results = await Promise.all(
+    recipients.map((r) => {
+      const token = fresh.get(r);
+      if (!token) return pushLegacy(ctx, r, data);
+      const payload = { ...data };
+      if (isGroup && typeof keys[r] === "string") {
+        const size = content.length + data.senderKey.length + keys[r].length;
+        if (size <= MAX_FCM_CONTENT) {
+          payload.content = content;
+          payload.key = keys[r];
+        }
+      }
+      return sendFcm(ctx, token, payload, r, true);
+    })
+  );
   const sent = results.filter((r) => r === "sent").length;
   if (sent === 0 && results.includes("error")) throw httpError(502, "Bildirim gönderilemedi");
+  addUsage(ctx.env, "notify", 1);
 
   notifiedMessages.set(dedupeKey, Date.now());
   if (notifiedMessages.size > 2000) {
@@ -163,38 +209,207 @@ async function handleNotify(request, ctx) {
   return json({ ok: true, sent });
 }
 
-/** Tek bir alıcıya bildirim gönderir. Alıcı göndereni engellediyse gönderilmez. */
-async function pushTo(ctx, recipient, data) {
+/** Eski sürüm alıcı: jeton Firestore'da. Alıcı göndereni engellediyse gönderilmez. */
+async function pushLegacy(ctx, recipient, data) {
   try {
     const contact = await getDoc(ctx, `users/${recipient}/contacts/${ctx.uid}`);
     if (contact && contact.isBlocked === true) return "blocked";
-
     const tokenDoc = await getDoc(ctx, `push_tokens/${recipient}`);
     const token = tokenDoc && typeof tokenDoc.token === "string" ? tokenDoc.token : "";
     if (!token) return "no_token";
+    return await sendFcm(ctx, token, data, recipient, false);
+  } catch (e) {
+    console.error("Bildirim hatası", e && e.stack ? e.stack : e);
+    return "error";
+  }
+}
 
+async function sendFcm(ctx, token, data, recipient, fromSupabase) {
+  try {
     const res = await googleFetch(ctx, `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`, {
       method: "POST",
-      body: JSON.stringify({
-        message: {
-          token,
-          data,
-          android: { priority: "HIGH", ttl: "86400s" },
-        },
-      }),
+      body: JSON.stringify({ message: { token, data, android: { priority: "HIGH", ttl: "86400s" } } }),
     });
     if (res.ok) return "sent";
     const text = await res.text();
     if (res.status === 404 || text.includes("UNREGISTERED")) {
-      await deleteDoc(ctx, `push_tokens/${recipient}`).catch(() => {});
+      if (fromSupabase) await supabaseFetch(ctx.env, `push_tokens?uid=eq.${encodeURIComponent(recipient)}`, { method: "DELETE" }).catch(() => {});
+      else await deleteDoc(ctx, `push_tokens/${recipient}`).catch(() => {});
       return "unregistered";
     }
-    console.error("FCM hatası", res.status, text);
+    console.error("FCM hatası", res.status, text.slice(0, 300));
     return "error";
   } catch (e) {
     console.error("Bildirim hatası", e && e.stack ? e.stack : e);
     return "error";
   }
+}
+
+// ------------------------------------------------------------------------------------------------
+// /register, /unregister — bildirim jetonları (Supabase: public.push_tokens)
+// ------------------------------------------------------------------------------------------------
+
+async function handleRegister(request, ctx) {
+  if (!hasSupabase(ctx.env)) throw httpError(503, "Sunucu yapılandırılmamış");
+  const body = await readJson(request);
+  const token = String(body.token || "");
+  const appVersion = Math.max(0, Math.min(1_000_000, Number(body.appVersion) || 0));
+  if (!token || token.length > 4096) throw httpError(400, "Geçersiz jeton");
+  const res = await supabaseFetch(ctx.env, "push_tokens?on_conflict=uid", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ uid: ctx.uid, token, app_version: appVersion, updated_at: new Date().toISOString() }),
+  });
+  if (!res.ok) throw new Error(`Jeton kaydedilemedi: ${res.status} ${await res.text()}`);
+  // Eski Firestore kaydı artık gereksiz; silinirse aynı kişiye iki bildirim gitmez.
+  await deleteDoc(ctx, `push_tokens/${ctx.uid}`).catch(() => {});
+  return json({ ok: true });
+}
+
+async function handleUnregister(ctx) {
+  if (hasSupabase(ctx.env)) {
+    await supabaseFetch(ctx.env, `push_tokens?uid=eq.${encodeURIComponent(ctx.uid)}`, { method: "DELETE" });
+  }
+  await deleteDoc(ctx, `push_tokens/${ctx.uid}`).catch(() => {});
+  return json({ ok: true });
+}
+
+async function supabaseTokens(env, uids) {
+  const out = new Map();
+  if (!hasSupabase(env) || uids.length === 0) return out;
+  try {
+    const list = uids.map((u) => `"${String(u).replace(/["\\]/g, "")}"`).join(",");
+    const res = await supabaseFetch(env, `push_tokens?select=uid,token&uid=in.(${encodeURIComponent(list)})`);
+    if (!res.ok) return out;
+    for (const row of await res.json()) if (row.uid && row.token) out.set(row.uid, row.token);
+  } catch (e) {
+    console.error("Jetonlar okunamadı", e && e.message ? e.message : e);
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------------
+// /media/* — fotoğraflar (2. Supabase projesi, özel "media" kovası)
+// ------------------------------------------------------------------------------------------------
+
+function mediaPath(body) {
+  const chatId = String(body.chatId || "");
+  const mediaId = String(body.mediaId || "");
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(chatId) || !/^[A-Za-z0-9_-]{8,80}$/.test(mediaId)) {
+    throw httpError(400, "Geçersiz istek");
+  }
+  return { chatId, mediaId, path: `${chatId}/${mediaId}` };
+}
+
+/** Sohbet üyeliğini doğrular; sohbet belgesi 5 dakika önbellekte tutulur. */
+async function requireMember(ctx, chatId) {
+  const cached = chatCache.get(chatId);
+  let members = cached && cached.expires > Date.now() ? cached.members : null;
+  if (!members) {
+    const chat = await getDoc(ctx, `chats/${chatId}`);
+    if (!chat) throw httpError(404, "Sohbet bulunamadı");
+    members = Array.isArray(chat.memberUids) ? chat.memberUids : [];
+    chatCache.set(chatId, { members, expires: Date.now() + 5 * 60_000 });
+    if (chatCache.size > 500) chatCache.delete(chatCache.keys().next().value);
+  }
+  if (!members.includes(ctx.uid)) {
+    chatCache.delete(chatId);
+    throw httpError(403, "Bu sohbetin üyesi değilsiniz");
+  }
+}
+
+async function handleMediaUpload(request, ctx) {
+  if (!hasMedia(ctx.env)) throw httpError(503, "Fotoğraf sunucusu yapılandırılmamış");
+  const body = await readJson(request);
+  const { chatId, path } = mediaPath(body);
+  const bytes = Number(body.bytes) || 0;
+  if (bytes <= 0 || bytes > MAX_MEDIA_BYTES) throw httpError(413, "Fotoğraf çok büyük");
+  await requireMember(ctx, chatId);
+
+  const res = await mediaFetch(ctx.env, `object/upload/sign/media/${path}`, { method: "POST", body: "{}" });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Yükleme adresi alınamadı: ${res.status} ${text.slice(0, 300)}`);
+  const signed = JSON.parse(text);
+  await supabaseFetch(ctx.env, "media_objects?on_conflict=path", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ path, chat_id: chatId, sender_uid: ctx.uid, bytes }),
+  }).catch(() => {});
+  addUsage(ctx.env, "media_up", bytes);
+  return json({ ok: true, url: `${ctx.env.MEDIA_URL}/storage/v1${signed.url}` });
+}
+
+async function handleMediaDownload(request, ctx) {
+  if (!hasMedia(ctx.env)) throw httpError(503, "Fotoğraf sunucusu yapılandırılmamış");
+  const body = await readJson(request);
+  const { chatId, path } = mediaPath(body);
+  await requireMember(ctx, chatId);
+
+  const res = await mediaFetch(ctx.env, `object/sign/media/${path}`, {
+    method: "POST",
+    body: JSON.stringify({ expiresIn: 600 }),
+  });
+  if (res.status === 400 || res.status === 404) return json({ ok: false, expired: true }, 404);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`İndirme adresi alınamadı: ${res.status} ${text.slice(0, 300)}`);
+  const signed = JSON.parse(text);
+  const row = await supabaseFetch(ctx.env, `media_objects?select=bytes&path=eq.${encodeURIComponent(path)}`)
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => []);
+  const bytes = Array.isArray(row) && row[0] ? Number(row[0].bytes) || 0 : 0;
+  addUsage(ctx.env, "media_down", bytes);
+  return json({ ok: true, url: `${ctx.env.MEDIA_URL}/storage/v1${signed.signedURL}` });
+}
+
+async function handleMediaDelete(request, ctx) {
+  if (!hasMedia(ctx.env)) return json({ ok: true });
+  const body = await readJson(request);
+  const { chatId, path } = mediaPath(body);
+  await requireMember(ctx, chatId);
+  await deleteMediaPaths(ctx.env, [path]);
+  return json({ ok: true });
+}
+
+async function deleteMediaPaths(env, paths) {
+  if (paths.length === 0) return;
+  const res = await mediaFetch(env, "object/media", { method: "DELETE", body: JSON.stringify({ prefixes: paths }) });
+  if (!res.ok && res.status !== 404) throw new Error(`Fotoğraf silinemedi: ${res.status} ${await res.text()}`);
+  const list = paths.map((p) => `"${p}"`).join(",");
+  await supabaseFetch(env, `media_objects?path=in.(${encodeURIComponent(list)})`, { method: "DELETE" }).catch(() => {});
+}
+
+// ------------------------------------------------------------------------------------------------
+// Kullanım sayacı ve otomatik tasarruf (kota bekçisi)
+// ------------------------------------------------------------------------------------------------
+
+/** Sayaçları arka planda artırır; hata isteği bozmaz. */
+function addUsage(env, metric, value) {
+  if (!hasSupabase(env) || !value) return;
+  supabaseFetch(env, "rpc/dakk_usage_add", {
+    method: "POST",
+    body: JSON.stringify({ p_metric: metric, p_value: Math.round(value) }),
+  }).catch(() => {});
+  usageCache.expires = 0;
+}
+
+/**
+ * Tasarruf seviyesi: 0 = normal, 1 = fotoğraflar daha küçük, 2 = fotoğraflar küçük + "yazıyor" kapalı.
+ * Fotoğraf projesinin aylık 5 GB veri çıkışı günlere bölünür; bütçe aşılmaya başlarsa seviye yükselir.
+ */
+async function usageState(env) {
+  if (usageCache.value && Date.now() < usageCache.expires) return usageCache.value;
+  let summary = { today: {}, month: {} };
+  try {
+    const res = await supabaseFetch(env, "rpc/dakk_usage_summary", { method: "POST", body: "{}" });
+    if (res.ok) summary = (await res.json()) || summary;
+  } catch (_) {}
+  const today = Number((summary.today || {}).media_down) || 0;
+  const month = Number((summary.month || {}).media_down) || 0;
+  let saver = 0;
+  if (today >= 0.7 * MEDIA_DAILY_BUDGET || month >= 0.6 * MEDIA_MONTHLY_BUDGET) saver = 1;
+  if (today >= MEDIA_DAILY_BUDGET || month >= 0.85 * MEDIA_MONTHLY_BUDGET) saver = 2;
+  usageCache = { value: { saver, summary }, expires: Date.now() + 60_000 };
+  return usageCache.value;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -207,6 +422,9 @@ async function handleAdmin(request, env, path) {
   const ctx = { env, sa, uid: null, db: env.FIRESTORE_DATABASE_ID || DEFAULT_DATABASE_ID };
   if (path.endsWith("/admin/broadcast")) return await handleBroadcast(request, ctx);
   if (path.endsWith("/admin/rules")) return await handleRules(request, ctx);
+  if (path.endsWith("/admin/config")) return await handleConfig(request, ctx);
+  if (path.endsWith("/admin/usage")) return json({ ok: true, ...(await usageState(env)) });
+  if (path.endsWith("/admin/cleanup")) return await handleCleanup(ctx);
   return json({ error: "Bulunamadı" }, 404);
 }
 
@@ -236,14 +454,14 @@ async function handleBroadcast(request, ctx) {
   if (!title || title.length > 80 || !text || text.length > 400) throw httpError(400, "Başlık veya metin geçersiz");
   const dryRun = body.dryRun === true;
 
-  const tokens = await listPushTokens(ctx);
+  const tokens = await allPushTokens(ctx);
   const result = { ok: true, dryRun, total: tokens.length, sent: 0, failed: 0, removed: 0 };
   const url = `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`;
 
   let next = 0;
   async function workerLoop() {
     while (next < tokens.length) {
-      const { uid, token } = tokens[next++];
+      const { uid, token, fromSupabase } = tokens[next++];
       const res = await googleFetch(ctx, url, {
         method: "POST",
         body: JSON.stringify({
@@ -266,7 +484,9 @@ async function handleBroadcast(request, ctx) {
       }
       const errText = await res.text();
       if (res.status === 404 || errText.includes("UNREGISTERED")) {
-        if (!dryRun) await deleteDoc(ctx, `push_tokens/${uid}`).catch(() => {});
+        if (!dryRun && fromSupabase) {
+          await supabaseFetch(ctx.env, `push_tokens?uid=eq.${encodeURIComponent(uid)}`, { method: "DELETE" }).catch(() => {});
+        } else if (!dryRun) await deleteDoc(ctx, `push_tokens/${uid}`).catch(() => {});
         result.removed++;
       } else {
         result.failed++;
@@ -276,6 +496,30 @@ async function handleBroadcast(request, ctx) {
   }
   await Promise.all(Array.from({ length: Math.min(8, tokens.length) }, workerLoop));
   return json(result);
+}
+
+/** Supabase (2.4.0+) ve Firestore'daki (eski sürümler) jetonlar; aynı kişi bir kez sayılır. */
+async function allPushTokens(ctx) {
+  const out = [];
+  const seen = new Set();
+  if (hasSupabase(ctx.env)) {
+    const res = await supabaseFetch(ctx.env, "push_tokens?select=uid,token");
+    if (res.ok) {
+      for (const row of await res.json()) {
+        if (row.uid && row.token && !seen.has(row.uid)) {
+          seen.add(row.uid);
+          out.push({ uid: row.uid, token: row.token, fromSupabase: true });
+        }
+      }
+    }
+  }
+  for (const t of await listPushTokens(ctx)) {
+    if (!seen.has(t.uid)) {
+      seen.add(t.uid);
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 async function listPushTokens(ctx) {
@@ -294,6 +538,57 @@ async function listPushTokens(ctx) {
     pageToken = page.nextPageToken || "";
   } while (pageToken && out.length < 50000);
   return out;
+}
+
+/**
+ * app_config/public belgesini döndürür; gövdede { set: {...} } varsa yalnızca izinli alanları değiştirir.
+ * Örnek: { "set": { "min_supported_version": "2.3.0" } }
+ */
+async function handleConfig(request, ctx) {
+  const body = await readJson(request);
+  const set = body.set && typeof body.set === "object" ? body.set : null;
+  if (set) {
+    const fields = {};
+    for (const [k, v] of Object.entries(set)) {
+      const type = CONFIG_FIELDS[k];
+      if (!type || typeof v !== type) throw httpError(400, `İzin verilmeyen alan: ${k}`);
+      if (type === "string" && v.length > 2000) throw httpError(400, `Çok uzun: ${k}`);
+      fields[k] = v;
+    }
+    if (Object.keys(fields).length === 0) throw httpError(400, "Değiştirilecek alan yok");
+    await patchDoc(ctx, "app_config/public", fields);
+    configCache.expires = 0;
+  }
+  const pub = (await getDoc(ctx, "app_config/public")) || {};
+  const view = {};
+  for (const k of Object.keys(CONFIG_FIELDS)) if (k in pub) view[k] = pub[k];
+  return json({ ok: true, config: view });
+}
+
+/** 7 günden eski fotoğrafları ve 60 günden eski sayaçları siler. */
+async function handleCleanup(ctx) {
+  const result = { ok: true, media: 0 };
+  if (hasMedia(ctx.env)) {
+    const cutoff = new Date(Date.now() - MEDIA_TTL_MS).toISOString();
+    for (let round = 0; round < 20; round++) {
+      const res = await supabaseFetch(
+        ctx.env,
+        `media_objects?select=path&created_at=lt.${encodeURIComponent(cutoff)}&limit=100`
+      );
+      if (!res.ok) break;
+      const rows = await res.json();
+      if (!rows.length) break;
+      await deleteMediaPaths(ctx.env, rows.map((r) => r.path));
+      result.media += rows.length;
+    }
+    // Fotoğraf projesi boşta kalıp duraklatılmasın diye her gün bir istek de yapılmış olur.
+    await mediaFetch(ctx.env, "bucket/media", { method: "GET" }).catch(() => {});
+  }
+  if (hasSupabase(ctx.env)) {
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await supabaseFetch(ctx.env, `usage_daily?day=lt.${old}`, { method: "DELETE" }).catch(() => {});
+  }
+  return json(result);
 }
 
 /**
@@ -514,6 +809,18 @@ async function deleteDoc(ctx, path) {
   if (!res.ok && res.status !== 404) throw new Error(`Firestore silme hatası: ${res.status}`);
 }
 
+async function patchDoc(ctx, path, fields) {
+  const params = new URLSearchParams();
+  for (const k of Object.keys(fields)) params.append("updateMask.fieldPaths", k);
+  const encoded = {};
+  for (const [k, v] of Object.entries(fields)) encoded[k] = typeof v === "boolean" ? { booleanValue: v } : { stringValue: String(v) };
+  const res = await googleFetch(ctx, `${docUrl(ctx, path)}?${params}`, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: encoded }),
+  });
+  if (!res.ok) throw new Error(`Firestore yazma hatası (${path}): ${res.status} ${await res.text()}`);
+}
+
 function decodeFields(fields) {
   const out = {};
   for (const [k, v] of Object.entries(fields)) out[k] = decodeValue(v);
@@ -536,6 +843,40 @@ function decodeValue(v) {
 // ------------------------------------------------------------------------------------------------
 // Yardımcılar
 // ------------------------------------------------------------------------------------------------
+
+function hasSupabase(env) {
+  return Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY);
+}
+
+function hasMedia(env) {
+  return hasSupabase(env) && Boolean(env.MEDIA_URL && env.MEDIA_SERVICE_KEY);
+}
+
+/** Bu projenin veritabanı (PostgREST), gizli anahtarla. */
+function supabaseFetch(env, path, init = {}) {
+  return fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+}
+
+/** Fotoğraf projesinin depolama API'si, gizli anahtarla. */
+function mediaFetch(env, path, init = {}) {
+  return fetch(`${env.MEDIA_URL}/storage/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: env.MEDIA_SERVICE_KEY,
+      Authorization: `Bearer ${env.MEDIA_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+}
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
