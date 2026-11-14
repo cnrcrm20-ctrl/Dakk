@@ -516,6 +516,56 @@ private fun StatField(field: PanelField, repo: ConfigRepository) {
             }
         ) { Text(if (busy) "…" else "Say") }
     }
+    if (field.key == "user_count") UserList(repo)
+}
+
+/** Giriş yapan hesaplar: ad, Google hesabı ve uygulamayı son açtığı zaman. */
+@Composable
+private fun UserList(repo: ConfigRepository) {
+    val scope = rememberCoroutineScope()
+    var users by remember { mutableStateOf<List<ConfigRepository.UserRow>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text("Giriş yapan hesaplar", color = Color.White, fontSize = 15.sp)
+                Text(
+                    error ?: users?.let { "${it.size} hesap · son açan en üstte" } ?: "Göstermek için dokunun (kişi başı 1 okuma).",
+                    color = if (error != null) DakkStatusFailed else DakkTextSecondaryDark,
+                    fontSize = 13.sp
+                )
+            }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = {
+                    scope.launch {
+                        busy = true
+                        error = null
+                        try {
+                            users = repo.listUsers()
+                        } catch (e: Exception) {
+                            error = "Alınamadı: ${e.message ?: "hata"}"
+                        }
+                        busy = false
+                    }
+                }
+            ) { Text(if (busy) "…" else if (users == null) "Göster" else "Yenile") }
+        }
+        users?.forEach { u ->
+            Surface(
+                color = DakkDarkSurfaceVariant,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Text(u.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    if (u.email.isNotBlank()) Text(u.email, color = DakkYellow, fontSize = 13.sp)
+                    if (u.lastSeen > 0) Text("Son açılış: ${formatDate(u.lastSeen)}", color = DakkTextSecondaryDark, fontSize = 12.sp)
+                }
+            }
+        }
+    }
 }
 
 @Composable

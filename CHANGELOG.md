@@ -2,6 +2,12 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.4.1] - 2026-11-15
+
+### İyileştirildi
+- **Kurucu paneli:** İstatistik bölümünde giriş yapan hesapların listesi (ad, Google hesabı ve uygulamayı
+  son açtığı zaman) görünüyor. Yalnızca kurucular görür; diğer kullanıcılar için değişiklik yok.
+
 ## [2.4.0] - 2026-11-15
 
 ### Yeni
