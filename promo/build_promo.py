@@ -6,6 +6,7 @@ Kullanım:
     python3 -m venv .venv && .venv/bin/pip install pillow numpy imageio-ffmpeg qrcode
     .venv/bin/python promo/build_promo.py               # promo/render/ altına iki video üretir
     .venv/bin/python promo/build_promo.py --frames 2,6  # yalnızca o saniyelerden PNG önizleme
+    .venv/bin/python promo/build_promo.py --uzun        # 69 saniyelik detaylı sürüm (9 sahne + özet)
 
 Telefon ekranları promo/mock_screens.py'de çizilir: Dakk arayüzünün sadeleştirilmiş, animasyonlu hali
 (Google tanıtım reklamlarındaki gibi). İstenirse bir sahne gerçek ekran kaydıyla değiştirilebilir:
@@ -65,6 +66,55 @@ SCENES = [
 
 OUTRO = dict(start=24.0, duck_start=24.35, text_start=26.0, words="Ücretsiz. Reklamsız. Açık kaynak.",
              button="Hemen indir", url="cnrcrm20-ctrl.github.io/Dakk")
+
+PHONE_END = OUTRO["start"]   # telefon bu saniyede aşağı iner
+RECAP = None                 # özet bölümü (yalnız uzun sürümde)
+MUSIC = dict(rhythm_end_bar=12, final_chord=26.2, counter_from_bar=None)
+OUT_NAME = "dakk_tanitim"
+
+# ---- 69 saniyelik detaylı sürüm: 9 sahne x 6 sn, "hepsi tek uygulamada" özeti, ördekli kapanış
+LONG = dict(
+    DURATION=69.0,
+    SCENES=[
+        dict(clip="1_sohbet", title="Uçtan uca şifreli.", hl="şifreli.", sub="Mesajlarını biz bile okuyamayız.", speed=0.75),
+        dict(clip="2_qr", title="Arkadaşını saniyede ekle.", hl="saniyede", sub="QR kodu okut, sohbet başlasın.", speed=0.75),
+        dict(clip="6_grup", title="Ekibini tek yerde topla.", hl="topla.", sub="50 kişiye kadar şifreli gruplar."),
+        dict(clip="3_anket", title="Maç akşamı? Takımları Dakk kursun.", hl="Dakk",
+             sub="Hazır maç anketi, tek dokunuşla takım.", speed=0.75),
+        dict(clip="4_tepki", title="Tepkini bırak, anında gör.", hl="anında",
+             sub="Uzun bas, tepki bırak. Kim yazıyor, gör.", speed=0.75),
+        dict(clip="7_foto", title="Fotoğraflar da korunur.", hl="korunur.", sub="Açıldığı an sunucudan silinir."),
+        dict(clip="8_asistan", title="Yanında akıllı bir asistan.", hl="asistan.",
+             sub="Mesajına @dakk yaz, yapay zekâ yardım etsin."),
+        dict(clip="9_kaybolan", title="Bazı mesajlar iz bırakmasın.", hl="iz", sub="Kaybolan mesajlar: 24 saat veya 7 gün."),
+        dict(clip="5_yedek", title="Telefon değişir, sohbetler kalır.", hl="kalır.",
+             sub="Arkadaşlarından şifreli geri yükleme.", speed=0.75),
+    ],
+    SCENE_LEN=6.0,
+    RECAP=dict(start=58.0, end=62.0, title="Hepsi tek uygulamada.", hl="tek",
+               chips=["🔒 Uçtan uca şifreleme", "📱 QR ile ekle", "👥 Gruplar", "📊 Anketler", "⚽ Takım kur",
+                      "❤️ Tepkiler", "📷 Şifreli fotoğraf", "✨ Dakk Asistan", "⏱ Kaybolan mesajlar",
+                      "💾 Sohbet yedeği", "🔕 Sessize al", "💬 Yanıtla"]),
+    OUTRO=dict(start=62.0, duck_start=62.35, text_start=64.0, words="Ücretsiz. Reklamsız. Açık kaynak.",
+               button="Hemen indir", url="cnrcrm20-ctrl.github.io/Dakk"),
+    MUSIC=dict(rhythm_end_bar=31, final_chord=64.2, counter_from_bar=14),
+    OUT_NAME="dakk_tanitim_69sn",
+)
+
+
+def use_long_profile():
+    global DURATION, SCENES, OUTRO, PHONE_END, RECAP, MUSIC, OUT_NAME
+    DURATION = LONG["DURATION"]
+    SCENES = []
+    t = INTRO["end"]
+    for sc in LONG["SCENES"]:
+        SCENES.append(dict(sc, start=t, end=t + LONG["SCENE_LEN"]))
+        t += LONG["SCENE_LEN"]
+    RECAP = LONG["RECAP"]
+    OUTRO = LONG["OUTRO"]
+    PHONE_END = RECAP["start"]
+    MUSIC = LONG["MUSIC"]
+    OUT_NAME = LONG["OUT_NAME"]
 
 # Telefon çerçevesi (ekran 9:20 — çoğu Android telefonun kayıt oranı)
 SW, SH = 620, 1378
@@ -291,6 +341,40 @@ def load_splash():
     return frames
 
 
+def make_chips(labels, size=44, top=880, max_w=1000, gap_x=20, gap_y=26):
+    """Google tarzı çipler (beyaz, ince gri kenarlı, emoji destekli) → [(img, x, y)] ortalanmış satırlar."""
+    chips = []
+    for lab in labels:
+        t = mock_screens.rich(lab, size, 500, INK)
+        w, h = t.width + 64, int(size * 2.35)
+        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        big = Image.new("RGBA", (w * 3, h * 3), (0, 0, 0, 0))
+        ImageDraw.Draw(big).rounded_rectangle((0, 0, w * 3 - 1, h * 3 - 1), h * 3 // 2, fill=(255, 255, 255, 255),
+                                              outline=(218, 220, 224, 255), width=6)
+        img = big.resize((w, h), Image.LANCZOS)
+        img.alpha_composite(t, (32, (h - t.height) // 2))
+        chips.append(img)
+    rows, cur, cur_w = [], [], 0
+    for c in chips:
+        if cur and cur_w + gap_x + c.width > max_w:
+            rows.append(cur)
+            cur, cur_w = [], 0
+        cur_w = c.width if not cur else cur_w + gap_x + c.width
+        cur.append(c)
+    if cur:
+        rows.append(cur)
+    out = []
+    y = top
+    for row in rows:
+        rw = sum(c.width for c in row) + gap_x * (len(row) - 1)
+        x = (W - rw) / 2
+        for c in row:
+            out.append((c, x, y))
+            x += c.width + gap_x
+        y += row[0].height + gap_y
+    return out
+
+
 # ---------------------------------------------------------------- müzik
 
 def make_music(path, sr=44100):
@@ -367,10 +451,20 @@ def make_music(path, sr=44100):
     for b in range(bars):
         t0 = b * BAR
         root, notes = chords[b % 4]
-        full = 2 <= b < 12          # ritim 4. saniyede girer, final bölümünde çekilir
-        outro = b >= 12
+        rend = MUSIC["rhythm_end_bar"]
+        full = 2 <= b < rend        # ritim 4. saniyede girer, final bölümünde çekilir
+        outro = b >= rend
         add(pad(notes, BAR + 0.3), t0, 0.16 if not outro else 0.2)
-        if b < 13:
+        cf = MUSIC.get("counter_from_bar")
+        if cf is not None and full and b >= cf:
+            # ikinci yarıda üstte karşı ezgi: uzun videoda tekdüzeliği kırar
+            add(pluck(notes[3] + 12, 1.2), t0, 0.075)
+            add(pluck(notes[2] + 12, 1.0), t0 + 0.75, 0.06)
+            add(pluck(notes[1] + 12, 1.0), t0 + 1.5, 0.06)
+        if cf is not None and b == cf - 1:
+            t_r = np.arange(int(0.9 * sr)) / sr
+            add(np.diff(np.concatenate([[0], rng.standard_normal(len(t_r))])) * (t_r / 0.9) ** 2 * 0.2, t0 + 1.1)
+        if b < rend + 1:
             for k in range(8):
                 m = notes[arp[k]] + (12 if (k % 4 == 3 and full) else 0)
                 add(pluck(m), t0 + k * beat / 2, 0.16 if full else 0.13)
@@ -389,8 +483,8 @@ def make_music(path, sr=44100):
     add(riser, 3.1)
     # final akoru: ördek göz kırptığında
     for m in (48, 55, 60, 64, 67, 72, 76):
-        add(pluck(m, 3.0), 26.2, 0.14)
-    add(kick(), 26.2, 0.5)
+        add(pluck(m, 3.0), MUSIC["final_chord"], 0.14)
+    add(kick(), MUSIC["final_chord"], 0.5)
     # basit yankı
     wet = np.zeros_like(out)
     for d, g in ((0.075, 0.28), (0.137, 0.2), (0.25, 0.14), (0.375, 0.08)):
@@ -427,6 +521,10 @@ class Renderer:
         self.intro = Headline(None, 150, 600, 980, 900, hl=INTRO["hl"], line_h=176,
                               forced_lines=[[w] for w in INTRO["lines"]])
         self.titles = [Headline(s["title"].split(), 84, 600, 960, 285, hl=s["hl"], line_h=100) for s in SCENES]
+        self.recap = None
+        if RECAP:
+            self.recap_title = Headline(RECAP["title"].split(), 100, 600, 980, 640, hl=RECAP["hl"], line_h=118)
+            self.recap = make_chips(RECAP["chips"])
         self.subs = [text_img(s["sub"], 40, 400, SUBINK) for s in SCENES]
         self.readers = {}
         self.outro_words = Headline(OUTRO["words"].split(), 60, 600, 980, 1475)
@@ -442,7 +540,7 @@ class Renderer:
         s = SCENES[idx]
         path = find_clip(s["clip"])
         if not path:
-            return mock_screens.SCENE_FUNCS[s["clip"]](t - s["start"])
+            return mock_screens.SCENE_FUNCS[s["clip"]]((t - s["start"]) * s.get("speed", 1.0))
         if idx not in self.readers:
             cfg = self.settings.get(s["clip"], {})
             n = int((s["end"] - s["start"] + 1.0) * FPS)
@@ -451,7 +549,10 @@ class Renderer:
 
     def phone_screen(self, t):
         # Sahne sınırında 0.3 sn çapraz geçiş
-        idx = max(0, min(len(SCENES) - 1, int((t - SCENES[0]["start"]) // 4)))
+        idx = 0
+        for i, s in enumerate(SCENES):
+            if t >= s["start"]:
+                idx = i
         cur = self.screen_for(idx, t)
         if idx + 1 < len(SCENES):
             nxt_start = SCENES[idx + 1]["start"]
@@ -470,10 +571,15 @@ class Renderer:
 
         # --- telefon
         enter = ease_out(prog(t, 3.55, 0.75))
-        leave = ease_in_out(prog(t, OUTRO["start"] - 0.1, 0.55))
+        leave = ease_in_out(prog(t, PHONE_END - 0.1, 0.55))
         if enter > 0 and leave < 1:
-            local = (t - SCENES[0]["start"]) % 4 if t >= SCENES[0]["start"] else 0
-            scale = 0.94 + 0.06 * enter + 0.018 * ease_in_out(local / 4)
+            cur = [s for s in SCENES if s["start"] <= t < s["end"]]
+            if cur:
+                ln = cur[0]["end"] - cur[0]["start"]
+                local = (t - cur[0]["start"]) / ln
+            else:
+                local = 0
+            scale = 0.94 + 0.06 * enter + 0.018 * ease_in_out(local)
             dy = (1 - enter) * 1500 + leave * 1600 + math.sin(t * 1.3) * 5
             phone = self.body.copy()
             phone.paste(self.phone_screen(max(t, SCENES[0]["start"])), (BEZEL, BEZEL), self.screen_mask)
@@ -498,6 +604,20 @@ class Renderer:
                 ex = ease_in_out(prog(t, s["end"] - 0.35, 0.35))
                 last_y = max(it[2] for it in self.titles[i].items)
                 paste(canvas, sub, (W - sub.width) / 2, last_y + 118 + (1 - p) * 30 - ex * 30, p * (1 - ex))
+
+        # --- özet: "Hepsi tek uygulamada." + özellik çipleri
+        if self.recap and RECAP["start"] - 0.1 <= t < RECAP["end"]:
+            rs, re_ = RECAP["start"] + 0.25, RECAP["end"]
+            self.recap_title.draw(canvas, t, rs, re_, stagger=0.1)
+            ex = ease_in_out(prog(t, re_ - 0.4, 0.4))
+            for i, (chip, x, y) in enumerate(self.recap):
+                p = ease_out(prog(t, rs + 0.45 + i * 0.09, 0.45))
+                if p <= 0:
+                    continue
+                s = 0.8 + 0.2 * mock_screens.back_out(prog(t, rs + 0.45 + i * 0.09, 0.45))
+                c = chip.resize((max(2, int(chip.width * s)), max(2, int(chip.height * s))), Image.BILINEAR)
+                paste(canvas, c, x + (chip.width - c.width) / 2, y + (chip.height - c.height) / 2 + (1 - p) * 40 - ex * 30,
+                      p * (1 - ex))
 
         # --- kapanış
         if t >= OUTRO["duck_start"]:
@@ -528,14 +648,14 @@ def render(args):
     if args.frames:
         for s in args.frames.split(","):
             t = float(s)
-            p = os.path.join(OUT_DIR, f"onizleme_{t:05.2f}.png")
+            p = os.path.join(OUT_DIR, f"onizleme_{OUT_NAME}_{t:05.2f}.png")
             r.frame(t).save(p)
             print(p)
         return
 
-    music = os.path.join(OUT_DIR, "muzik.wav")
+    music = os.path.join(OUT_DIR, f"muzik_{OUT_NAME}.wav")
     make_music(music)
-    silent = os.path.join(OUT_DIR, "dakk_tanitim_sessiz.mp4")
+    silent = os.path.join(OUT_DIR, f"{OUT_NAME}_sessiz.mp4")
     enc = subprocess.Popen(
         [FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
          "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
@@ -548,7 +668,7 @@ def render(args):
             print(f"  {i / FPS:4.1f} sn", file=sys.stderr, flush=True)
     enc.stdin.close()
     enc.wait()
-    final = os.path.join(OUT_DIR, "dakk_tanitim.mp4")
+    final = os.path.join(OUT_DIR, f"{OUT_NAME}.mp4")
     subprocess.run([FFMPEG, "-y", "-v", "error", "-i", silent, "-i", music, "-c:v", "copy", "-c:a", "aac",
                     "-b:a", "192k", "-shortest", "-movflags", "+faststart", final], check=True)
     print(final)
@@ -558,4 +678,8 @@ def render(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--frames", help="Virgülle ayrılmış saniyeler: yalnızca PNG önizleme üretir")
-    render(ap.parse_args())
+    ap.add_argument("--uzun", action="store_true", help="69 saniyelik detaylı sürüm")
+    a = ap.parse_args()
+    if a.uzun:
+        use_long_profile()
+    render(a)

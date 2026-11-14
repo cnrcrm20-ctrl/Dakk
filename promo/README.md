@@ -14,6 +14,26 @@ Ekran kaydı gerekmez; ekranlar `mock_screens.py`'de uygulamanın renk ve şekil
 | 20–24 sn | Telefon değişir, sohbetler **kalır.** | `5_yedek` |
 | 24–30 sn | Ördek animasyonu · Ücretsiz. Reklamsız. Açık kaynak. · **Hemen indir** | — |
 
+## 69 saniyelik detaylı sürüm (`--uzun`)
+
+9 sahne, her biri 6 sn, ardından "Hepsi tek uygulamada." özeti ve ördekli kapanış:
+`dakk_tanitim_69sn.mp4` (+ `_sessiz`).
+
+| Süre | Başlık | Telefonda |
+| --- | --- | --- |
+| 0–4 sn | Mesajların sadece **senin.** | — |
+| 4–10 | Uçtan uca **şifreli.** | `1_sohbet` |
+| 10–16 | Arkadaşını **saniyede** ekle. | `2_qr` |
+| 16–22 | Ekibini tek yerde **topla.** | `6_grup`: kişiler seçilir, *Grubu kur*, grup sohbeti açılır |
+| 22–28 | Maç akşamı? Takımları **Dakk** kursun. | `3_anket` |
+| 28–34 | Tepkini bırak, **anında** gör. | `4_tepki` |
+| 34–40 | Fotoğraflar da **korunur.** | `7_foto`: şifrelenerek yüklenir, açılınca sunucudan silinir, tam ekran yakınlaştırma |
+| 40–46 | Yanında akıllı bir **asistan.** | `8_asistan`: grupta @dakk ile hatırlatma yazdırılır |
+| 46–52 | Bazı mesajlar **iz** bırakmasın. | `9_kaybolan`: Sohbet bilgisi → 24 saat, "24 saat sonra…", mesajlar dağılır |
+| 52–58 | Telefon değişir, sohbetler **kalır.** | `5_yedek` |
+| 58–62 | Hepsi **tek** uygulamada. | 12 özellik çipi |
+| 62–69 | Ördek · Ücretsiz. Reklamsız. Açık kaynak. · **Hemen indir** | — |
+
 ## Telefondaki ekranlar (`mock_screens.py`)
 
 | Sahne | Ne oluyor |
@@ -36,6 +56,7 @@ değiştirmek için ilgili `scene_*` fonksiyonunu düzenle; tek sahneye hızlı 
 python3 -m venv .venv && .venv/bin/pip install pillow numpy imageio-ffmpeg qrcode
 .venv/bin/python promo/build_promo.py                    # promo/render/dakk_tanitim.mp4 (+ _sessiz)
 .venv/bin/python promo/build_promo.py --frames 6,13.5    # yalnızca PNG önizleme
+.venv/bin/python promo/build_promo.py --uzun             # 69 sn sürüm: promo/render/dakk_tanitim_69sn.mp4
 ```
 
 (İsteğe bağlı) gerçek klip ince ayarı `promo/clips/ayar.json`:
