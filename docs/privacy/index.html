@@ -13,7 +13,7 @@
 <div style="height:16px;"></div>
 <!-- Bu sayfa PRIVACY_POLICY.md dosyasından üretilmiştir; değişiklikleri önce oraya yapın. -->
 <h1 style="color:#FFC107;font-size:30px;margin:0 0 8px;">Dakk Gizlilik Politikası</h1>
-<p style="color:#C8C8C8;margin:8px 0;"><b>Son güncelleme:</b> 11 Kasım 2026 • <b>Geçerli sürüm:</b> Dakk 2.1 ve sonrası</p>
+<p style="color:#C8C8C8;margin:8px 0;"><b>Son güncelleme:</b> 14 Kasım 2026 • <b>Geçerli sürüm:</b> Dakk 2.3 ve sonrası</p>
 <p style="color:#C8C8C8;margin:8px 0;">Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları <a href="https://github.com/cnrcrm20-ctrl/Dakk" style="color:#FFC107;">GitHub deposunda</a> doğrulayabilirsin.</p>
 <h2 style="color:#FFFFFF;font-size:22px;margin:28px 0 8px;">Kısaca</h2>
 <ul style="padding-left:20px;color:#C8C8C8;">
@@ -38,26 +38,38 @@
 </ul>
 <h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">3. Mesajlar</h3>
 <ul style="padding-left:20px;color:#C8C8C8;">
-<li style="margin:4px 0;">Mesaj içeriği, sohbet listesinde görünen son mesaj önizlemesi, mesajlara bırakılan <b>tepkiler</b> ve yanıtlarda görünen <b>alıntı</b> metni <b>uçtan uca şifreli</b> olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.</li>
+<li style="margin:4px 0;">Mesaj içeriği, sohbet listesinde görünen son mesaj önizlemesi, mesajlara bırakılan <b>tepkiler</b>, yanıtlarda görünen <b>alıntı</b> metni, <b>anket</b> soruları, seçenekleri ve <b>oylar</b> <b>uçtan uca şifreli</b> olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.</li>
 <li style="margin:4px 0;">Mesajın iletilebilmesi için bazı bilgiler <b>şifrelenmeden</b> saklanır:<ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">gönderen ve alıcı kimliği,</li>
 <li style="margin:4px 0;">gönderim zamanı,</li>
 <li style="margin:4px 0;">iletim ve okundu durumu,</li>
 <li style="margin:4px 0;">gönderenin görünen adı,</li>
-<li style="margin:4px 0;">mesaj türü (yazı, fotoğraf veya "ekran görüntüsü aldı" bilgisi),</li>
-<li style="margin:4px 0;">bir mesaja kimin tepki bıraktığı (hangi tepki olduğu değil) ve yanıtlanan mesajın kimliği.</li>
+<li style="margin:4px 0;">mesaj türü (yazı, fotoğraf, anket veya "ekran görüntüsü aldı" bilgisi),</li>
+<li style="margin:4px 0;">bir mesaja kimin tepki bıraktığı ve bir ankette kimin oy verdiği (hangi tepki veya hangi seçenek olduğu değil), yanıtlanan mesajın kimliği,</li>
+<li style="margin:4px 0;">kaybolan mesajlarda mesajın silineceği zaman.</li>
 </ul></li>
+<li style="margin:4px 0;">Sohbet içinde ortada görünen kısa <b>sistem notları</b> (ör. "Ali takma adını … yaptı", "Ayşe gruba katıldı", "kaybolan mesajlar açıldı") şifrelenmeden saklanır.</li>
+<li style="margin:4px 0;"><b>Kaybolan mesajlar</b> açıksa mesajlar seçilen süre (24 saat veya 7 gün) dolunca sohbetteki bir cihaz tarafından sunucudan silinir.</li>
 <li style="margin:4px 0;">Bir sohbette ekran görüntüsü aldığında (Android 14 ve üzeri) karşı tarafa sohbet içinde "ekran görüntüsü aldı" bilgisi gönderilir. Ekran görüntüsünün kendisi hiçbir yere gönderilmez.</li>
 </ul>
-<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">4. Fotoğraflar</h3>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">4. Gruplar ve sohbet ayarları</h3>
+<ul style="padding-left:20px;color:#C8C8C8;">
+<li style="margin:4px 0;">Bir grubun <b>adı, fotoğrafı, üye listesi ve yöneticileri</b> grubun üyelerinin görebildiği bir alanda <b>şifrelenmeden</b> saklanır. Grup mesajları ise uçtan uca şifrelidir.</li>
+<li style="margin:4px 0;"><b>Takma adlar</b> sohbetteki herkesin görebilmesi için sohbet bilgisiyle birlikte şifrelenmeden saklanır.</li>
+<li style="margin:4px 0;">Grup <b>davet bağlantısı</b> yalnızca yöneticiler açarsa çalışır. Bağlantıya sahip olan herkes gruba katılabilir; bağlantı istenince yenilenebilir.</li>
+<li style="margin:4px 0;"><b>Sessize alma</b> ayarı ve birebir sohbette kişiye verdiğin <b>özel fotoğraf</b> yalnızca senin telefonunda saklanır, kimseye gönderilmez.</li>
+</ul>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">5. "Yazıyor…" bilgisi</h3>
+<p style="color:#C8C8C8;margin:8px 0;">Bir sohbette yazarken, o an uygulaması açık olan sohbet üyelerine "yazıyor" sinyali gönderilir. Sinyal yalnızca kullanıcı kimliğini ve "yazıyor / bıraktı" bilgisini taşır; yazdığın metni <b>taşımaz</b>. Sinyal Dakk sunucusunun anlık iletim kanalı (Supabase Realtime) üzerinden geçer ve <b>hiçbir yerde saklanmaz</b>. Kanal adları sohbete özel gizli bir değerden türetilir, sohbet dışındaki biri kanalı bulamaz.</p>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">6. Fotoğraflar</h3>
 <ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">Gönderdiğin fotoğraf önce telefonunda küçültülür, sonra <b>uçtan uca şifrelenir</b>.</li>
 <li style="margin:4px 0;">Şifreli hali parçalar halinde Firestore'a geçici olarak yüklenir.</li>
-<li style="margin:4px 0;">Alıcı fotoğrafı açtığında fotoğraf onun cihazına kaydedilir ve sunucudaki şifreli kopya <b>hemen silinir</b>.</li>
+<li style="margin:4px 0;">Birebir sohbette alıcı fotoğrafı açtığında fotoğraf onun cihazına kaydedilir ve sunucudaki şifreli kopya <b>hemen silinir</b>. Gruplarda herkesin indirebilmesi için şifreli kopya 7 gün sunucuda kalır.</li>
 <li style="margin:4px 0;">Hiç açılmayan fotoğraflar <b>7 gün</b> sonra sunucudan silinir.</li>
 <li style="margin:4px 0;">Fotoğraflar, gönderen ve alan cihazlarda uygulamanın kendi alanında saklanır. Galeriye yalnızca sen <i>Kaydet</i> dersen kopyalanır.</li>
 </ul>
-<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">5. Kişi listesi</h3>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">7. Kişi listesi</h3>
 <p style="color:#C8C8C8;margin:8px 0;">Eklediğin kişilerle ilgili şu bilgiler, yalnızca senin okuyabildiğin bir alanda saklanır:</p>
 <ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">kimlik,</li>
@@ -66,9 +78,9 @@
 <li style="margin:4px 0;">fotoğraf bağlantısı,</li>
 <li style="margin:4px 0;">engelli olup olmadığı.</li>
 </ul>
-<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">6. Bildirim jetonu</h3>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">8. Bildirim jetonu</h3>
 <p style="color:#C8C8C8;margin:8px 0;">Uygulama kapalıyken yeni mesajları haber verebilmek için cihazına özel bir Firebase Cloud Messaging jetonu üretilir ve hesabınla birlikte saklanır. Bu jetonu kimse okuyamaz, yalnızca Dakk sunucusu kullanır. Çıkış yaptığında jeton silinir.</p>
-<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">7. Cihazda tutulanlar</h3>
+<h3 style="color:#FFFFFF;font-size:17px;margin:20px 0 6px;">9. Cihazda tutulanlar</h3>
 <p style="color:#C8C8C8;margin:8px 0;">Şunlar yalnızca cihazında durur:</p>
 <ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">ayarların,</li>
@@ -109,6 +121,7 @@
 </ul><p style="color:#C8C8C8;margin:8px 0;">Google'ın gizlilik politikası: <a href="https://policies.google.com/privacy" style="color:#FFC107;">https://policies.google.com/privacy</a></p></li>
 <li style="margin:4px 0;"><b>Supabase</b> — Dakk sunucusu burada (Avrupa Birliği, Frankfurt) çalışır. Görevleri:<ul style="padding-left:20px;color:#C8C8C8;">
 <li style="margin:4px 0;">uygulama kapalıyken bildirim iletmek,</li>
+<li style="margin:4px 0;">"yazıyor…" sinyalini anlık olarak iletmek (saklamadan),</li>
 <li style="margin:4px 0;">yöneticiler özel bir yapay zekâ hizmeti seçtiyse asistan isteklerini o hizmete aktarmak.</li>
 </ul><p style="color:#C8C8C8;margin:8px 0;">Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir ve hiçbir veriyi kalıcı olarak saklamaz. Supabase'in gizlilik politikası: <a href="https://supabase.com/privacy" style="color:#FFC107;">https://supabase.com/privacy</a></p></li>
 <li style="margin:4px 0;"><b>GitHub</b> — güncelleme denetimi için GitHub Releases'a anonim bir istek gönderilir ve APK buradan indirilir. GitHub'ın gizlilik politikası: <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" style="color:#FFC107;">https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement</a></li>

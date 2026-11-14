@@ -1,6 +1,6 @@
 # Dakk Gizlilik Politikası
 
-**Son güncelleme:** 11 Kasım 2026 • **Geçerli sürüm:** Dakk 2.1 ve sonrası
+**Son güncelleme:** 14 Kasım 2026 • **Geçerli sürüm:** Dakk 2.3 ve sonrası
 
 Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları [GitHub deposunda](https://github.com/cnrcrm20-ctrl/Dakk) doğrulayabilirsin.
 
@@ -26,24 +26,36 @@ Cihazın bir anahtar çifti üretir:
 - **Özel anahtar** cihazından hiç çıkmaz ve Android Keystore ile korunur.
 
 ### 3. Mesajlar
-- Mesaj içeriği, sohbet listesinde görünen son mesaj önizlemesi, mesajlara bırakılan **tepkiler** ve yanıtlarda görünen **alıntı** metni **uçtan uca şifreli** olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.
+- Mesaj içeriği, sohbet listesinde görünen son mesaj önizlemesi, mesajlara bırakılan **tepkiler**, yanıtlarda görünen **alıntı** metni, **anket** soruları, seçenekleri ve **oylar** **uçtan uca şifreli** olarak Firestore'da saklanır. Sunucuda yalnızca okunamayan şifreli metin bulunur.
 - Mesajın iletilebilmesi için bazı bilgiler **şifrelenmeden** saklanır:
   - gönderen ve alıcı kimliği,
   - gönderim zamanı,
   - iletim ve okundu durumu,
   - gönderenin görünen adı,
-  - mesaj türü (yazı, fotoğraf veya "ekran görüntüsü aldı" bilgisi),
-  - bir mesaja kimin tepki bıraktığı (hangi tepki olduğu değil) ve yanıtlanan mesajın kimliği.
+  - mesaj türü (yazı, fotoğraf, anket veya "ekran görüntüsü aldı" bilgisi),
+  - bir mesaja kimin tepki bıraktığı ve bir ankette kimin oy verdiği (hangi tepki veya hangi seçenek olduğu değil), yanıtlanan mesajın kimliği,
+  - kaybolan mesajlarda mesajın silineceği zaman.
+- Sohbet içinde ortada görünen kısa **sistem notları** (ör. "Ali takma adını … yaptı", "Ayşe gruba katıldı", "kaybolan mesajlar açıldı") şifrelenmeden saklanır.
+- **Kaybolan mesajlar** açıksa mesajlar seçilen süre (24 saat veya 7 gün) dolunca sohbetteki bir cihaz tarafından sunucudan silinir.
 - Bir sohbette ekran görüntüsü aldığında (Android 14 ve üzeri) karşı tarafa sohbet içinde "ekran görüntüsü aldı" bilgisi gönderilir. Ekran görüntüsünün kendisi hiçbir yere gönderilmez.
 
-### 4. Fotoğraflar
+### 4. Gruplar ve sohbet ayarları
+- Bir grubun **adı, fotoğrafı, üye listesi ve yöneticileri** grubun üyelerinin görebildiği bir alanda **şifrelenmeden** saklanır. Grup mesajları ise uçtan uca şifrelidir.
+- **Takma adlar** sohbetteki herkesin görebilmesi için sohbet bilgisiyle birlikte şifrelenmeden saklanır.
+- Grup **davet bağlantısı** yalnızca yöneticiler açarsa çalışır. Bağlantıya sahip olan herkes gruba katılabilir; bağlantı istenince yenilenebilir.
+- **Sessize alma** ayarı ve birebir sohbette kişiye verdiğin **özel fotoğraf** yalnızca senin telefonunda saklanır, kimseye gönderilmez.
+
+### 5. "Yazıyor…" bilgisi
+Bir sohbette yazarken, o an uygulaması açık olan sohbet üyelerine "yazıyor" sinyali gönderilir. Sinyal yalnızca kullanıcı kimliğini ve "yazıyor / bıraktı" bilgisini taşır; yazdığın metni **taşımaz**. Sinyal Dakk sunucusunun anlık iletim kanalı (Supabase Realtime) üzerinden geçer ve **hiçbir yerde saklanmaz**. Kanal adları sohbete özel gizli bir değerden türetilir, sohbet dışındaki biri kanalı bulamaz.
+
+### 6. Fotoğraflar
 - Gönderdiğin fotoğraf önce telefonunda küçültülür, sonra **uçtan uca şifrelenir**.
 - Şifreli hali parçalar halinde Firestore'a geçici olarak yüklenir.
-- Alıcı fotoğrafı açtığında fotoğraf onun cihazına kaydedilir ve sunucudaki şifreli kopya **hemen silinir**.
+- Birebir sohbette alıcı fotoğrafı açtığında fotoğraf onun cihazına kaydedilir ve sunucudaki şifreli kopya **hemen silinir**. Gruplarda herkesin indirebilmesi için şifreli kopya 7 gün sunucuda kalır.
 - Hiç açılmayan fotoğraflar **7 gün** sonra sunucudan silinir.
 - Fotoğraflar, gönderen ve alan cihazlarda uygulamanın kendi alanında saklanır. Galeriye yalnızca sen *Kaydet* dersen kopyalanır.
 
-### 5. Kişi listesi
+### 7. Kişi listesi
 Eklediğin kişilerle ilgili şu bilgiler, yalnızca senin okuyabildiğin bir alanda saklanır:
 - kimlik,
 - ad,
@@ -51,10 +63,10 @@ Eklediğin kişilerle ilgili şu bilgiler, yalnızca senin okuyabildiğin bir al
 - fotoğraf bağlantısı,
 - engelli olup olmadığı.
 
-### 6. Bildirim jetonu
+### 8. Bildirim jetonu
 Uygulama kapalıyken yeni mesajları haber verebilmek için cihazına özel bir Firebase Cloud Messaging jetonu üretilir ve hesabınla birlikte saklanır. Bu jetonu kimse okuyamaz, yalnızca Dakk sunucusu kullanır. Çıkış yaptığında jeton silinir.
 
-### 7. Cihazda tutulanlar
+### 9. Cihazda tutulanlar
 Şunlar yalnızca cihazında durur:
 - ayarların,
 - şifreli özel anahtarın,
@@ -99,6 +111,7 @@ Dakk Asistan isteğe bağlıdır ve ilk kullanımda seni uyarır.
   Google'ın gizlilik politikası: <https://policies.google.com/privacy>
 - **Supabase** — Dakk sunucusu burada (Avrupa Birliği, Frankfurt) çalışır. Görevleri:
   - uygulama kapalıyken bildirim iletmek,
+  - "yazıyor…" sinyalini anlık olarak iletmek (saklamadan),
   - yöneticiler özel bir yapay zekâ hizmeti seçtiyse asistan isteklerini o hizmete aktarmak.
 
   Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir ve hiçbir veriyi kalıcı olarak saklamaz. Supabase'in gizlilik politikası: <https://supabase.com/privacy>

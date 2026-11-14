@@ -156,7 +156,8 @@ class TypingClient(private val scope: CoroutineScope) {
             .put("presence", JSONObject().put("key", ""))
             .put("private", false)
         val payload = JSONObject().put("config", config)
-        info?.publicKey?.let { payload.put("access_token", it) }
+        // Klasik (JWT) anahtar kanal yetkisi olarak da gönderilir; yeni tip anahtarlar yalnızca bağlantıda kullanılır.
+        info?.publicKey?.takeIf { it.startsWith("eyJ") && it.count { c -> c == '.' } == 2 }?.let { payload.put("access_token", it) }
         sendLocked(topic, "phx_join", payload, joinRef)
     }
 
