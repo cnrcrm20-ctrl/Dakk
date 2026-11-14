@@ -48,6 +48,13 @@ object AppState {
  */
 class PushClient(private val repo: FirestoreRepository) {
 
+    /** Sunucunun bildirdiği anlık sinyal ("yazıyor…") kanalı bilgisi. */
+    data class RealtimeInfo(val url: String, val publicKey: String)
+
+    @Volatile
+    var realtime: RealtimeInfo? = null
+        private set
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -76,6 +83,11 @@ class PushClient(private val repo: FirestoreRepository) {
                 http.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@use false
                     val body = JSONObject(response.body?.string().orEmpty())
+                    body.optJSONObject("realtime")?.let { rt ->
+                        val url = rt.optString("url")
+                        val key = rt.optString("key")
+                        if (url.startsWith("https://") && key.isNotBlank()) realtime = RealtimeInfo(url, key)
+                    }
                     body.optBoolean("ok") && body.optBoolean("configured")
                 }
             }

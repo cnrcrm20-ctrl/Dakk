@@ -10,8 +10,8 @@ plugins {
 // Sürüm bilgisi — yeni bir sürüm yayınlamak için SADECE burayı değiştirin.
 // main dalına push edildiğinde GitHub Actions bu sürüm için otomatik olarak Release oluşturur.
 // ---------------------------------------------------------------------------------------------
-val dakkVersionName = "2.2.0"
-val dakkVersionCode = 23
+val dakkVersionName = "2.3.0"
+val dakkVersionCode = 24
 
 // ---------------------------------------------------------------------------------------------
 // İmzalama — Google ile Giriş (Firebase) APK'nın imza parmak izine bağlıdır.

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.R
 import com.google.android.gms.tasks.Task
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
@@ -17,6 +18,7 @@ import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 
 /**
  * Firestore erişim katmanı. Tüm yazma işlemleri depodaki firestore.rules ile uyumludur.
@@ -128,18 +130,44 @@ class FirestoreRepository(context: Context) {
             .snapshots()
             .map { snap ->
                 snap.documents.map { d ->
-                    @Suppress("UNCHECKED_CAST")
-                    ChatDoc(
-                        chatId = d.id,
-                        memberUids = (d.get("memberUids") as? List<String>).orEmpty(),
-                        lastMessage = d.getString("lastMessage").orEmpty(),
-                        lastMessageSenderId = d.getString("lastMessageSenderId").orEmpty(),
-                        lastMessageSenderKey = d.getString("lastMessageSenderKey").orEmpty(),
-                        lastMessageRecipientKey = d.getString("lastMessageRecipientKey").orEmpty(),
-                        lastMessageTime = d.getTimestamp("lastMessageTimestamp", estimate)?.toDate()?.time ?: 0L
-                    )
+                    d.toChatDoc()
                 }
             }
+
+    suspend fun getChat(chatId: String): ChatDoc? {
+        val d = db.collection("chats").document(chatId).get().await()
+        return if (d.exists()) d.toChatDoc() else null
+    }
+
+    private fun DocumentSnapshot.stringList(field: String): List<String> =
+        (get(field) as? List<*>)?.filterIsInstance<String>().orEmpty()
+
+    private fun DocumentSnapshot.stringMap(field: String): Map<String, String> =
+        (get(field) as? Map<*, *>)
+            ?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
+            ?.toMap()
+            .orEmpty()
+
+    private fun DocumentSnapshot.toChatDoc(): ChatDoc = ChatDoc(
+        chatId = id,
+        memberUids = stringList("memberUids"),
+        lastMessage = getString("lastMessage").orEmpty(),
+        lastMessageSenderId = getString("lastMessageSenderId").orEmpty(),
+        lastMessageSenderKey = getString("lastMessageSenderKey").orEmpty(),
+        lastMessageRecipientKey = getString("lastMessageRecipientKey").orEmpty(),
+        lastMessageTime = getTimestamp("lastMessageTimestamp", estimate)?.toDate()?.time ?: 0L,
+        isGroup = getBoolean("isGroup") == true,
+        name = getString("name").orEmpty(),
+        photo = getString("photo").orEmpty(),
+        admins = stringList("admins"),
+        inviteEnabled = getBoolean("inviteEnabled") == true,
+        inviteCode = getString("inviteCode").orEmpty(),
+        typingKey = getString("typingKey").orEmpty(),
+        nicknames = stringMap("nicknames"),
+        disappearSeconds = getLong("disappearSeconds") ?: 0L,
+        lastMessageKeys = stringMap("lastMessageKeys"),
+        lastMessageExpiresAt = getLong("lastMessageExpiresAt") ?: 0L
+    )
 
     fun observeMessages(chatId: String): Flow<List<MessageDoc>> =
         db.collection("chats").document(chatId).collection("messages")
@@ -172,7 +200,12 @@ class FirestoreRepository(context: Context) {
             .orEmpty(),
         replyTo = getString("replyTo")?.ifBlank { null },
         replyToSender = getString("replyToSender")?.ifBlank { null },
-        replyPreview = getString("replyPreview")?.ifBlank { null }
+        replyPreview = getString("replyPreview")?.ifBlank { null },
+        keys = stringMap("keys"),
+        expiresAt = getTimestamp("expiresAt")?.toDate()?.time ?: 0L,
+        systemText = getString("systemText")?.ifBlank { null },
+        votes = stringMap("votes"),
+        senderName = getString("senderName").orEmpty()
     )
 
     /** Yanıtlanan mesaj bilgisi (alıntı metni şifrelidir). */
@@ -196,12 +229,13 @@ class FirestoreRepository(context: Context) {
         isAssistant: Boolean = false,
         reply: ReplyFields? = null,
         updateChat: Boolean = true,
+        expiresAt: Long = 0L,
         onSent: (messageId: String) -> Unit = {},
         onError: (Exception) -> Unit
     ): String {
         val (chatTask, messageRef, messageTask) = writeMessage(
             chatId, myUid, peerUid, senderName, encryptedContent, encryptedPreview,
-            senderKey, recipientKey, messageType, isAssistant, reply, updateChat
+            senderKey, recipientKey, messageType, isAssistant, reply, updateChat, expiresAt
         )
         chatTask?.addOnFailureListener { e -> Log.e(TAG, "Sohbet güncellenemedi", e); onError(e) }
         messageTask
@@ -219,11 +253,12 @@ class FirestoreRepository(context: Context) {
         encryptedContent: String,
         encryptedPreview: String,
         senderKey: String,
-        recipientKey: String
+        recipientKey: String,
+        expiresAt: Long = 0L
     ): String {
         val (chatTask, messageRef, messageTask) = writeMessage(
             chatId, myUid, peerUid, senderName, encryptedContent, encryptedPreview,
-            senderKey, recipientKey, "TEXT", false, null, true
+            senderKey, recipientKey, "TEXT", false, null, true, expiresAt
         )
         chatTask?.await()
         messageTask.await()
@@ -242,7 +277,8 @@ class FirestoreRepository(context: Context) {
         messageType: String,
         isAssistant: Boolean,
         reply: ReplyFields?,
-        updateChat: Boolean
+        updateChat: Boolean,
+        expiresAt: Long
     ): Triple<Task<Void>?, DocumentReference, Task<Void>> {
         val chatRef = db.collection("chats").document(chatId)
         val chatTask = if (updateChat) {
@@ -254,6 +290,7 @@ class FirestoreRepository(context: Context) {
                 "lastMessageSenderKey" to senderKey,
                 "lastMessageRecipientKey" to recipientKey,
                 "lastMessageTimestamp" to FieldValue.serverTimestamp(),
+                "lastMessageExpiresAt" to expiresAt,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -276,9 +313,235 @@ class FirestoreRepository(context: Context) {
                 put("replyToSender", reply.senderUid)
                 put("replyPreview", reply.encryptedPreview)
             }
+            if (expiresAt > 0) put("expiresAt", Timestamp(Date(expiresAt)))
         }
         val messageRef = chatRef.collection("messages").document()
         return Triple(chatTask, messageRef, messageRef.set(messagePayload))
+    }
+
+    // ---------------------------------------------------------------- Gruplar
+
+    /**
+     * Grup mesajı gönderir. İçerik ve önizleme mesaj anahtarıyla şifrelidir; [keys] bu anahtarın
+     * her üye için sarılmış halidir.
+     */
+    fun sendGroupMessage(
+        chatId: String,
+        myUid: String,
+        senderName: String,
+        encryptedContent: String,
+        encryptedPreview: String,
+        senderKey: String,
+        keys: Map<String, String>,
+        messageType: String = "TEXT",
+        isAssistant: Boolean = false,
+        reply: ReplyFields? = null,
+        updateChat: Boolean = true,
+        expiresAt: Long = 0L,
+        onSent: (messageId: String) -> Unit = {},
+        onError: (Exception) -> Unit
+    ): String {
+        val (chatTask, messageRef, messageTask) = writeGroupMessage(
+            chatId, myUid, senderName, encryptedContent, encryptedPreview, senderKey, keys,
+            messageType, isAssistant, reply, updateChat, expiresAt
+        )
+        chatTask?.addOnFailureListener { e -> Log.e(TAG, "Grup güncellenemedi", e); onError(e) }
+        messageTask
+            .addOnSuccessListener { onSent(messageRef.id) }
+            .addOnFailureListener { e -> Log.e(TAG, "Grup mesajı gönderilemedi", e); onError(e) }
+        return messageRef.id
+    }
+
+    suspend fun sendGroupMessageAndWait(
+        chatId: String,
+        myUid: String,
+        senderName: String,
+        encryptedContent: String,
+        encryptedPreview: String,
+        senderKey: String,
+        keys: Map<String, String>,
+        expiresAt: Long = 0L
+    ): String {
+        val (chatTask, messageRef, messageTask) = writeGroupMessage(
+            chatId, myUid, senderName, encryptedContent, encryptedPreview, senderKey, keys,
+            "TEXT", false, null, true, expiresAt
+        )
+        chatTask?.await()
+        messageTask.await()
+        return messageRef.id
+    }
+
+    private fun writeGroupMessage(
+        chatId: String,
+        myUid: String,
+        senderName: String,
+        encryptedContent: String,
+        encryptedPreview: String,
+        senderKey: String,
+        keys: Map<String, String>,
+        messageType: String,
+        isAssistant: Boolean,
+        reply: ReplyFields?,
+        updateChat: Boolean,
+        expiresAt: Long
+    ): Triple<Task<Void>?, DocumentReference, Task<Void>> {
+        val chatRef = db.collection("chats").document(chatId)
+        val chatTask = if (updateChat) {
+            chatRef.update(
+                mapOf(
+                    "lastMessage" to encryptedPreview,
+                    "lastMessageSenderId" to myUid,
+                    "lastMessageSenderKey" to senderKey,
+                    "lastMessageKeys" to keys,
+                    "lastMessageTimestamp" to FieldValue.serverTimestamp(),
+                    "lastMessageExpiresAt" to expiresAt,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+        } else null
+        val payload = buildMap<String, Any> {
+            put("chatId", chatId)
+            put("senderId", myUid)
+            put("senderName", senderName.ifBlank { "Dakk" }.take(60))
+            put("content", encryptedContent)
+            put("senderKey", senderKey)
+            put("keys", keys)
+            put("deliveryStatus", "SENT")
+            put("messageType", messageType)
+            put("createdAt", FieldValue.serverTimestamp())
+            if (isAssistant) put("isAssistant", true)
+            if (reply != null) {
+                put("replyTo", reply.messageId)
+                put("replyToSender", reply.senderUid)
+                put("replyPreview", reply.encryptedPreview)
+            }
+            if (expiresAt > 0) put("expiresAt", Timestamp(Date(expiresAt)))
+        }
+        val messageRef = chatRef.collection("messages").document()
+        return Triple(chatTask, messageRef, messageRef.set(payload))
+    }
+
+    /** Sohbete şifresiz, kısa bir sistem notu ekler (takma ad, kaybolan mesaj, grup değişiklikleri). */
+    fun sendSystemNote(chatId: String, myUid: String, senderName: String, text: String) {
+        val payload = mapOf(
+            "chatId" to chatId,
+            "senderId" to myUid,
+            "senderName" to senderName.ifBlank { "Dakk" }.take(60),
+            "content" to "",
+            "systemText" to text.take(300),
+            "deliveryStatus" to "SENT",
+            "messageType" to "SYSTEM",
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("chats").document(chatId).collection("messages").document().set(payload)
+            .addOnFailureListener { e -> Log.w(TAG, "Sistem notu yazılamadı", e) }
+    }
+
+    suspend fun createGroup(
+        chatId: String,
+        myUid: String,
+        name: String,
+        photo: String,
+        members: List<String>,
+        typingKey: String,
+        inviteCode: String
+    ) {
+        val payload = buildMap<String, Any> {
+            put("chatId", chatId)
+            put("isGroup", true)
+            put("name", name.trim().take(50))
+            if (photo.isNotEmpty()) put("photo", photo)
+            put("memberUids", (members + myUid).distinct())
+            put("admins", listOf(myUid))
+            put("createdBy", myUid)
+            put("inviteEnabled", false)
+            put("inviteCode", inviteCode)
+            put("typingKey", typingKey)
+            put("nicknames", emptyMap<String, String>())
+            put("disappearSeconds", 0L)
+            put("lastMessage", "")
+            put("lastMessageSenderId", myUid)
+            put("lastMessageTimestamp", FieldValue.serverTimestamp())
+            put("createdAt", FieldValue.serverTimestamp())
+            put("updatedAt", FieldValue.serverTimestamp())
+        }
+        db.collection("chats").document(chatId).set(payload).await()
+    }
+
+    /** Grup/sohbet belgesinde birkaç alanı birlikte günceller. */
+    suspend fun updateChatFields(chatId: String, fields: Map<String, Any>) {
+        db.collection("chats").document(chatId)
+            .update(fields + ("updatedAt" to FieldValue.serverTimestamp()))
+            .await()
+    }
+
+    suspend fun addMembers(chatId: String, uids: List<String>) {
+        if (uids.isEmpty()) return
+        updateChatFields(chatId, mapOf("memberUids" to FieldValue.arrayUnion(*uids.toTypedArray())))
+    }
+
+    suspend fun removeMember(chatId: String, uid: String) {
+        updateChatFields(
+            chatId,
+            mapOf(
+                "memberUids" to FieldValue.arrayRemove(uid),
+                "admins" to FieldValue.arrayRemove(uid)
+            )
+        )
+    }
+
+    /**
+     * Gruptan ayrılır. Ayrılan kişi tek yöneticiyse önce [promote] yönetici yapılır (bunu henüz yöneticiyken
+     * yapar), sonra kişi üyelerden ve yöneticilerden çıkar.
+     */
+    suspend fun leaveGroup(chatId: String, myUid: String, promote: String?) {
+        if (promote != null) {
+            updateChatFields(chatId, mapOf("admins" to FieldValue.arrayUnion(promote)))
+        }
+        updateChatFields(
+            chatId,
+            mapOf("memberUids" to FieldValue.arrayRemove(myUid), "admins" to FieldValue.arrayRemove(myUid))
+        )
+    }
+
+    /** Davet bağlantısıyla gruba katılır (kurallar kodu ve bağlantının açık olduğunu doğrular). */
+    suspend fun joinGroup(chatId: String, myUid: String, code: String) {
+        db.collection("chats").document(chatId).update(
+            mapOf(
+                "memberUids" to FieldValue.arrayUnion(myUid),
+                "joinCode" to code
+            )
+        ).await()
+    }
+
+    /** Takma ad koyar veya kaldırır ([nickname] null/boş ise). */
+    suspend fun setNickname(chatId: String, targetUid: String, nickname: String?) {
+        val value: Any = nickname?.trim()?.take(40)?.ifBlank { null } ?: FieldValue.delete()
+        db.collection("chats").document(chatId).update(
+            FieldPath.of("nicknames", targetUid), value,
+            FieldPath.of("nickTarget"), targetUid,
+            FieldPath.of("updatedAt"), FieldValue.serverTimestamp()
+        ).await()
+    }
+
+    suspend fun setDisappearing(chatId: String, seconds: Long) {
+        updateChatFields(chatId, mapOf("disappearSeconds" to seconds))
+    }
+
+    /** Ankete oy verir veya oyu geri çeker ([encryptedVote] null ise). */
+    suspend fun setVote(chatId: String, messageId: String, myUid: String, encryptedVote: String?) {
+        db.collection("chats").document(chatId).collection("messages").document(messageId)
+            .update(FieldPath.of("votes", myUid), encryptedVote ?: FieldValue.delete())
+            .await()
+    }
+
+    /** Süresi dolmuş kaybolan mesajları siler. */
+    suspend fun deleteMessages(chatId: String, ids: List<String>) {
+        if (ids.isEmpty()) return
+        val batch = db.batch()
+        val messages = db.collection("chats").document(chatId).collection("messages")
+        ids.take(400).forEach { batch.delete(messages.document(it)) }
+        batch.commit().await()
     }
 
     /** Sohbet belgesinin var olduğundan emin olur (fotoğraf parçaları yüklenmeden önce gerekli). */
@@ -401,7 +664,17 @@ class FirestoreRepository(context: Context) {
             .get().await()
             .documents
             .map { it.toMessage() }
-            .firstOrNull { it.senderId == peerUid && it.messageType != "SCREENSHOT" }
+            .firstOrNull { it.senderId == peerUid && it.messageType != "SCREENSHOT" && it.messageType != "SYSTEM" }
+
+    /** Gruptaki, benden olmayan en son mesaj (bildirimdeki ❤️ düğmesi için). */
+    suspend fun latestMessageNotFrom(chatId: String, myUid: String): MessageDoc? =
+        db.collection("chats").document(chatId).collection("messages")
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(20)
+            .get().await()
+            .documents
+            .map { it.toMessage() }
+            .firstOrNull { it.senderId != myUid && it.messageType != "SCREENSHOT" && it.messageType != "SYSTEM" }
 
     suspend fun deleteMessage(chatId: String, messageId: String) {
         db.collection("chats").document(chatId).collection("messages").document(messageId)

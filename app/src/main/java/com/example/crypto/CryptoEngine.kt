@@ -251,6 +251,100 @@ class CryptoEngine(context: Context) {
         }
     }
 
+    // --------------------------------------------------------------------------------------
+    // Grup şifreleme
+    //
+    // Her grup mesajı için rastgele bir AES-256 mesaj anahtarı üretilir. İçerik bu anahtarla şifrelenir;
+    // anahtar ise her üye için, gönderici ile o üye arasındaki ECDH anahtarıyla ayrı ayrı sarılır.
+    // Böylece yalnızca mesaj gönderildiği anda grupta olan üyeler mesajı çözebilir.
+    // --------------------------------------------------------------------------------------
+
+    /** Yeni, rastgele 32 baytlık mesaj anahtarı. */
+    fun newMessageKey(): ByteArray = ByteArray(32).also { secureRandom.nextBytes(it) }
+
+    /** Mesaj anahtarını bir üyenin açık anahtarı için sarar. */
+    fun wrapKey(messageKey: ByteArray, memberPublicKeyBase64: String): String =
+        encrypt(Base64.encodeToString(messageKey, Base64.NO_WRAP), memberPublicKeyBase64)
+
+    /** Bu cihaz için sarılmış mesaj anahtarını, göndericinin açık anahtarıyla açar. Açılamazsa null. */
+    fun unwrapKey(wrapped: String, senderPublicKeyBase64: String): ByteArray? {
+        if (wrapped.isBlank() || senderPublicKeyBase64.isBlank()) return null
+        return try {
+            Base64.decode(decrypt(wrapped, senderPublicKeyBase64), Base64.NO_WRAP).takeIf { it.size == 32 }
+        } catch (e: Exception) {
+            Log.w(TAG, "Grup mesaj anahtarı açılamadı", e)
+            null
+        }
+    }
+
+    fun encryptWithKey(plainText: String, messageKey: ByteArray): String {
+        val iv = ByteArray(GCM_IV_BYTES).also { secureRandom.nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(messageKey, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
+        val body = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
+        return Base64.encodeToString(iv + body, Base64.NO_WRAP)
+    }
+
+    fun decryptWithKey(cipherTextBase64: String, messageKey: ByteArray): String? = try {
+        val all = Base64.decode(cipherTextBase64, Base64.NO_WRAP)
+        require(all.size > GCM_IV_BYTES + 16) { "Geçersiz şifreli veri" }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            SecretKeySpec(messageKey, "AES"),
+            GCMParameterSpec(GCM_TAG_BITS, all.copyOfRange(0, GCM_IV_BYTES))
+        )
+        String(cipher.doFinal(all, GCM_IV_BYTES, all.size - GCM_IV_BYTES), StandardCharsets.UTF_8)
+    } catch (e: Exception) {
+        Log.w(TAG, "Grup mesajı çözülemedi", e)
+        null
+    }
+
+    fun encryptBytesWithKey(data: ByteArray, messageKey: ByteArray): ByteArray {
+        val iv = ByteArray(GCM_IV_BYTES).also { secureRandom.nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(messageKey, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
+        return iv + cipher.doFinal(data)
+    }
+
+    fun decryptBytesWithKey(data: ByteArray, messageKey: ByteArray): ByteArray? {
+        if (data.size <= GCM_IV_BYTES + 16) return null
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                SecretKeySpec(messageKey, "AES"),
+                GCMParameterSpec(GCM_TAG_BITS, data.copyOfRange(0, GCM_IV_BYTES))
+            )
+            cipher.doFinal(data, GCM_IV_BYTES, data.size - GCM_IV_BYTES)
+        } catch (e: Exception) {
+            Log.w(TAG, "Grup dosyası çözülemedi", e)
+            null
+        }
+    }
+
+    /**
+     * "Yazıyor…" sinyalinin gönderildiği kanalın adı. Birebir sohbette iki kişinin ortak ECDH anahtarından,
+     * grupta yalnızca üyelerin okuyabildiği gruba özel gizli değerden türetilir; böylece kanal adını
+     * sohbetin dışındaki kimse tahmin edemez.
+     */
+    fun typingTopicForPeer(chatId: String, peerPublicKeyBase64: String): String? = try {
+        val secret = sharedKey(peerPublicKeyBase64).encoded
+        topicHash(chatId, secret)
+    } catch (e: Exception) {
+        null
+    }
+
+    fun typingTopicForGroup(chatId: String, typingKey: String): String? =
+        if (typingKey.length < 16) null else topicHash(chatId, typingKey.toByteArray(StandardCharsets.UTF_8))
+
+    private fun topicHash(chatId: String, secret: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update("dakk-typing-v1|$chatId|".toByteArray(StandardCharsets.UTF_8))
+        digest.update(secret)
+        return "dakk-t-" + digest.digest().take(16).joinToString("") { "%02x".format(it) }
+    }
+
     /**
      * İki kişinin açık anahtarlarından, her iki cihazda da aynı görünen 60 haneli güvenlik numarası üretir.
      */

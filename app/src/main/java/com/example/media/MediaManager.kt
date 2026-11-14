@@ -170,8 +170,17 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
         peerPublicKey: String,
         mediaId: String,
         image: PreparedImage
+    ): ImageMeta = upload(chatId, myUid, mediaId, image) { crypto.encryptBytes(it, peerPublicKey) }
+
+    /** Fotoğrafı verilen şifreleyiciyle (ör. grup mesaj anahtarı) şifreleyip yükler. */
+    suspend fun upload(
+        chatId: String,
+        myUid: String,
+        mediaId: String,
+        image: PreparedImage,
+        encrypt: (ByteArray) -> ByteArray
     ): ImageMeta {
-        val encrypted = withContext(Dispatchers.Default) { crypto.encryptBytes(image.jpeg, peerPublicKey) }
+        val encrypted = withContext(Dispatchers.Default) { encrypt(image.jpeg) }
         val parts = (encrypted.indices step CHUNK_BYTES).map { start ->
             val end = minOf(start + CHUNK_BYTES, encrypted.size)
             Base64.encodeToString(encrypted, start, end - start, Base64.NO_WRAP)
@@ -183,6 +192,44 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
         }
         rememberUpload(chatId, mediaId, parts.size)
         return ImageMeta(mediaId, parts.size, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64)
+    }
+
+    // ------------------------------------------------------------------ Profil/grup fotoğrafı
+
+    /** Grup veya kişi fotoğrafı için küçük, kare kırpılmış JPEG üretir. */
+    suspend fun prepareAvatar(uri: Uri): ByteArray = withContext(Dispatchers.IO) {
+        val prepared = prepare(uri)
+        val full = BitmapFactory.decodeByteArray(prepared.jpeg, 0, prepared.jpeg.size) ?: error("Fotoğraf okunamadı")
+        val side = minOf(full.width, full.height)
+        val square = Bitmap.createBitmap(full, (full.width - side) / 2, (full.height - side) / 2, side, side)
+        val small = scaleDown(square, AVATAR_DIMENSION)
+        var quality = 75
+        var bytes = compress(small, quality)
+        while (bytes.size > MAX_AVATAR_BYTES && quality > 35) {
+            quality -= 10
+            bytes = compress(small, quality)
+        }
+        if (small !== square) small.recycle()
+        if (square !== full) square.recycle()
+        full.recycle()
+        require(bytes.size <= MAX_AVATAR_BYTES) { "Fotoğraf çok büyük" }
+        bytes
+    }
+
+    private val customPhotoDir = File(appContext.filesDir, "chat_photos").apply { mkdirs() }
+
+    /** Birebir sohbette kişiye bu cihazda verilen özel fotoğraf (yalnızca sende görünür). */
+    fun customPhotoFile(peerUid: String): File = File(customPhotoDir, "$peerUid.jpg")
+
+    fun hasCustomPhoto(peerUid: String): Boolean = customPhotoFile(peerUid).let { it.isFile && it.length() > 0 }
+
+    suspend fun saveCustomPhoto(peerUid: String, uri: Uri) {
+        val bytes = prepareAvatar(uri)
+        withContext(Dispatchers.IO) { customPhotoFile(peerUid).writeBytes(bytes) }
+    }
+
+    suspend fun deleteCustomPhoto(peerUid: String) {
+        withContext(Dispatchers.IO) { customPhotoFile(peerUid).delete() }
     }
 
     // ------------------------------------------------------------------ Alma
@@ -197,6 +244,14 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
         senderKey: String,
         recipientKey: String,
         deleteAfter: Boolean
+    ): DownloadResult = download(chatId, meta, deleteAfter) { crypto.decryptBytes(it, senderKey, recipientKey) }
+
+    /** Fotoğrafı verilen çözücüyle (ör. grup mesaj anahtarı) indirir. */
+    suspend fun download(
+        chatId: String,
+        meta: ImageMeta,
+        deleteAfter: Boolean,
+        decrypt: (ByteArray) -> ByteArray?
     ): DownloadResult {
         if (hasLocal(meta.mediaId)) return DownloadResult.Ok(localFile(meta.mediaId))
         return try {
@@ -205,9 +260,7 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
                 val part = repo.getBlob(chatId, meta.mediaId, i) ?: return DownloadResult.Expired
                 out.write(Base64.decode(part, Base64.NO_WRAP))
             }
-            val plain = withContext(Dispatchers.Default) {
-                crypto.decryptBytes(out.toByteArray(), senderKey, recipientKey)
-            } ?: return DownloadResult.Failed
+            val plain = withContext(Dispatchers.Default) { decrypt(out.toByteArray()) } ?: return DownloadResult.Failed
             val file = localFile(meta.mediaId)
             withContext(Dispatchers.IO) {
                 val tmp = File(dir, "${meta.mediaId}.part")
@@ -299,5 +352,7 @@ class MediaManager(context: Context, private val repo: FirestoreRepository, priv
         const val CHUNK_BYTES = 700_000
         const val MAX_CHUNKS = 4
         const val UPLOAD_TTL_MS = 7L * 24 * 60 * 60 * 1000
+        const val AVATAR_DIMENSION = 256
+        const val MAX_AVATAR_BYTES = 40_000
     }
 }

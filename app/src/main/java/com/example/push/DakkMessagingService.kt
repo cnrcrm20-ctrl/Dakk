@@ -3,8 +3,12 @@ package com.example.push
 import android.content.Context
 import android.util.Log
 import com.example.crypto.CryptoEngine
+import com.example.data.ChatIds
+import com.example.data.ChatPrefs
 import com.example.data.FirestoreRepository
+import com.example.data.MessageDoc
 import com.example.notification.NotificationHelper
+import com.example.util.MuteOptions
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -43,43 +47,58 @@ class DakkMessagingService : FirebaseMessagingService() {
         val messageId = data["messageId"].orEmpty()
         val senderId = data["senderId"].orEmpty()
         if (chatId.isBlank() || messageId.isBlank() || senderId.isBlank() || senderId == myUid) return
+        // Sessize alınan sohbetler bildirim göstermez.
+        val mainPrefs = getSharedPreferences(MAIN_PREFS, Context.MODE_PRIVATE)
+        if (MuteOptions.isMuted(mainPrefs.getLong(ChatPrefs.PREFIX_MUTE + chatId, 0L), System.currentTimeMillis())) return
         if (!markSeen(messageId)) return
 
+        val isGroup = data["group"] == "1" || ChatIds.isGroup(chatId)
         var content = data["content"].orEmpty()
         var senderKey = data["senderKey"].orEmpty()
         var recipientKey = data["recipientKey"].orEmpty()
         var messageType = data["messageType"] ?: "TEXT"
         var isAssistant = data["assistant"] == "1"
+        var doc: MessageDoc? = null
 
-        // İçerik bildirim sınırına sığmadıysa mesajı doğrudan Firestore'dan oku.
-        if (content.isBlank()) {
-            val doc = runBlocking {
+        // Grup mesajları ve bildirim sınırına sığmayan içerik doğrudan Firestore'dan okunur.
+        if (isGroup || content.isBlank()) {
+            doc = runBlocking {
                 withTimeoutOrNull(8_000) {
                     runCatching { FirestoreRepository(applicationContext).getMessage(chatId, messageId) }.getOrNull()
                 }
             }
-            if (doc != null) {
-                content = doc.content
-                senderKey = doc.senderKey
-                recipientKey = doc.recipientKey
-                messageType = doc.messageType
-                isAssistant = doc.isAssistant
+            doc?.let {
+                content = it.content
+                senderKey = it.senderKey
+                recipientKey = it.recipientKey
+                messageType = it.messageType
+                isAssistant = it.isAssistant
             }
         }
+        // Ekran görüntüsü ve sistem notları sohbet içinde gösterilir; ayrı bildirim çıkarmaz.
+        if (messageType == "SCREENSHOT" || messageType == "SYSTEM") return
 
+        val crypto = CryptoEngine(applicationContext)
         val plain = runCatching {
-            CryptoEngine(applicationContext).decryptMessage(content, senderKey, recipientKey)
+            if (isGroup) {
+                val wrapped = doc?.keys?.get(myUid)
+                val key = wrapped?.let { crypto.unwrapKey(it, senderKey) }
+                key?.let { crypto.decryptWithKey(content, it) }
+            } else {
+                crypto.decryptMessage(content, senderKey, recipientKey)
+            }
         }.getOrNull()
-        // Ekran görüntüsü notları sohbet içinde gösterilir; ayrı bildirim çıkarmaz.
-        if (messageType == "SCREENSHOT") return
         val text = when {
             messageType == "IMAGE" -> "📷 Fotoğraf"
+            messageType == "POLL" -> "📊 Anket"
             plain == null -> "Yeni şifreli mesaj"
             isAssistant -> "🤖 $plain"
             else -> plain
         }
-        val name = data["senderName"]?.ifBlank { null } ?: "Dakk"
-        NotificationHelper(applicationContext).showMessage(senderId, name, text, chatId = chatId, messageId = messageId)
+        val name = data["senderName"]?.ifBlank { null } ?: doc?.senderName?.ifBlank { null } ?: "Dakk"
+        val title = if (isGroup) "${data["groupName"]?.ifBlank { null } ?: "Grup"} · $name" else name
+        val key = if (isGroup) chatId else senderId
+        NotificationHelper(applicationContext).showMessage(key, title, text, chatId = chatId, messageId = messageId)
     }
 
     /** Aynı mesaj için ikinci kez bildirim göstermemek üzere son mesaj kimliklerini tutar. */
@@ -94,6 +113,7 @@ class DakkMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "DakkPushService"
         private const val PREFS = "dakk_push"
+        private const val MAIN_PREFS = "dakk_prefs"
         private const val KEY_SEEN = "seen_ids"
     }
 }
