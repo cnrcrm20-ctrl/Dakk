@@ -5,7 +5,9 @@ import com.example.R
 import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -72,6 +74,25 @@ class ConfigRepository(context: Context) {
 
     suspend fun countUsers(): Long =
         db.collection("users").count().get(AggregateSource.SERVER).await().count
+
+    /** Kurucu paneli: Dakk'a giriş yapan hesaplar. lastSeen, uygulamanın son açıldığı zamandır. */
+    data class UserRow(val name: String, val email: String, val lastSeen: Long)
+
+    /** Son açanlar en üstte. Her kullanıcı 1 okuma harcar. */
+    suspend fun listUsers(limit: Long = 300): List<UserRow> =
+        db.collection("users")
+            .orderBy("updatedAt", Query.Direction.DESCENDING)
+            .limit(limit)
+            .get(Source.SERVER)
+            .await()
+            .documents
+            .map { d ->
+                UserRow(
+                    name = d.getString("displayName").orEmpty().ifBlank { "Dakk Kullanıcısı" },
+                    email = d.getString("email").orEmpty(),
+                    lastSeen = d.getTimestamp("updatedAt")?.toDate()?.time ?: 0L
+                )
+            }
 
     companion object {
         const val COLLECTION = "app_config"
