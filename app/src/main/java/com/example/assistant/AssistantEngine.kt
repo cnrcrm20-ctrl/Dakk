@@ -81,8 +81,6 @@ class AssistantEngine(context: Context) {
         return text.trim().ifBlank { throw AssistantException("Asistan boş bir yanıt verdi. Tekrar deneyin.") }
     }
 
-    // ------------------------------------------------------------------ Gemini (Firebase AI Logic)
-
     private suspend fun callGemini(modelName: String, system: String, turns: List<AssistantTurn>, prompt: String): String {
         val key = "$modelName|$system"
         val model = cachedModel?.takeIf { cachedModelKey == key } ?: Firebase
@@ -95,8 +93,6 @@ class AssistantEngine(context: Context) {
         val chat = model.startChat(history = turns.map { t -> content(role = t.role) { text(t.text) } })
         return chat.sendMessage(prompt).text.orEmpty()
     }
-
-    // ------------------------------------------------------------------ OpenAI uyumlu uç nokta
 
     private fun openAiMessages(system: String, turns: List<AssistantTurn>, prompt: String): JSONArray {
         val messages = JSONArray()
@@ -156,8 +152,6 @@ class AssistantEngine(context: Context) {
         }
     }
 
-    // ------------------------------------------------------------------ Yardımcılar
-
     /** Geçmiş "user" ile başlamalı ve roller sırayla değişmeli; ardışık aynı roller birleştirilir. */
     private fun sanitize(history: List<AssistantTurn>): List<AssistantTurn> {
         val out = ArrayList<AssistantTurn>()
@@ -186,8 +180,6 @@ class AssistantEngine(context: Context) {
             else -> "Asistan şu an yanıt veremiyor. Tekrar deneyin."
         }
     }
-
-    // ------------------------------------------------------------------ Yerel geçmiş
 
     private val historyFile get() = File(appContext.filesDir, "assistant_history.json")
 

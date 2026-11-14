@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DataSaverOn
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
@@ -35,6 +36,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -61,6 +64,7 @@ import com.example.ui.theme.DakkStatusFailed
 import com.example.ui.theme.DakkTextSecondaryDark
 import com.example.ui.theme.DakkTextTertiaryDark
 import com.example.ui.theme.DakkYellow
+import com.example.util.DataSaver
 
 private const val REPO_URL = "https://github.com/cnrcrm20-ctrl/Dakk"
 
@@ -76,11 +80,14 @@ fun SettingsScreen(viewModel: DakkViewModel) {
     val update by viewModel.update.collectAsStateWithLifecycle()
     val autoUpdate by viewModel.autoUpdate.collectAsStateWithLifecycle()
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
+    val dataSaver by viewModel.dataSaver.collectAsStateWithLifecycle()
+    val saverLevel by viewModel.saverLevel.collectAsStateWithLifecycle()
 
     var showQr by remember { mutableStateOf(false) }
     var showEditName by remember { mutableStateOf(false) }
     var showBlocked by remember { mutableStateOf(false) }
     var confirmSignOut by remember { mutableStateOf(false) }
+    var showDataSaver by remember { mutableStateOf(false) }
 
     val name = me?.displayName?.ifBlank { null } ?: user?.displayName ?: "Dakk Kullanıcısı"
     val email = user?.email.orEmpty()
@@ -130,6 +137,14 @@ fun SettingsScreen(viewModel: DakkViewModel) {
             runCatching { context.startActivity(intent) }
         }
         SettingRow(
+            Icons.Default.DataSaverOn,
+            "Veri tasarrufu",
+            when {
+                dataSaver == DataSaver.AUTO && saverLevel > 0 -> "Otomatik · şu an tasarrufta"
+                else -> dataSaver.title
+            }
+        ) { showDataSaver = true }
+        SettingRow(
             Icons.Default.SystemUpdate,
             "Güncellemeleri denetle",
             update.statusMessage ?: "Sürüm ${viewModel.appVersion}"
@@ -177,6 +192,44 @@ fun SettingsScreen(viewModel: DakkViewModel) {
             tint = DakkStatusFailed
         ) { confirmSignOut = true }
         Spacer(Modifier.height(32.dp))
+    }
+
+    if (showDataSaver) {
+        AlertDialog(
+            onDismissRequest = { showDataSaver = false },
+            title = { Text("Veri tasarrufu") },
+            text = {
+                Column {
+                    DataSaver.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setDataSaver(mode)
+                                    showDataSaver = false
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = mode == dataSaver,
+                                onClick = {
+                                    viewModel.setDataSaver(mode)
+                                    showDataSaver = false
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = DakkYellow)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(mode.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                Text(mode.description, color = DakkTextSecondaryDark, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDataSaver = false }) { Text("Kapat") } }
+        )
     }
 
     if (showQr) {

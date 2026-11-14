@@ -1,6 +1,6 @@
 # Dakk Gizlilik Politikası
 
-**Son güncelleme:** 14 Kasım 2026 • **Geçerli sürüm:** Dakk 2.3 ve sonrası
+**Son güncelleme:** 15 Kasım 2026 • **Geçerli sürüm:** Dakk 2.4 ve sonrası
 
 Dakk, açık kaynaklı bir mesajlaşma uygulamasıdır. Bu metin, uygulamanın hangi verileri neden kullandığını sade bir dille açıklar. Kaynak kodun tamamı herkese açıktır. Burada yazanları [GitHub deposunda](https://github.com/cnrcrm20-ctrl/Dakk) doğrulayabilirsin.
 
@@ -50,7 +50,8 @@ Bir sohbette yazarken, o an uygulaması açık olan sohbet üyelerine "yazıyor"
 
 ### 6. Fotoğraflar
 - Gönderdiğin fotoğraf önce telefonunda küçültülür, sonra **uçtan uca şifrelenir**.
-- Şifreli hali parçalar halinde Firestore'a geçici olarak yüklenir.
+- Şifreli hali Dakk'ın **fotoğraf deposuna** (Supabase Storage, Frankfurt) geçici olarak yüklenir. Depo yalnızca okunamayan şifreli veriyi görür; yükleme ve indirme, sunucunun o an için verdiği ve birkaç dakika geçerli olan imzalı adreslerle yapılır. Fotoğraf deposu kullanılamazsa şifreli hali eskisi gibi parçalar halinde Firestore'a yüklenir.
+- Sunucu, kotayı takip edebilmek için her fotoğrafın sohbet kimliğini, gönderen kimliğini, boyutunu ve yüklenme zamanını tutar. Bu kayıt fotoğrafla birlikte silinir.
 - Birebir sohbette alıcı fotoğrafı açtığında fotoğraf onun cihazına kaydedilir ve sunucudaki şifreli kopya **hemen silinir**. Gruplarda herkesin indirebilmesi için şifreli kopya 7 gün sunucuda kalır.
 - Hiç açılmayan fotoğraflar **7 gün** sonra sunucudan silinir.
 - Fotoğraflar, gönderen ve alan cihazlarda uygulamanın kendi alanında saklanır. Galeriye yalnızca sen *Kaydet* dersen kopyalanır.
@@ -64,13 +65,17 @@ Eklediğin kişilerle ilgili şu bilgiler, yalnızca senin okuyabildiğin bir al
 - engelli olup olmadığı.
 
 ### 8. Bildirim jetonu
-Uygulama kapalıyken yeni mesajları haber verebilmek için cihazına özel bir Firebase Cloud Messaging jetonu üretilir ve hesabınla birlikte saklanır. Bu jetonu kimse okuyamaz, yalnızca Dakk sunucusu kullanır. Çıkış yaptığında jeton silinir.
+Uygulama kapalıyken yeni mesajları haber verebilmek için cihazına özel bir Firebase Cloud Messaging jetonu üretilir. 2.4 ve sonrasında jeton, uygulama sürüm numarasıyla birlikte Dakk sunucusunun veritabanında (Supabase) saklanır. Bu jetonu kimse okuyamaz, yalnızca Dakk sunucusu kullanır. Çıkış yaptığında jeton silinir.
+
+Kısa şifreli mesajlar artık bildirimin içinde (şifreli olarak) iletilir, böylece telefonun mesajı sunucudan ayrıca indirmesi gerekmez. Engellediğin kişilerden gelen bildirimler telefonunda gösterilmeden atılır.
 
 ### 9. Cihazda tutulanlar
 Şunlar yalnızca cihazında durur:
 - ayarların,
 - şifreli özel anahtarın,
 - aldığın ve gönderdiğin fotoğraflar,
+- **mesaj arşivin:** sohbetlerin hızlı açılması için mesajlar telefonunda da saklanır (içerik şifreli haliyle). Çıkış yapınca bu arşiv silinir,
+- veri tasarrufu ayarın,
 - Dakk Asistan sohbet geçmişin.
 
 Uygulama yedeklemeye kapalıdır, bu veriler Google yedeğine aktarılmaz.
@@ -110,11 +115,13 @@ Dakk Asistan isteğe bağlıdır ve ilk kullanımda seni uyarır.
 
   Google'ın gizlilik politikası: <https://policies.google.com/privacy>
 - **Supabase** — Dakk sunucusu burada (Avrupa Birliği, Frankfurt) çalışır. Görevleri:
-  - uygulama kapalıyken bildirim iletmek,
+  - uygulama kapalıyken bildirim iletmek ve bunun için bildirim jetonunu saklamak,
   - "yazıyor…" sinyalini anlık olarak iletmek (saklamadan),
+  - şifreli fotoğrafları en fazla 7 gün tutmak (ayrı bir Supabase projesinde, yine Frankfurt'ta),
+  - ücretsiz kotanın aşılmaması için günlük toplam kullanım sayılarını tutmak (kişiye özel değil; 60 gün sonra silinir),
   - yöneticiler özel bir yapay zekâ hizmeti seçtiyse asistan isteklerini o hizmete aktarmak.
 
-  Sunucu mesaj içeriğini okuyamaz, bildirimleri şifreli olarak iletir ve hiçbir veriyi kalıcı olarak saklamaz. Supabase'in gizlilik politikası: <https://supabase.com/privacy>
+  Sunucu mesaj ve fotoğraf içeriğini okuyamaz, bildirimleri şifreli olarak iletir. Supabase'in gizlilik politikası: <https://supabase.com/privacy>
 - **GitHub** — güncelleme denetimi için GitHub Releases'a anonim bir istek gönderilir ve APK buradan indirilir. GitHub'ın gizlilik politikası: <https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement>
 
 ## Verilerini silmek

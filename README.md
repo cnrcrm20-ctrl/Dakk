@@ -44,7 +44,11 @@ mesajı sadece sen ve karşındaki kişi açabilir.
 - ⏳ **Kaybolan mesajlar** — Sohbet başına 24 saat veya 7 gün sonra kendiliğinden silinen mesajlar.
 - 🛡️ **Güvenlik numarası** — Sohbetin gerçekten doğru kişiyle olduğunu yüz yüze doğrula.
 - 🚫 **Engelleme** — İstemediğin kişilerden gelen mesajları durdur.
-- 🖼️ **Fotoğraf gönderme** — Fotoğraflar telefonda küçültülür ve uçtan uca şifrelenir. Alıcı açınca sunucudaki kopya silinir.
+- 🖼️ **Fotoğraf gönderme** — Fotoğraflar telefonda 1280 piksel JPEG'e küçültülür (tasarrufta 960) ve uçtan uca şifrelenir.
+  Birebir sohbette alıcı açınca sunucudaki kopya silinir; gruplarda en fazla 7 gün kalır.
+- 📉 **Veri tasarrufu** — Ayarlar → *Veri tasarrufu*: Normal / Tasarruf / Otomatik. Otomatik, sunucu yoğunlaşınca
+  kendiliğinden küçük fotoğraflara geçer.
+- 💾 **Telefonda mesaj arşivi** — Sohbetler internet beklemeden açılır; sunucudan yalnızca son mesajlar dinlenir.
 - ✨ **Dakk Asistan** — Uygulama içi yapay zekâ asistanı. Bir sohbette `@dakk` yazarak onu sohbete çağırabilirsin. Yapay zekâ tarafından işlenir; ilk kullanımda uyarı gösterilir.
 - 😂 **Tepkiler** — Mesaja uzun bas, 😂 ❤️ ⭐ 👌 tepkilerinden birini bırak. Tepkiler de şifrelidir.
 - ↩️ **Yanıtla** — Bir mesajı alıntılayarak yanıt ver.
@@ -113,6 +117,10 @@ Sonraki güncellemeler uygulamanın içinden gelir; yeniden APK indirmen gerekme
   üzeriyse** gönderilir. Daha eski Android sürümleri bunu uygulamalara bildirmez. Ekran kaydı algılanmaz.
 - Şimdilik yazı, fotoğraf ve anket gönderilebilir. Video ve sesli mesaj yoktur.
 - Gruplar, anketler ve "yazıyor…" bilgisi için konuştuğun kişilerin de Dakk 2.3.0 veya üzerini kullanması gerekir.
+- 2.4.0 ile gönderilen fotoğraflar yeni fotoğraf deposuna gider; 2.3.0 kullananlar bu fotoğrafları açamaz
+  ("süresi doldu" görünür). Herkesin 2.4.0'a geçmesi önerilir.
+- Telefondaki arşiv sohbetin son 150 mesajını sunucuyla eşitler. Daha eski bir mesaja sonradan verilen
+  tepki veya oy, sohbet bir sonraki tam eşitlemeye kadar görünmeyebilir.
 - "Yazıyor…" bilgisi yalnızca uygulama açıkken gönderilir ve görünür.
 - Dakk Asistan ile yapılan sohbetler ve `@dakk` ile asistana gönderilen mesajlar uçtan uca şifreli değildir.
 

@@ -31,8 +31,15 @@ class DakkMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         val uid = Firebase.auth.currentUser?.uid ?: return
         scope.launch {
-            runCatching { FirestoreRepository(applicationContext).savePushToken(uid, token) }
-                .onFailure { Log.w(TAG, "Yeni bildirim jetonu kaydedilemedi", it) }
+            val repo = FirestoreRepository(applicationContext)
+            val client = PushClient(repo)
+            val server = AppState.rememberedServer(applicationContext)
+            // Sunucu jetonu kendi tutabiliyorsa oraya, değilse Firestore'a yazılır.
+            val ok = server.isNotBlank() && client.isServerReady(server) && client.registerToken(uid, server)
+            if (!ok) {
+                runCatching { repo.savePushToken(uid, token) }
+                    .onFailure { Log.w(TAG, "Yeni bildirim jetonu kaydedilemedi", it) }
+            }
         }
     }
 
@@ -47,6 +54,7 @@ class DakkMessagingService : FirebaseMessagingService() {
         val messageId = data["messageId"].orEmpty()
         val senderId = data["senderId"].orEmpty()
         if (chatId.isBlank() || messageId.isBlank() || senderId.isBlank() || senderId == myUid) return
+        if (AppState.isBlocked(applicationContext, senderId)) return
         // Sessize alınan sohbetler bildirim göstermez.
         val mainPrefs = getSharedPreferences(MAIN_PREFS, Context.MODE_PRIVATE)
         if (MuteOptions.isMuted(mainPrefs.getLong(ChatPrefs.PREFIX_MUTE + chatId, 0L), System.currentTimeMillis())) return
@@ -58,10 +66,11 @@ class DakkMessagingService : FirebaseMessagingService() {
         var recipientKey = data["recipientKey"].orEmpty()
         var messageType = data["messageType"] ?: "TEXT"
         var isAssistant = data["assistant"] == "1"
+        var wrappedKey = data["key"].orEmpty()
         var doc: MessageDoc? = null
 
-        // Grup mesajları ve bildirim sınırına sığmayan içerik doğrudan Firestore'dan okunur.
-        if (isGroup || content.isBlank()) {
+        // İçerik bildirimin içinde geldiyse Firestore'a hiç gidilmez; yalnızca sığmayanlar oradan okunur.
+        if (content.isBlank() || (isGroup && wrappedKey.isBlank())) {
             doc = runBlocking {
                 withTimeoutOrNull(8_000) {
                     runCatching { FirestoreRepository(applicationContext).getMessage(chatId, messageId) }.getOrNull()
@@ -73,6 +82,7 @@ class DakkMessagingService : FirebaseMessagingService() {
                 recipientKey = it.recipientKey
                 messageType = it.messageType
                 isAssistant = it.isAssistant
+                wrappedKey = it.keys[myUid].orEmpty()
             }
         }
         // Ekran görüntüsü ve sistem notları sohbet içinde gösterilir; ayrı bildirim çıkarmaz.
@@ -81,8 +91,7 @@ class DakkMessagingService : FirebaseMessagingService() {
         val crypto = CryptoEngine(applicationContext)
         val plain = runCatching {
             if (isGroup) {
-                val wrapped = doc?.keys?.get(myUid)
-                val key = wrapped?.let { crypto.unwrapKey(it, senderKey) }
+                val key = wrappedKey.ifBlank { null }?.let { crypto.unwrapKey(it, senderKey) }
                 key?.let { crypto.decryptWithKey(content, it) }
             } else {
                 crypto.decryptMessage(content, senderKey, recipientKey)

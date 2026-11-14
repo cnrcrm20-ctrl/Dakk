@@ -32,8 +32,6 @@ class FirestoreRepository(context: Context) {
 
     private val estimate = DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
 
-    // ---------------------------------------------------------------- Profiller
-
     suspend fun publishProfile(uid: String, displayName: String, email: String, photoUrl: String, publicKey: String) {
         val payload = mapOf(
             "userId" to uid,
@@ -71,8 +69,6 @@ class FirestoreRepository(context: Context) {
             publicKey = getString("publicKey").orEmpty()
         )
     }
-
-    // ---------------------------------------------------------------- Kişiler
 
     fun observeContacts(myUid: String): Flow<List<Contact>> =
         db.collection("users").document(myUid).collection("contacts")
@@ -122,8 +118,6 @@ class FirestoreRepository(context: Context) {
             .delete().await()
     }
 
-    // ---------------------------------------------------------------- Sohbetler
-
     fun observeChats(myUid: String): Flow<List<ChatDoc>> =
         db.collection("chats")
             .whereArrayContains("memberUids", myUid)
@@ -172,6 +166,16 @@ class FirestoreRepository(context: Context) {
     fun observeMessages(chatId: String): Flow<List<MessageDoc>> =
         db.collection("chats").document(chatId).collection("messages")
             .orderBy("createdAt", Query.Direction.ASCENDING)
+            .snapshots(MetadataChanges.INCLUDE)
+            .map { snap ->
+                snap.documents.map { d -> d.toMessage() }
+            }
+
+    /** Yalnızca son [limit] mesajı dinler; daha eskileri telefondaki arşivden gelir. */
+    fun observeRecentMessages(chatId: String, limit: Long): Flow<List<MessageDoc>> =
+        db.collection("chats").document(chatId).collection("messages")
+            .orderBy("createdAt", Query.Direction.ASCENDING)
+            .limitToLast(limit)
             .snapshots(MetadataChanges.INCLUDE)
             .map { snap ->
                 snap.documents.map { d -> d.toMessage() }
@@ -318,8 +322,6 @@ class FirestoreRepository(context: Context) {
         val messageRef = chatRef.collection("messages").document()
         return Triple(chatTask, messageRef, messageRef.set(messagePayload))
     }
-
-    // ---------------------------------------------------------------- Gruplar
 
     /**
      * Grup mesajı gönderir. İçerik ve önizleme mesaj anahtarıyla şifrelidir; [keys] bu anahtarın
@@ -555,7 +557,6 @@ class FirestoreRepository(context: Context) {
         db.collection("chats").document(chatId).set(payload, SetOptions.merge()).await()
     }
 
-    // ---------------------------------------------------------------- Fotoğraf parçaları
     // chats/{chatId}/blobs/{mediaId}_{index} — şifreli fotoğraf verisi (Base64).
     // Alıcı fotoğrafı indirince parçaları siler; gönderici 7 gün sonra kalanları temizler.
 
@@ -585,8 +586,6 @@ class FirestoreRepository(context: Context) {
         for (i in 0 until total.coerceIn(1, 50)) batch.delete(blobRef(chatId, mediaId, i))
         batch.commit().await()
     }
-
-    // ---------------------------------------------------------------- Anlık bildirim jetonu
 
     suspend fun savePushToken(uid: String, token: String) {
         val payload = mapOf(

@@ -53,8 +53,13 @@ object Polls {
             val o = JSONObject(json)
             if (o.optString("type") != "poll") null else {
                 val arr = o.optJSONArray("o") ?: JSONArray()
-                val options = (0 until arr.length()).map { arr.optString(it) }
-                build(o.optString("q"), options, o.optBoolean("m"), o.optString("k") == "match")
+                // Seçenekler gönderenin cihazında zaten temizlendi; burada yeniden ayıklanmaz ki
+                // oyların tuttuğu seçenek sıraları kaymasın.
+                val options = (0 until minOf(arr.length(), MAX_OPTIONS)).map { arr.optString(it).take(MAX_OPTION) }
+                val q = o.optString("q").trim().take(MAX_QUESTION)
+                val isMatch = o.optString("k") == "match"
+                if (q.isEmpty() || options.size < MIN_OPTIONS) null
+                else Spec(q, options, o.optBoolean("m") && !isMatch, isMatch)
             }
         }
     } catch (_: Exception) {
@@ -76,10 +81,14 @@ object Polls {
         else -> setOf(option)
     }
 
+    /** Takım mesajının ilk satırı; aynı anket için takımların zaten kurulup kurulmadığını anlamakta kullanılır. */
+    const val TEAMS_HEADER = "⚽ Takımlar hazır!"
+
     /**
      * Gelen oyuncuları rastgele iki dengeli takıma böler (fark en fazla 1 kişi).
+     * Oyuncular kimlikleriyle verilir; aynı adı taşıyan iki kişi ayrı oyuncu sayılır.
      */
-    fun splitTeams(players: List<String>, random: Random = java.security.SecureRandom()): Pair<List<String>, List<String>> {
+    fun <T> splitTeams(players: List<T>, random: Random = java.security.SecureRandom()): Pair<List<T>, List<T>> {
         val shuffled = players.distinct().toMutableList()
         for (i in shuffled.indices.reversed()) {
             val j = random.nextInt(i + 1)
@@ -91,7 +100,7 @@ object Polls {
 
     /** Takım kur sonucunun gruba gönderilen metni. */
     fun teamsMessage(teamA: List<String>, teamB: List<String>): String = buildString {
-        append("⚽ Takımlar hazır!\n\n")
+        append(TEAMS_HEADER).append("\n\n")
         append("🟡 Takım 1 (${teamA.size})\n")
         teamA.forEach { append("• ").append(it).append('\n') }
         append("\n⚫ Takım 2 (${teamB.size})\n")

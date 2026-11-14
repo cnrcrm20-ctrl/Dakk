@@ -115,8 +115,6 @@ class TypingClient(private val scope: CoroutineScope) {
         }
     }
 
-    // ------------------------------------------------------------------ Bağlantı
-
     private fun ensureConnectionLocked() {
         if (!active || socket != null || myUid.isBlank()) return
         val i = info ?: return

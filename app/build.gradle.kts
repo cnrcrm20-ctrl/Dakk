@@ -10,8 +10,8 @@ plugins {
 // Sürüm bilgisi — yeni bir sürüm yayınlamak için SADECE burayı değiştirin.
 // main dalına push edildiğinde GitHub Actions bu sürüm için otomatik olarak Release oluşturur.
 // ---------------------------------------------------------------------------------------------
-val dakkVersionName = "2.3.0"
-val dakkVersionCode = 24
+val dakkVersionName = "2.4.0"
+val dakkVersionCode = 25
 
 // ---------------------------------------------------------------------------------------------
 // İmzalama — Google ile Giriş (Firebase) APK'nın imza parmak izine bağlıdır.
@@ -128,6 +128,7 @@ dependencies {
   implementation(libs.zxing)
 
   testImplementation(libs.junit)
+  testImplementation(libs.org.json)
   debugImplementation(libs.androidx.compose.ui.tooling)
 }
 

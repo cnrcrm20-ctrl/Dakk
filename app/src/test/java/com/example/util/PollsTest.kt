@@ -79,4 +79,17 @@ class PollsTest {
         assertTrue(text.contains("Takım 2 (1)"))
         assertTrue(text.contains("• Ali") && text.contains("• Can") && text.contains("• Veli"))
     }
+
+    @Test
+    fun parseKeepsOptionOrderForVotes() {
+        val json = Polls.Spec("Soru", listOf("A", "a", "B"), multi = false, isMatch = false).toJson()
+        val spec = Polls.parse(json)!!
+        assertEquals(listOf("A", "a", "B"), spec.options)
+    }
+
+    @Test
+    fun teamsSplitByIdKeepsSameNames() {
+        val (a, b) = Polls.splitTeams(listOf("uid1", "uid2", "uid3", "uid4"), Random(3))
+        assertEquals(4, a.size + b.size)
+    }
 }

@@ -169,6 +169,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     var confirmBlock by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<UiMessage?>(null) }
     var viewingImage by remember { mutableStateOf<String?>(null) }
+    var teamsConfirmId by remember { mutableStateOf<String?>(null) }
     var pendingMention by remember { mutableStateOf<String?>(null) }
     var replyingTo by remember(peerUid) { mutableStateOf<UiMessage?>(null) }
     var creatingPoll by remember { mutableStateOf(false) }
@@ -562,7 +563,10 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                                     onRetryImage = { id -> viewModel.retryImage(peerUid, id) },
                                     onReact = { emoji -> viewModel.react(peerUid, m.id, emoji) },
                                     onVote = { option -> viewModel.vote(peerUid, m.id, option) },
-                                    onBuildTeams = { viewModel.buildTeams(peerUid, m.id) },
+                                    onBuildTeams = {
+                                        if (viewModel.teamsAlreadyBuilt(m.id)) teamsConfirmId = m.id
+                                        else viewModel.buildTeams(peerUid, m.id)
+                                    },
                                     onOpenQuote = { quoted ->
                                         val target = chatItems.indexOfFirst { it.key == quoted.messageId }
                                         if (target >= 0) scope.launch { listState.animateScrollToItem(headerCount + target) }
@@ -686,6 +690,20 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
             onCreate = { spec ->
                 if (viewModel.sendPoll(peerUid, spec)) creatingPoll = false
             }
+        )
+    }
+
+    teamsConfirmId?.let { pollId ->
+        AlertDialog(
+            onDismissRequest = { teamsConfirmId = null },
+            title = { Text("Takımlar zaten kuruldu") },
+            text = { Text("Bu maç için takımlar daha önce paylaşıldı. Yeniden karıştırılsın mı?") },
+            confirmButton = {
+                TextButton(onClick = { teamsConfirmId = null; viewModel.buildTeams(peerUid, pollId) }) {
+                    Text("Yeniden karıştır", color = DakkYellow)
+                }
+            },
+            dismissButton = { TextButton(onClick = { teamsConfirmId = null }) { Text("Vazgeç") } }
         )
     }
 
@@ -881,7 +899,7 @@ private fun MessageBubble(
                 )
                 message.text != null -> Text(message.text, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp)
                 else -> Text(
-                    "🔒 Bu mesaj bu cihazda çözülemedi (farklı bir cihazda veya eski bir kurulumda şifrelenmiş).",
+                    message.lockedText ?: "🔒 Bu mesaj bu cihazda çözülemedi (farklı bir cihazda veya eski bir kurulumda şifrelenmiş).",
                     color = DakkTextSecondaryDark,
                     fontStyle = FontStyle.Italic,
                     fontSize = 13.sp
