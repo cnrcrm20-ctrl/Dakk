@@ -483,12 +483,654 @@ SCENE_FUNCS = {
     "i4_yukle": scene_install,
 }
 
+# ================================================================ 60 sn "yükleme ve kurulum" videosu için ek sahneler
+
+from mock_screens import SURF, SURFV, BORDER, icon_checks, TXT3 as _TXT3  # noqa: E402
+
+GREEN = (129, 201, 149)
+
+
+def system_dialog(w, title, body_lines, buttons, icon=None, extra=None, title_size=20):
+    """Android tarzı koyu iletişim kutusu → (görüntü, {düğme: (x, y) merkez})."""
+    pad = dp(24)
+    h = pad + (dp(44) if icon else 0) + dp(30) + len(body_lines) * dp(20) + (extra[1] if extra else 0) + dp(70)
+    img = rrect(w, h, dp(28), DLG).copy()
+    y = pad
+    if icon:
+        icon(img, (w - dp(32)) // 2, y)
+        y += dp(44)
+    tl = wrap(title, dp(title_size), 500, w - 2 * pad)
+    h_extra = (len(tl) - 1) * dp(26)
+    if h_extra:
+        img2 = rrect(w, h + h_extra, dp(28), DLG).copy()
+        img2.alpha_composite(img.crop((0, 0, w, y)), (0, 0))
+        img, h = img2, h + h_extra
+    for line in tl:
+        t = rich(line, dp(title_size), 500, WHITE)
+        img.alpha_composite(t, ((w - t.width) // 2 if icon else pad, y))
+        y += dp(26)
+    y += dp(6)
+    for line in body_lines:
+        img.alpha_composite(rich(line, dp(14), 400, (200, 200, 200)), (pad, y))
+        y += dp(20)
+    if extra:
+        extra[0](img, pad, y)
+        y += extra[1]
+    pos = {}
+    x = w - pad
+    for b in reversed(buttons):
+        t = rich(b, dp(15), 600, BLUE)
+        x -= t.width
+        img.alpha_composite(t, (x, h - dp(46)))
+        pos[b] = (x + t.width / 2, h - dp(46) + t.height / 2)
+        x -= dp(32)
+    return img, pos
+
+
+def place_dialog(img, dlg, pos, a):
+    s = 0.92 + 0.08 * ease_out(a)
+    d2 = dlg.resize((max(2, int(dlg.width * s)), max(2, int(dlg.height * s))), Image.BILINEAR)
+    x0, y0 = (SW - d2.width) / 2, (SH - d2.height) / 2
+    put(img, d2, x0, y0, clamp01(a))
+    ox, oy = (SW - dlg.width) / 2, (SH - dlg.height) / 2
+    return {k: (ox + v[0], oy + v[1]) for k, v in pos.items()}
+
+
+def shield_icon(color):
+    def draw(img, x, y):
+        ss = 4
+        S = dp(32) * ss
+        big = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        d = ImageDraw.Draw(big)
+        d.polygon([(S * 0.5, S * 0.04), (S * 0.9, S * 0.2), (S * 0.86, S * 0.58), (S * 0.5, S * 0.96),
+                   (S * 0.14, S * 0.58), (S * 0.1, S * 0.2)], fill=color + (255,))
+        d.line((S * 0.32, S * 0.5, S * 0.45, S * 0.64, S * 0.7, S * 0.36), fill=DLG + (255,), width=int(S * 0.09))
+        img.alpha_composite(big.resize((dp(32), dp(32)), Image.LANCZOS), (int(x), int(y)))
+    return draw
+
+
+def highlight(img, x, y, w, h, t, start, dur=0.8):
+    """Dikkat çekmek için sarı, nabız gibi atan çerçeve."""
+    p = (t - start) / dur
+    if not 0 < p < 1:
+        return
+    k = 0.5 + 0.5 * math.sin(p * math.pi * 4)
+    g = dp(4) * k
+    op = min(p * 6, (1 - p) * 6, 1)
+    lay = Image.new("RGBA", (SW, SH), (0, 0, 0, 0))
+    ImageDraw.Draw(lay).rounded_rectangle((x - g, y - g, x + w + g, y + h + g), dp(12) + g,
+                                          outline=Y + (int(255 * op),), width=dp(3))
+    img.alpha_composite(lay)
+
+
+INSTALL_W = SW - dp(48)
+
+
+def install_dialog(t_state, msg, labels, progress=None, scan=None):
+    """Paket yükleyici penceresi (Dakk simgesi, ad, mesaj, düğmeler)."""
+    w = INSTALL_W
+    h = dp(262) if scan is None else dp(330)
+    dlg = rrect(w, h, dp(28), DLG).copy()
+    lg = logo(dp(56))
+    dlg.alpha_composite(lg, ((w - lg.width) // 2, dp(24)))
+    nm = rich("Dakk", dp(20), 600, WHITE)
+    dlg.alpha_composite(nm, ((w - nm.width) // 2, dp(90)))
+    y = dp(128)
+    for line in wrap(msg, dp(15), 400, w - dp(48)):
+        m = rich(line, dp(15), 400, (210, 210, 210))
+        dlg.alpha_composite(m, ((w - m.width) // 2, y))
+        y += dp(21)
+    dd = ImageDraw.Draw(dlg)
+    if progress is not None:
+        pw = w - dp(64)
+        dd.rounded_rectangle((dp(32), dp(180), dp(32) + pw, dp(185)), dp(3), fill=(70, 74, 80))
+        dd.rounded_rectangle((dp(32), dp(180), dp(32) + pw * progress, dp(185)), dp(3), fill=BLUE)
+    if scan is not None:
+        scan(dlg, w, dp(160))
+    pos = {}
+    if labels:
+        x = w - dp(28)
+        for b in reversed(labels):
+            tt = rich(b, dp(15), 600, BLUE)
+            x -= tt.width
+            dlg.alpha_composite(tt, (x, h - dp(46)))
+            pos[b] = (x + tt.width / 2, h - dp(46) + tt.height / 2)
+            x -= dp(36)
+    return dlg, pos
+
+
+# ---------------------------------------------------------------- 4) yükle + güvenlik taraması
+
+def scene_install_scan(t):
+    t = max(t, 0.0)
+    img, _ = browser()
+    dim(img, 140 * ease_out(prog(t, 0.0, 0.3)))
+    if t < 1.0:
+        dlg, pos = install_dialog(t, "Bu uygulamayı yüklemek istiyor musun?", ("İptal", "Yükle"))
+        p = place_dialog(img, dlg, pos, ease_out(prog(t, 0.0, 0.3)))
+        touch(img, *p["Yükle"], t, 0.7)
+        return img.convert("RGB")
+    sp = prog(t, 1.1, 2.0)
+    found = t >= 3.15
+
+    def scan(dlg, w, y):
+        d = ImageDraw.Draw(dlg)
+        cx, cy, r = w / 2, y + dp(58), dp(40)
+        if not found:
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(70, 74, 80), width=dp(4))
+            a0 = (t * 300) % 360
+            d.arc((cx - r, cy - r, cx + r, cy + r), a0, a0 + 100, fill=BLUE, width=dp(4))
+            pc = rich(f"%{int(sp * 100)}", dp(16), 700, WHITE)
+            dlg.alpha_composite(pc, (int(cx - pc.width / 2), int(cy - pc.height / 2)))
+            lab = rich("Güvenlik taraması…", dp(14), 500, (200, 200, 200))
+        else:
+            pop = back_out(prog(t, 3.15, 0.35))
+            rr = r * min(pop, 1.1)
+            d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=GREEN)
+            if pop > 0.5:
+                ss = 4
+                S = dp(40) * ss
+                big = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+                ImageDraw.Draw(big).line((S * 0.22, S * 0.52, S * 0.42, S * 0.72, S * 0.8, S * 0.3),
+                                         fill=(20, 40, 25, 255), width=int(S * 0.11), joint="curve")
+                dlg.alpha_composite(big.resize((dp(40), dp(40)), Image.LANCZOS), (int(cx - dp(20)), int(cy - dp(20))))
+            lab = rich("Risk bulunamadı", dp(15), 600, GREEN)
+        dlg.alpha_composite(lab, (int(cx - lab.width / 2), int(cy + r + dp(12))))
+
+    dlg, pos = install_dialog(t, "Yüklemeden önce kontrol ediliyor", None, scan=scan)
+    pp = min(1.0, 1 - prog(t, 4.0, 0.25))
+    place_dialog(img, dlg, pos, pp)
+    if t >= 4.1:
+        draw_protect(img, t - 4.1, expanded=False)
+    return img.convert("RGB")
+
+
+# ---------------------------------------------------------------- 5) Play Protect
+
+PROTECT_BODY = "Play Protect bu uygulamanın geliştiricisini tanımıyor. Bilinmeyen geliştiricilerin " \
+               "uygulamaları bazen güvenli olmayabilir."
+
+
+def draw_protect(img, lt, expanded, t_tap_more=None, t_tap_install=None, gt=None):
+    w = SW - dp(40)
+    body = wrap(PROTECT_BODY, dp(14), 400, w - dp(48))
+    ex_h = dp(56)
+
+    def extra(dlg, x, y):
+        d = ImageDraw.Draw(dlg)
+        tt = rich("Ayrıntılar", dp(14), 600, BLUE)
+        dlg.alpha_composite(tt, (x, y + dp(14)))
+        ax, ay = x + tt.width + dp(10), y + dp(25)
+        if expanded:
+            d.line((ax, ay + dp(3), ax + dp(6), ay - dp(3), ax + dp(12), ay + dp(3)), fill=BLUE, width=dp(2))
+        else:
+            d.line((ax, ay - dp(3), ax + dp(6), ay + dp(3), ax + dp(12), ay - dp(3)), fill=BLUE, width=dp(2))
+
+    dlg, pos = system_dialog(w, "Play Protect tarafından engellendi", body, ["Tamam"],
+                             icon=shield_icon(BLUE), extra=(extra, ex_h + (dp(54) if expanded else 0)), title_size=19)
+    if expanded:
+        # "Yine de yükle" seçeneği ayrıntıların altında
+        yy = dlg.height - dp(70) - dp(54)
+        tt = rich("Yine de yükle (güvenli değil)", dp(14), 600, BLUE)
+        dlg.alpha_composite(tt, (dp(24), yy + dp(12)))
+        pos["Yine de yükle"] = (dp(24) + tt.width / 2, yy + dp(12) + tt.height / 2)
+        pos["_yy"] = (dp(16), yy)
+    a = ease_out(clamp01(lt / 0.3))
+    p = place_dialog(img, dlg, pos, a)
+    return p, ((SW - w) / 2, (SH - dlg.height) / 2, w, dlg.height)
+
+
+def scene_protect(t):
+    t = max(t, 0.0)
+    img, _ = browser()
+    dim(img, 140)
+    if t < 2.45:
+        expanded = t >= 1.05
+        p, (dx, dy, dw, dh) = draw_protect(img, t + 1.0, expanded)
+        if not expanded:
+            # "Ayrıntılar" düğmesinin yeri: gövdenin hemen altı
+            body_n = len(wrap(PROTECT_BODY, dp(14), 400, dw - dp(48)))
+            ay = dy + dp(24) + dp(44) + dp(30) + body_n * dp(20) + dp(6) + dp(26)
+            touch(img, dx + dp(24) + dp(40), ay, t, 0.8)
+        else:
+            bx, by = p["Yine de yükle"]
+            yx, yy = p["_yy"]
+            highlight(img, dx + dp(14), yy, dw - dp(28), dp(44), t, 1.2, 1.0)
+            touch(img, bx, by, t, 2.2)
+        return img.convert("RGB")
+    ip = prog(t, 2.55, 1.3)
+    done = ip >= 1
+    msg = "Uygulama yüklendi." if done else "Yükleniyor…"
+    dlg, pos = install_dialog(t, msg, ("Bitti", "Aç") if done else None, progress=None if done else ease_in_out(ip))
+    p = place_dialog(img, dlg, pos, 1.0)
+    if done:
+        touch(img, *p["Aç"], t, 4.55)
+    # Dakk açılıyor
+    if t >= 4.85:
+        k = min(int((t - 4.85) * 26), 29)
+        sp = splash_frame(k).copy()
+        sp.putalpha(int(255 * ease_out(prog(t, 4.85, 0.3))))
+        img.alpha_composite(sp)
+    return img.convert("RGB")
+
+
+# ---------------------------------------------------------------- sihirbaz parçaları (SetupWizard.kt)
+
+WIZ_STEPS = 9
+STEP_BG = (38, 33, 12)  # sarı %12, koyu zemin üstünde
+
+
+def wizard_top(img, index, back=True, skip=True):
+    y = dp(26)
+    if back:
+        put(img, rich("Geri", dp(14), 500, TXT2), dp(16), y + dp(14))
+    if skip:
+        s = rich("Atla", dp(14), 600, TXT2)
+        put(img, s, SW - dp(16) - s.width, y + dp(14))
+    d = ImageDraw.Draw(img)
+    widths = [dp(20) if i == index else dp(7) for i in range(WIZ_STEPS)]
+    total = sum(widths) + dp(6) * (WIZ_STEPS - 1)
+    x = (SW - total) / 2
+    for i, wd in enumerate(widths):
+        col = Y if i == index else ((128, 106, 13) if i < index else BORDER)
+        d.rounded_rectangle((x, y + dp(22), x + wd, y + dp(29)), dp(3.5), fill=col)
+        x += wd + dp(6)
+
+
+def step_frame(img, primary, secondary=None, press=0.0):
+    bw, bh = SW - dp(48), dp(56)
+    s = 1 - 0.04 * press
+    b = rrect(int(bw * s), int(bh * s), dp(16), Y).copy()
+    lab = rich(primary, dp(16), 700, (0, 0, 0))
+    b.alpha_composite(lab, ((b.width - lab.width) // 2, (b.height - lab.height) // 2))
+    by = SH - dp(24) - bh - (dp(44) if secondary else 0)
+    put(img, b, dp(24) + (bw - b.width) / 2, by + (bh - b.height) / 2)
+    if secondary:
+        st = rich(secondary, dp(14), 500, TXT2)
+        put(img, st, (SW - st.width) / 2, by + bh + dp(12))
+    return (SW / 2, by + bh / 2)
+
+
+def step_body(img, emoji_cp, title, text, y_center=None, emoji_draw=None):
+    lines = wrap(text, dp(16), 400, SW - dp(56))
+    h = dp(104) + dp(24) + dp(34) + dp(12) + len(lines) * dp(23)
+    y = (y_center or SH * 0.43) - h / 2
+    c = circle(dp(104), STEP_BG)
+    put(img, c, (SW - c.width) / 2, y)
+    if emoji_draw:
+        emoji_draw(img, (SW - dp(104)) / 2, y)
+    else:
+        e = emoji_img(emoji_cp, dp(52))
+        put(img, e, (SW - e.width) / 2, y + (dp(104) - e.height) / 2)
+    y += dp(128)
+    tt = rich(title, dp(26), 900, WHITE)
+    put(img, tt, (SW - tt.width) / 2, y)
+    y += dp(46)
+    for line in lines:
+        lt = rich(line, dp(16), 400, TXT2)
+        put(img, lt, (SW - lt.width) / 2, y)
+        y += dp(23)
+    return y
+
+
+def wiz_base():
+    img = base()
+    status_bar(img, BG)
+    return img
+
+
+def _welcome(t, press_at):
+    img = wiz_base()
+    wizard_top(img, 0, back=False, skip=False)
+    y = SH * 0.30
+    ring = circle(dp(126), Y)
+    put(img, ring, (SW - ring.width) / 2, y - dp(3))
+    put(img, circle(dp(120), WHITE), (SW - dp(120)) / 2, y)
+    lg = logo(dp(112))
+    put(img, lg, (SW - lg.width) / 2, y + dp(4))
+    y += dp(148)
+    tt = rich("Dakk'a hoş geldin 👋", dp(26), 900, WHITE)
+    put(img, tt, (SW - tt.width) / 2, y)
+    y += dp(46)
+    for line in wrap("Hızlı, sade ve uçtan uca şifreli mesajlaşma. Birkaç kısa adımda hazırız.", dp(16), 400, SW - dp(56)):
+        lt = rich(line, dp(16), 400, TXT2)
+        put(img, lt, (SW - lt.width) / 2, y)
+        y += dp(23)
+    press = math.sin(prog(t, press_at, 0.22) * math.pi)
+    c = step_frame(img, "Başlayalım", press=press)
+    touch(img, *c, t, press_at)
+    return img
+
+
+def _account_sheet(img, t, t_in, tap_at):
+    sp = min(ease_out(prog(t, t_in, 0.35)), 1 - ease_in_out(prog(t, tap_at + 0.3, 0.3)))
+    if sp <= 0:
+        return
+    dim(img, 130 * sp)
+    sh_h = dp(330)
+    sy = SH - sh_h * sp
+    put(img, rrect(SW, sh_h + dp(30), dp(28), (32, 33, 36), corners=(True, True, False, False)), 0, sy)
+    y = sy + dp(26)
+    t1 = rich("Hesap seçin", dp(20), 500, WHITE)
+    put(img, t1, (SW - t1.width) / 2, y)
+    y += dp(32)
+    t2 = rich("Dakk uygulamasına devam etmek için", dp(13), 400, (189, 193, 198))
+    put(img, t2, (SW - t2.width) / 2, y)
+    y += dp(40)
+    rh = dp(64)
+    hp = prog(t, tap_at - 0.05, 0.45)
+    if 0 < hp < 1:
+        put(img, rrect(SW - dp(32), rh, dp(12), (60, 64, 67)), dp(16), y, 1 - hp)
+    put(img, avatar(dp(40), (0, 168, 132), "A"), dp(28), y + dp(12))
+    put(img, rich("Ayşe Yılmaz", dp(15), 600, WHITE), dp(82), y + dp(12))
+    put(img, rich("ayse.yilmaz@gmail.com", dp(13), 400, (189, 193, 198)), dp(82), y + dp(34))
+    touch(img, SW / 2, y + rh / 2, t, tap_at)
+    y += rh
+    ImageDraw.Draw(img).rectangle((dp(16), y + dp(6), SW - dp(16), y + dp(7)), fill=(60, 64, 67))
+    y += dp(20)
+    d = ImageDraw.Draw(img)
+    d.ellipse((dp(36), y + dp(8), dp(60), y + dp(32)), outline=(189, 193, 198), width=dp(2))
+    d.line((dp(48), y + dp(14), dp(48), y + dp(26)), fill=(189, 193, 198), width=dp(2))
+    d.line((dp(42), y + dp(20), dp(54), y + dp(20)), fill=(189, 193, 198), width=dp(2))
+    put(img, rich("Başka bir hesap ekle", dp(15), 500, WHITE), dp(82), y + dp(8))
+
+
+# ---------------------------------------------------------------- 6) Dakk'ı aç, Google ile gir
+
+def scene_open_signin(t):
+    t = max(t, 0.0)
+    if t < 1.0:
+        k = min(int((t + 1.15) * 26), 29)
+        sp = splash_frame(k)
+        img = sp.copy()
+        if t > 0.75:
+            w = _welcome(t, 99)
+            w.putalpha(int(255 * prog(t, 0.75, 0.25)))
+            img.alpha_composite(w)
+        return img.convert("RGB")
+    if t < 2.35:
+        return _welcome(t, 1.95).convert("RGB")
+    img, (bx, by) = login_screen()
+    if t < 2.65:
+        w = _welcome(t, 1.95)
+        w.putalpha(int(255 * (1 - prog(t, 2.35, 0.3))))
+        img.alpha_composite(w)
+    loading = t >= 4.9
+    if loading:
+        # düğmede "Giriş yapılıyor…"
+        b = rrect(SW - dp(40), dp(54), dp(16), Y).copy()
+        lab = rich("Giriş yapılıyor…", dp(16), 600, (0, 0, 0))
+        b.alpha_composite(lab, ((b.width - lab.width) // 2 + dp(14), (b.height - lab.height) // 2))
+        d = ImageDraw.Draw(b)
+        cx, cy, r = (b.width - lab.width) // 2 - dp(4), b.height // 2, dp(10)
+        a0 = (t * 400) % 360
+        d.arc((cx - r, cy - r, cx + r, cy + r), a0, a0 + 270, fill=(0, 0, 0), width=dp(2.5))
+        put(img, b, dp(20), by - dp(27))
+    press = math.sin(prog(t, 3.15, 0.22) * math.pi)
+    if press > 0:
+        dim_btn = rrect(SW - dp(40), dp(54), dp(16), (0, 0, 0, int(40 * press)))
+        put(img, dim_btn, dp(20), by - dp(27))
+    touch(img, bx, by, t, 3.15)
+    _account_sheet(img, t, 3.45, 4.55)
+    if t >= 4.85:
+        # sayfa iner
+        pass
+    return img.convert("RGB")
+
+
+# ---------------------------------------------------------------- 7) ad + bildirim izni + yedek
+
+def _profile(t, press_at):
+    img = wiz_base()
+    wizard_top(img, 3)
+    y = step_body(img, 0x1F642, "Seni nasıl görelim?", "Arkadaşların seni bu adla görür. Sonra Ayarlar'dan değiştirebilirsin.",
+                  y_center=SH * 0.36)
+    y += dp(24)
+    fw = SW - dp(56)
+    put(img, rrect(fw, dp(58), dp(6), (0, 0, 0, 0), outline=Y + (255,), width=dp(2)), dp(28), y)
+    put(img, rrect(dp(92), dp(18), 0, BG), dp(40), y - dp(9))
+    put(img, rich("Görünen ad", dp(12), 500, Y), dp(46), y - dp(10))
+    put(img, rich("Ayşe Yılmaz", dp(16), 400, WHITE), dp(44), y + dp(16))
+    press = math.sin(prog(t, press_at, 0.22) * math.pi)
+    c = step_frame(img, "Kaydet ve devam et", press=press)
+    touch(img, *c, t, press_at)
+    return img
+
+
+def _notif(t, press_at, sys_in, allow_at):
+    img = wiz_base()
+    wizard_top(img, 4)
+    y = step_body(img, 0x1F514, "Mesajlar kaçmasın",
+                  "Arkadaşların yazınca haber verelim mi? Bildirimdeki mesaj yalnızca senin telefonunda çözülür.",
+                  y_center=SH * 0.36)
+    y += dp(18)
+    info = wrap("Birazdan Android küçük bir izin penceresi açacak. \"İzin ver\"e dokunman yeterli.",
+                dp(13), 400, SW - dp(56) - dp(60))
+    card = rrect(SW - dp(56), dp(26) + len(info) * dp(19), dp(14), SURF).copy()
+    card.alpha_composite(emoji_img(0x1F4A1, dp(20)), (dp(14), (card.height - dp(20)) // 2))
+    for i, line in enumerate(info):
+        card.alpha_composite(rich(line, dp(13), 400, TXT2), (dp(46), dp(13) + i * dp(19)))
+    put(img, card, dp(28), y)
+    press = math.sin(prog(t, press_at, 0.22) * math.pi)
+    c = step_frame(img, "Bildirimlere izin ver", "Şimdi değil", press=press)
+    touch(img, *c, t, press_at)
+    # Android 13+ bildirim izni penceresi
+    a = min(ease_out(prog(t, sys_in, 0.3)), 1 - ease_in_out(prog(t, allow_at + 0.25, 0.25)))
+    if a > 0:
+        dim(img, 150 * a)
+        w = SW - dp(56)
+        lines = wrap("Dakk uygulamasının sana bildirim göndermesine izin verilsin mi?", dp(18), 400, w - dp(48))
+        h = dp(84) + len(lines) * dp(25) + dp(132)
+        dlg = rrect(w, h, dp(28), DLG).copy()
+        dd = ImageDraw.Draw(dlg)
+        # zil simgesi
+        bx, by = w // 2, dp(38)
+        dd.pieslice((bx - dp(11), by - dp(12), bx + dp(11), by + dp(12)), 180, 360, fill=BLUE)
+        dd.rectangle((bx - dp(11), by, bx + dp(11), by + dp(8)), fill=BLUE)
+        dd.rectangle((bx - dp(14), by + dp(8), bx + dp(14), by + dp(10)), fill=BLUE)
+        dd.ellipse((bx - dp(3.5), by + dp(11), bx + dp(3.5), by + dp(17)), fill=BLUE)
+        y2 = dp(70)
+        for line in lines:
+            lt = rich(line, dp(18), 400, WHITE)
+            dlg.alpha_composite(lt, ((w - lt.width) // 2, y2))
+            y2 += dp(25)
+        y2 += dp(18)
+        pos = {}
+        for k_, lab in enumerate(("İzin ver", "İzin verme")):
+            hp = prog(t, allow_at - 0.05, 0.4) if k_ == 0 else 0
+            col = (82, 90, 110) if 0 < hp < 1 else (58, 62, 70)
+            dlg.alpha_composite(rrect(w - dp(48), dp(46), dp(23), col), (dp(24), y2))
+            lt = rich(lab, dp(15), 600, BLUE)
+            dlg.alpha_composite(lt, ((w - lt.width) // 2, y2 + (dp(46) - lt.height) // 2))
+            pos[lab] = (w / 2, y2 + dp(23))
+            y2 += dp(54)
+        p = place_dialog(img, dlg, pos, a)
+        touch(img, *p["İzin ver"], t, allow_at)
+    return img
+
+
+def backup_switch(img, x, y, on=True):
+    w, h = dp(52), dp(32)
+    put(img, rrect(w, h, h // 2, Y if on else SURFV), x, y)
+    r = dp(12)
+    cx = x + (w - dp(16) if on else dp(16))
+    put(img, circle(2 * r, (0, 0, 0) if on else TXT2), cx - r, y + h / 2 - r)
+
+
+def _backup(t, press_at):
+    img = wiz_base()
+    wizard_top(img, 5)
+    y = step_body(img, 0x1F49B, "Sohbet yedeği",
+                  "Telefonunu değiştirirsen arkadaşlarının telefonları ortak sohbetlerinizi sana şifreli olarak geri gönderir.",
+                  y_center=SH * 0.36)
+    y += dp(20)
+    card = rrect(SW - dp(56), dp(70), dp(16), SURF).copy()
+    card.alpha_composite(rich("Sohbet yedeği", dp(16), 600, WHITE), (dp(16), dp(13)))
+    card.alpha_composite(rich("Açık · önerilir", dp(13), 400, TXT2), (dp(16), dp(38)))
+    put(img, card, dp(28), y)
+    backup_switch(img, SW - dp(28) - dp(16) - dp(52), y + dp(19), True)
+    press = math.sin(prog(t, press_at, 0.22) * math.pi)
+    c = step_frame(img, "Devam", press=press)
+    touch(img, *c, t, press_at)
+    return img
+
+
+def scene_setup(t):
+    t = max(t, 0.0)
+    p1 = ease_in_out(prog(t, 1.05, 0.35))
+    p2 = ease_in_out(prog(t, 4.35, 0.35))
+    if p1 < 1:
+        a = _profile(t, 0.75)
+        if p1 <= 0:
+            return a.convert("RGB")
+        return slide_between(a, _notif(t, 2.3, 2.6, 3.75), p1).convert("RGB")
+    if p2 <= 0:
+        return _notif(t, 2.3, 2.6, 3.75).convert("RGB")
+    b = _backup(t, 5.45)
+    if p2 < 1:
+        return slide_between(_notif(t, 2.3, 2.6, 3.75), b, p2).convert("RGB")
+    return b.convert("RGB")
+
+
+# ---------------------------------------------------------------- 8) hazırsın → ana ekran
+
+def _done(t, press_at):
+    img = wiz_base()
+    wizard_top(img, 8, skip=False)
+
+    def party(im, x, y):
+        k = back_out(prog(t, 0.05, 0.5))
+        e = emoji_img(0x1F389, max(2, int(dp(52) * min(k, 1.15))))
+        put(im, e, x + (dp(104) - e.width) / 2, y + (dp(104) - e.height) / 2)
+
+    step_body(img, None, "Hazırsın!",
+              "Şimdi sana 30 saniyelik kısa bir tur gösterelim. İstersen Ayarlar'dan tekrar izleyebilirsin.",
+              emoji_draw=party)
+    # konfeti
+    import random
+    rnd = random.Random(11)
+    lay = Image.new("RGBA", (SW, SH), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    cp = prog(t, 0.1, 2.2)
+    if 0 < cp < 1:
+        cols = [Y, (255, 107, 0), (100, 181, 246), (129, 199, 132), (240, 98, 146), WHITE]
+        for _ in range(70):
+            x0 = SW / 2 + rnd.uniform(-dp(30), dp(30))
+            y0 = SH * 0.33
+            vx = rnd.uniform(-dp(190), dp(190))
+            vy = rnd.uniform(-dp(320), -dp(80))
+            tt = cp * 2.2
+            x = x0 + vx * tt
+            y = y0 + vy * tt + dp(260) * tt * tt
+            s = dp(rnd.uniform(3, 6))
+            a = int(255 * (1 - cp))
+            ang = rnd.random() * math.pi + tt * 6
+            pts = [(x + math.cos(ang + k * math.pi / 2) * s, y + math.sin(ang + k * math.pi / 2) * s * 0.5) for k in range(4)]
+            d.polygon(pts, fill=rnd.choice(cols) + (a,))
+        img.alpha_composite(lay)
+    press = math.sin(prog(t, press_at, 0.22) * math.pi)
+    c = step_frame(img, "Dakk'ı aç", press=press)
+    touch(img, *c, t, press_at)
+    return img
+
+
+def _home_empty(t, tap_at):
+    img = base()
+    d = ImageDraw.Draw(img)
+    y = dp(26) + dp(14)
+    put(img, rich("Dakk", dp(26), 700, Y), dp(20), y)
+    y += dp(48)
+    put(img, rrect(SW - dp(32), dp(44), dp(22), SURFV), dp(16), y)
+    put(img, rich("Sohbetlerde ara", dp(15), 400, TXT3), dp(36), y + dp(11))
+    y += dp(60)
+    # Dakk Asistan satırı
+    put(img, circle(dp(50), (38, 35, 58)), dp(16), y + dp(12))
+    e = emoji_img(0x2728, dp(26))
+    put(img, e, dp(16) + (dp(50) - e.width) / 2, y + dp(12) + (dp(50) - e.height) / 2)
+    put(img, rich("Dakk Asistan", dp(16), 600, WHITE), dp(80), y + dp(16))
+    put(img, rich("Bir şey sor, yardımcı olayım ✨", dp(13), 400, TXT2), dp(80), y + dp(40))
+    y += dp(86)
+    d.rectangle((0, y, SW, y + 1), fill=BORDER)
+    # boş durum
+    cy = SH * 0.55
+    put(img, circle(dp(96), STEP_BG), (SW - dp(96)) / 2, cy - dp(120))
+    e = emoji_img(0x1F4AC, dp(46))
+    put(img, e, (SW - e.width) / 2, cy - dp(120) + (dp(96) - e.height) / 2)
+    tt = rich("Henüz sohbet yok", dp(18), 600, WHITE)
+    put(img, tt, (SW - tt.width) / 2, cy)
+    for i, line in enumerate(wrap("Arkadaşını QR kodla ya da davet bağlantısıyla ekle.", dp(14), 400, SW - dp(80))):
+        lt = rich(line, dp(14), 400, TXT2)
+        put(img, lt, (SW - lt.width) / 2, cy + dp(32) + i * dp(20))
+    press = math.sin(prog(t, tap_at, 0.22) * math.pi)
+    s = 1 - 0.05 * press
+    bw, bh = int(dp(150) * s), int(dp(48) * s)
+    b = rrect(bw, bh, bh // 2, Y).copy()
+    lab = rich("Kişi ekle", dp(15), 700, (0, 0, 0))
+    b.alpha_composite(lab, ((bw - lab.width) // 2, (bh - lab.height) // 2))
+    by = cy + dp(88)
+    put(img, b, (SW - bw) / 2, by + (dp(48) - bh) / 2)
+    touch(img, SW / 2, by + dp(24), t, tap_at)
+    # alt gezinme
+    nav_h = dp(72)
+    ny = SH - nav_h
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, ny, SW, SH), fill=SURF)
+    for i, lab in enumerate(["Sohbetler", "Kişiler", "Ayarlar"]):
+        cx = SW * (i + 0.5) / 3
+        sel = i == 0
+        if sel:
+            put(img, rrect(dp(60), dp(30), dp(15), (61, 52, 16)), cx - dp(30), ny + dp(10))
+        lt = rich(lab, dp(12), 600 if sel else 400, WHITE if sel else TXT2)
+        put(img, lt, cx - lt.width / 2, ny + dp(44))
+        col = Y if sel else TXT2
+        d.rounded_rectangle((cx - dp(9), ny + dp(17), cx + dp(9), ny + dp(31)), dp(4), outline=col, width=dp(2))
+    status_bar(img, BG)
+    # tanıtım turu ipucu balonu
+    tp = ease_out(prog(t, tap_at - 1.1, 0.35))
+    if tp > 0:
+        tip = rrect(dp(220), dp(48), dp(14), Y).copy()
+        tl = rich("Buradan ilk arkadaşını ekle", dp(13), 700, (0, 0, 0))
+        tip.alpha_composite(tl, ((tip.width - tl.width) // 2, (tip.height - tl.height) // 2))
+        tx, ty = (SW - tip.width) / 2, by + dp(66) - (1 - tp) * dp(10)
+        put(img, tip, tx, ty, tp)
+        lay = Image.new("RGBA", (SW, SH), (0, 0, 0, 0))
+        ImageDraw.Draw(lay).polygon([(SW / 2 - dp(9), ty + dp(1)), (SW / 2 + dp(9), ty + dp(1)), (SW / 2, ty - dp(9))],
+                                    fill=Y + (int(255 * tp),))
+        img.alpha_composite(lay)
+    return img
+
+
+def scene_ready(t):
+    t = max(t, 0.0)
+    p = ease_in_out(prog(t, 2.55, 0.4))
+    if p <= 0:
+        return _done(t, 2.25).convert("RGB")
+    h = _home_empty(t, 4.9)
+    if p >= 1:
+        return h.convert("RGB")
+    a = _done(t, 2.25)
+    h2 = h.copy()
+    h2.putalpha(int(255 * p))
+    a.alpha_composite(h2)
+    return a.convert("RGB")
+
+
+SCENE_FUNCS.update({
+    "i5_tarama": scene_install_scan,
+    "i6_protect": scene_protect,
+    "i7_giris": scene_open_signin,
+    "i8_sihirbaz": scene_setup,
+    "i9_hazir": scene_ready,
+})
+
+
 if __name__ == "__main__":
     import sys
     out = sys.argv[1] if len(sys.argv) > 1 else "/tmp/install_sheet.png"
     times = [float(x) for x in sys.argv[2].split(",")] if len(sys.argv) > 2 else [0.8, 1.8, 2.6, 3.3, 4.1, 4.8]
-    sheet = Image.new("RGB", (len(times) * 320, len(SCENE_FUNCS) * 700), (90, 90, 90))
-    for r, fn in enumerate(SCENE_FUNCS.values()):
+    names = sys.argv[3].split(",") if len(sys.argv) > 3 else list(SCENE_FUNCS)
+    sheet = Image.new("RGB", (len(times) * 320, len(names) * 700), (90, 90, 90))
+    for r, fn in enumerate(SCENE_FUNCS[n] for n in names):
         for c, tt in enumerate(times):
             sheet.paste(fn(tt).resize((310, 689)), (c * 320, r * 700))
     sheet.save(out)

@@ -50,6 +50,24 @@ Ekran kaydı gerekmez; ekranlar `mock_screens.py`'de uygulamanın renk ve şekil
 
 APK adı ve boyutu `mock_install.py`'nin başında (`APK`, `APK_MB`); yeni sürümde güncelle.
 
+## 60 sn "yükleme ve kurulum" videosu (`--kurulum`)
+
+Kullanıcı uyarılardan korkmasın diye her uyarı gösterilir ve ne yapılacağı söylenir:
+`dakk_yukleme_kurulum.mp4` (+ `_sessiz`).
+
+| Süre | Başlık | Telefonda |
+| --- | --- | --- |
+| 0–4 sn | Dakk kurulumu **1 dakika.** | — |
+| 4–10 | ① Siteye gir, **İndir'e** dokun. | Site, *Android için indir* |
+| 10–16 | ② Uyarı çıkarsa: Yine de **indir.** | Chrome "zarar verebilir" uyarısı → *Yine de indir* → *Aç* |
+| 16–22 | ③ Yüklemeye **izin** ver. | *Bu kaynaktan izin ver* |
+| 22–28 | ④ **Yükle'ye** dokun. | *Yükle* → güvenlik taraması → "Risk bulunamadı" → Play Protect penceresi |
+| 28–34 | ⑤ Play Protect uyarısı? Panik **yok.** | *Ayrıntılar* → *Yine de yükle* → yüklendi → *Aç* |
+| 34–40 | ⑥ Dakk'ı aç, **Google** ile gir. | Ördek → *Başlayalım* → *Google ile devam et* → hesap seç |
+| 40–46 | ⑦ Adını yaz, bildirimlere **izin** ver. | Görünen ad → bildirim izni (Android penceresi) → Sohbet yedeği |
+| 46–52 | ⑧ Bu kadar. **Hazırsın!** | Konfeti → ana ekran, *Kişi ekle* ipucu |
+| 52–60 | Ördek · site adresi · "Takılırsan yorumlara yaz." | — |
+
 ## Telefondaki ekranlar (`mock_screens.py`)
 
 | Sahne | Ne oluyor |
@@ -74,6 +92,7 @@ python3 -m venv .venv && .venv/bin/pip install pillow numpy imageio-ffmpeg qrcod
 .venv/bin/python promo/build_promo.py --frames 6,13.5    # yalnızca PNG önizleme
 .venv/bin/python promo/build_promo.py --uzun             # 69 sn sürüm: promo/render/dakk_tanitim_69sn.mp4
 .venv/bin/python promo/build_promo.py --indir            # nasıl indirilir: promo/render/dakk_nasil_indirilir.mp4
+.venv/bin/python promo/build_promo.py --kurulum          # 60 sn yükleme + kurulum: promo/render/dakk_yukleme_kurulum.mp4
 ```
 
 (İsteğe bağlı) gerçek klip ince ayarı `promo/clips/ayar.json`:

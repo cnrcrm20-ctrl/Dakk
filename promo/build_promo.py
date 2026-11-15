@@ -8,6 +8,7 @@ Kullanım:
     .venv/bin/python promo/build_promo.py --frames 2,6  # yalnızca o saniyelerden PNG önizleme
     .venv/bin/python promo/build_promo.py --uzun        # 69 saniyelik detaylı sürüm (9 sahne + özet)
     .venv/bin/python promo/build_promo.py --indir       # 30 sn "Dakk nasıl indirilir?" videosu
+    .venv/bin/python promo/build_promo.py --kurulum     # 60 sn yükleme + kurulum (uyarılar dahil) videosu
 
 Telefon ekranları promo/mock_screens.py'de çizilir: Dakk arayüzünün sadeleştirilmiş, animasyonlu hali
 (Google tanıtım reklamlarındaki gibi). İstenirse bir sahne gerçek ekran kaydıyla değiştirilebilir:
@@ -134,6 +135,51 @@ def use_howto_profile():
     OUTRO = HOWTO["OUTRO"]
     PHONE_END = OUTRO["start"]
     OUT_NAME = HOWTO["OUT_NAME"]
+
+
+# ---- 60 sn "yükleme ve kurulum": uyarılar (Chrome, tarama, Play Protect) ve uygulama içi kurulum
+SETUP = dict(
+    DURATION=60.0,
+    INTRO=dict(start=0.0, end=4.0, lines=["Dakk", "kurulumu", "1 dakika."], hl="1 dakika."),
+    SCENES=[
+        dict(clip="i1_site", step=1, title="Siteye gir, İndir'e dokun.", hl="İndir'e",
+             sub="cnrcrm20-ctrl.github.io/Dakk", speed=0.85),
+        dict(clip="i2_indir", step=2, title="Uyarı çıkarsa: Yine de indir.", hl="indir.",
+             sub="Chrome her APK dosyasında bunu sorar. Normal.", speed=0.85),
+        dict(clip="i3_izin", step=3, title="Yüklemeye izin ver.", hl="izin",
+             sub="Bu kaynaktan izin ver. Bir kez yeter.", speed=0.85),
+        dict(clip="i5_tarama", step=4, title="Yükle'ye dokun.", hl="Yükle'ye",
+             sub="Telefonun tarama yaparsa bitmesini bekle."),
+        dict(clip="i6_protect", step=5, title="Play Protect uyarısı? Panik yok.", hl="yok.",
+             sub="Ayrıntılar'a, sonra Yine de yükle'ye dokun."),
+        dict(clip="i7_giris", step=6, title="Dakk'ı aç, Google ile gir.", hl="Google",
+             sub="Hesabını seç, gerisi otomatik."),
+        dict(clip="i8_sihirbaz", step=7, title="Adını yaz, bildirimlere izin ver.", hl="izin",
+             sub="Sohbet yedeğini açık bırak, önerilir."),
+        dict(clip="i9_hazir", step=8, title="Bu kadar. Hazırsın!", hl="Hazırsın!",
+             sub="İlk arkadaşını ekle, yazışmaya başla."),
+    ],
+    SCENE_LEN=6.0,
+    OUTRO=dict(start=52.0, duck_start=52.35, text_start=54.0, words="Ücretsiz. Reklamsız. Açık kaynak.",
+               button="cnrcrm20-ctrl.github.io/Dakk", url="Takılırsan yorumlara yaz."),
+    MUSIC=dict(rhythm_end_bar=26, final_chord=54.2, counter_from_bar=14),
+    OUT_NAME="dakk_yukleme_kurulum",
+)
+
+
+def use_setup_profile():
+    global DURATION, INTRO, SCENES, OUTRO, PHONE_END, MUSIC, OUT_NAME
+    DURATION = SETUP["DURATION"]
+    INTRO = SETUP["INTRO"]
+    SCENES = []
+    t = INTRO["end"]
+    for sc in SETUP["SCENES"]:
+        SCENES.append(dict(sc, start=t, end=t + SETUP["SCENE_LEN"]))
+        t += SETUP["SCENE_LEN"]
+    OUTRO = SETUP["OUTRO"]
+    PHONE_END = OUTRO["start"]
+    MUSIC = SETUP["MUSIC"]
+    OUT_NAME = SETUP["OUT_NAME"]
 
 
 def use_long_profile():
@@ -734,10 +780,13 @@ if __name__ == "__main__":
     ap.add_argument("--frames", help="Virgülle ayrılmış saniyeler: yalnızca PNG önizleme üretir")
     ap.add_argument("--uzun", action="store_true", help="69 saniyelik detaylı sürüm")
     ap.add_argument("--indir", action="store_true", help="30 sn 'nasıl indirilir' videosu")
+    ap.add_argument("--kurulum", action="store_true", help="60 sn yükleme + kurulum videosu")
     a = ap.parse_args()
     ap_indir = a.indir
     if a.uzun:
         use_long_profile()
     elif ap_indir:
         use_howto_profile()
+    elif a.kurulum:
+        use_setup_profile()
     render(a)
