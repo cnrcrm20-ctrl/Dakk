@@ -7,6 +7,7 @@ Kullanım:
     .venv/bin/python promo/build_promo.py               # promo/render/ altına iki video üretir
     .venv/bin/python promo/build_promo.py --frames 2,6  # yalnızca o saniyelerden PNG önizleme
     .venv/bin/python promo/build_promo.py --uzun        # 69 saniyelik detaylı sürüm (9 sahne + özet)
+    .venv/bin/python promo/build_promo.py --indir       # 30 sn "Dakk nasıl indirilir?" videosu
 
 Telefon ekranları promo/mock_screens.py'de çizilir: Dakk arayüzünün sadeleştirilmiş, animasyonlu hali
 (Google tanıtım reklamlarındaki gibi). İstenirse bir sahne gerçek ekran kaydıyla değiştirilebilir:
@@ -26,7 +27,10 @@ import imageio_ffmpeg
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mock_install  # noqa: E402
 import mock_screens  # noqa: E402
+
+SCREEN_FUNCS = dict(mock_screens.SCENE_FUNCS, **mock_install.SCENE_FUNCS)
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -100,6 +104,36 @@ LONG = dict(
     MUSIC=dict(rhythm_end_bar=31, final_chord=64.2, counter_from_bar=14),
     OUT_NAME="dakk_tanitim_69sn",
 )
+
+
+# ---- 30 sn "nasıl indirilir?" videosu: 4 adım x 5 sn
+HOWTO = dict(
+    INTRO=dict(start=0.0, end=4.0, lines=["Dakk'ı", "30 saniyede", "kur."], hl="30 saniyede"),
+    SCENES=[
+        dict(clip="i1_site", step=1, title="Siteye gir, İndir'e dokun.", hl="İndir'e",
+             sub="cnrcrm20-ctrl.github.io/Dakk"),
+        dict(clip="i2_indir", step=2, title="Dosyayı indir.", hl="indir.", sub="Chrome sorarsa: Yine de indir."),
+        dict(clip="i3_izin", step=3, title="Yüklemeye izin ver.", hl="izin", sub="Bu kaynaktan izin ver. Bir kez yeter."),
+        dict(clip="i4_yukle", step=4, title="Yükle, aç. Hazır!", hl="Hazır!", sub="Google hesabınla gir, yazışmaya başla."),
+    ],
+    SCENE_LEN=5.0,
+    OUTRO=dict(start=24.0, duck_start=24.35, text_start=26.0, words="Ücretsiz. Reklamsız. Açık kaynak.",
+               button="cnrcrm20-ctrl.github.io/Dakk", url="Android 7.0 ve üzeri"),
+    OUT_NAME="dakk_nasil_indirilir",
+)
+
+
+def use_howto_profile():
+    global INTRO, SCENES, OUTRO, PHONE_END, OUT_NAME
+    INTRO = HOWTO["INTRO"]
+    SCENES = []
+    t = INTRO["end"]
+    for sc in HOWTO["SCENES"]:
+        SCENES.append(dict(sc, start=t, end=t + HOWTO["SCENE_LEN"]))
+        t += HOWTO["SCENE_LEN"]
+    OUTRO = HOWTO["OUTRO"]
+    PHONE_END = OUTRO["start"]
+    OUT_NAME = HOWTO["OUT_NAME"]
 
 
 def use_long_profile():
@@ -536,11 +570,29 @@ class Renderer:
         bd.text((60, 29), OUTRO["button"], font=bf, fill=INK + (255,))
         self.url = text_img(OUTRO["url"], 36, 400, SUBINK)
 
+    def draw_step(self, canvas, t, n, start, end):
+        """Adım rozeti: sarı daire içinde numara + "/4"."""
+        p = mock_screens.back_out(prog(t, start, 0.45))
+        ex = ease_in_out(prog(t, end - 0.35, 0.35))
+        if p <= 0 or ex >= 1:
+            return
+        size = 92
+        b = Image.new("RGBA", (size * 3, size * 3), (0, 0, 0, 0))
+        ImageDraw.Draw(b).ellipse((0, 0, size * 3 - 1, size * 3 - 1), fill=YELLOW + (255,))
+        b = b.resize((size, size), Image.LANCZOS)
+        num = text_img(str(n), 54, 700, INK)
+        b.alpha_composite(num, ((size - num.width) // 2, (size - num.height) // 2 - 2))
+        s = max(0.01, min(p, 1.1))
+        b2 = b.resize((max(2, int(size * s)), max(2, int(size * s))), Image.BILINEAR)
+        tot = len(SCENES)
+        cx, cy = W / 2, 118
+        paste(canvas, b2, cx - b2.width / 2, cy - b2.height / 2 - ex * 20, 1 - ex)
+
     def screen_for(self, idx, t):
         s = SCENES[idx]
         path = find_clip(s["clip"])
         if not path:
-            return mock_screens.SCENE_FUNCS[s["clip"]]((t - s["start"]) * s.get("speed", 1.0))
+            return SCREEN_FUNCS[s["clip"]]((t - s["start"]) * s.get("speed", 1.0))
         if idx not in self.readers:
             cfg = self.settings.get(s["clip"], {})
             n = int((s["end"] - s["start"] + 1.0) * FPS)
@@ -598,7 +650,9 @@ class Renderer:
         for i, s in enumerate(SCENES):
             if s["start"] - 0.2 <= t < s["end"]:
                 start = s["start"] + (0.35 if i == 0 else 0.05)
-                self.titles[i].draw(canvas, t, start, s["end"])
+                if s.get("step"):
+                    self.draw_step(canvas, t, s["step"], start, s["end"])
+                self.titles[i].draw(canvas, t, start + (0.12 if s.get("step") else 0), s["end"])
                 sub = self.subs[i]
                 p = ease_out(prog(t, start + 0.3, 0.5))
                 ex = ease_in_out(prog(t, s["end"] - 0.35, 0.35))
@@ -679,7 +733,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--frames", help="Virgülle ayrılmış saniyeler: yalnızca PNG önizleme üretir")
     ap.add_argument("--uzun", action="store_true", help="69 saniyelik detaylı sürüm")
+    ap.add_argument("--indir", action="store_true", help="30 sn 'nasıl indirilir' videosu")
     a = ap.parse_args()
+    ap_indir = a.indir
     if a.uzun:
         use_long_profile()
+    elif ap_indir:
+        use_howto_profile()
     render(a)
