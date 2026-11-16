@@ -617,9 +617,14 @@ async function handleBroadcast(request, ctx) {
   const text = String(body.body || "").trim();
   if (!title || title.length > 80 || !text || text.length > 400) throw httpError(400, "Başlık veya metin geçersiz");
   const dryRun = body.dryRun === true;
+  // İsteğe bağlı: yalnızca bu sürüm kodunun ALTINDAKİ (eski) uygulamalara gönder.
+  // Supabase'de sürümü bu koda eşit/büyük olanlar atlanır; Firestore'daki sürümsüz jetonlar
+  // (2.4.0 öncesi) Supabase'de kaydı yoksa eski sayılır.
+  const below = body.belowVersionCode == null ? null : Number(body.belowVersionCode);
+  if (below != null && (!Number.isInteger(below) || below < 1)) throw httpError(400, "belowVersionCode geçersiz");
 
-  const tokens = await allPushTokens(ctx);
-  const result = { ok: true, dryRun, total: tokens.length, sent: 0, failed: 0, removed: 0 };
+  const tokens = await allPushTokens(ctx, below);
+  const result = { ok: true, dryRun, belowVersionCode: below, total: tokens.length, sent: 0, failed: 0, removed: 0 };
   const url = `https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`;
 
   let next = 0;
@@ -662,16 +667,22 @@ async function handleBroadcast(request, ctx) {
   return json(result);
 }
 
-/** Supabase (2.4.0+) ve Firestore'daki (eski sürümler) jetonlar; aynı kişi bir kez sayılır. */
-async function allPushTokens(ctx) {
+/**
+ * Supabase (2.4.0+) ve Firestore'daki (eski sürümler) jetonlar; aynı kişi bir kez sayılır.
+ * belowVersionCode verilirse yalnızca o sürüm kodunun altındaki uygulamalar döner.
+ */
+async function allPushTokens(ctx, belowVersionCode = null) {
   const out = [];
   const seen = new Set();
   if (hasSupabase(ctx.env)) {
-    const res = await supabaseFetch(ctx.env, "push_tokens?select=uid,token");
+    const res = await supabaseFetch(ctx.env, "push_tokens?select=uid,token,app_version");
+    if (!res.ok && belowVersionCode != null) throw new Error(`Supabase jetonları okunamadı: ${res.status}`);
     if (res.ok) {
       for (const row of await res.json()) {
         if (row.uid && row.token && !seen.has(row.uid)) {
           seen.add(row.uid);
+          const version = row.app_version == null ? null : Number(row.app_version);
+          if (belowVersionCode != null && version != null && version >= belowVersionCode) continue;
           out.push({ uid: row.uid, token: row.token, fromSupabase: true });
         }
       }
