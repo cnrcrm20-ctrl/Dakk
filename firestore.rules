@@ -10,6 +10,9 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // DİKKAT: Depodaki adresler yer tutucudur (depo herkese açık). Kuralları yayınlarken
+    // kurucu1/kurucu2 yerine GERÇEK kurucu adreslerini yaz; yoksa kurucu paneli
+    // "permission denied" verir ve kimse açamaz.
     function isFounder() {
       return isSignedIn() &&
              request.auth.token.email_verified == true &&
