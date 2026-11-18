@@ -1,3 +1,0 @@
-Bu PNG emojiler Google Noto Emoji projesinden alınmıştır:
-https://github.com/googlefonts/noto-emoji (2D/png/128)
-Görseller Apache License 2.0 ile lisanslıdır: https://www.apache.org/licenses/LICENSE-2.0
