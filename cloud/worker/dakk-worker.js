@@ -718,6 +718,7 @@ async function listPushTokens(ctx) {
 /**
  * app_config/public belgesini döndürür; gövdede { set: {...} } varsa yalnızca izinli alanları değiştirir.
  * Örnek: { "set": { "min_supported_version": "2.3.0" } }
+ * Özellik anahtarı: { "set": { "feature_sesli_mesaj": true } }
  */
 async function handleConfig(request, ctx) {
   const body = await readJson(request);
@@ -725,7 +726,7 @@ async function handleConfig(request, ctx) {
   if (set) {
     const fields = {};
     for (const [k, v] of Object.entries(set)) {
-      const type = CONFIG_FIELDS[k];
+      const type = configFieldType(k);
       if (!type || typeof v !== type) throw httpError(400, `İzin verilmeyen alan: ${k}`);
       if (type === "string" && v.length > 2000) throw httpError(400, `Çok uzun: ${k}`);
       fields[k] = v;
@@ -736,8 +737,16 @@ async function handleConfig(request, ctx) {
   }
   const pub = (await getDoc(ctx, "app_config/public")) || {};
   const view = {};
-  for (const k of Object.keys(CONFIG_FIELDS)) if (k in pub) view[k] = pub[k];
+  for (const k of Object.keys(pub)) if (configFieldType(k)) view[k] = pub[k];
   return json({ ok: true, config: view });
+}
+
+/** Sunucudan açılıp kapatılan özellikler (2.6.0+): `feature_<ad>` alanları her zaman boolean'dır. */
+const FEATURE_KEY = /^feature_[a-z0-9_]{1,40}$/;
+
+function configFieldType(key) {
+  if (Object.prototype.hasOwnProperty.call(CONFIG_FIELDS, key)) return CONFIG_FIELDS[key];
+  return FEATURE_KEY.test(key) ? "boolean" : null;
 }
 
 /** 7 günden eski fotoğrafları ve 60 günden eski sayaçları siler. */

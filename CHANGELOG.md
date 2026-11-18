@@ -2,6 +2,12 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.6.0] - Geliştiriliyor
+
+### İyileştirildi
+- **Özellikler uzaktan açılabiliyor:** Yeni özellikler, uygulamayı yeniden indirmeye gerek kalmadan sunucudan
+  açılıp kapatılabiliyor. Bir sorun çıkarsa özellik herkes için anında kapatılabiliyor.
+
 ## [2.5.0] - 2026-11-15
 
 ### Yeni

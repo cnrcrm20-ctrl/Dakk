@@ -55,6 +55,7 @@
     },
     {
       "title": "Özellikler",
+      "description": "2.6.0 ve sonrası: yeni özellikler burada feature_… anahtarlarıyla, uygulama güncellemesi gerekmeden açılıp kapatılır.",
       "fields": [
         { "key": "images_enabled", "doc": "public", "type": "switch", "label": "Fotoğraf gönderme", "help": "Firestore ücretsiz kotası dolmak üzereyse geçici olarak kapatabilirsiniz.", "default": true }
       ]

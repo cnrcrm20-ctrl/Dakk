@@ -20,8 +20,18 @@ data class PublicConfig(
     val maintenanceEnabled: Boolean = false,
     val maintenanceMessage: String = "",
     val serverUrl: String = DEFAULT_SERVER_URL,
-    val announcement: Announcement? = null
+    val announcement: Announcement? = null,
+    /**
+     * Sunucudan açılıp kapatılabilen özellikler (2.6.0+): app_config/public içindeki `feature_*` boolean
+     * alanları. Yeni bir özellik uygulamaya eklenirken burada bir anahtarla korunur; kurucu panelinden
+     * veya /admin/config ile uygulama güncellemesi gerekmeden açılır/kapatılır.
+     */
+    val features: Map<String, Boolean> = emptyMap()
 ) {
+    /** `feature_<name>` anahtarı sunucuda yoksa [default] döner. Ad "feature_" ön ekiyle de verilebilir. */
+    fun feature(name: String, default: Boolean = false): Boolean =
+        features[name.removePrefix(FEATURE_PREFIX)] ?: default
+
     /** Bu sürüm artık desteklenmiyorsa true (zorunlu güncelleme). */
     fun requiresUpdate(currentVersion: String): Boolean =
         minSupportedVersion.isNotBlank() && VersionUtils.isNewer(minSupportedVersion, currentVersion)
@@ -29,6 +39,7 @@ data class PublicConfig(
     val hasServer: Boolean get() = serverUrl.startsWith("https://")
 
     companion object {
+        const val FEATURE_PREFIX = "feature_"
         const val PROVIDER_GEMINI = "gemini"
         const val PROVIDER_CUSTOM = "custom"
         const val DEFAULT_MODEL = "gemini-2.5-flash"
@@ -51,7 +62,10 @@ data class PublicConfig(
                 maintenanceEnabled = data.bool("maintenance_enabled") ?: false,
                 maintenanceMessage = data.str("maintenance_message") ?: "",
                 serverUrl = data.str("server_url")?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: DEFAULT_SERVER_URL,
-                announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) }
+                announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) },
+                features = data.entries
+                    .filter { (k, v) -> k.startsWith(FEATURE_PREFIX) && k.length > FEATURE_PREFIX.length && v is Boolean }
+                    .associate { (k, v) -> k.removePrefix(FEATURE_PREFIX) to (v as Boolean) }
             )
         }
     }

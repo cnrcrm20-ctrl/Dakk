@@ -84,4 +84,24 @@ class AppConfigTest {
         assertFalse(PrivateConfig("http://api.x/v1", "k", "m").isUsable)
         assertFalse(PrivateConfig("https://api.x/v1", "", "m").isUsable)
     }
+
+    @Test
+    fun featureFlagsFromServer() {
+        val c = PublicConfig.fromMap(
+            mapOf(
+                "feature_voice_notes" to true,
+                "feature_stories" to false,
+                "feature_bad" to "true",   // boolean olmayan değer yok sayılır
+                "feature_" to true,        // adsız anahtar yok sayılır
+                "images_enabled" to false  // feature_ olmayan alanlar özellik değildir
+            )
+        )
+        assertEquals(mapOf("voice_notes" to true, "stories" to false), c.features)
+        assertTrue(c.feature("voice_notes"))
+        assertTrue(c.feature("feature_voice_notes"))
+        assertFalse(c.feature("stories", default = true))
+        assertFalse(c.feature("bad"))
+        assertTrue(c.feature("unknown", default = true))
+        assertFalse(PublicConfig.fromMap(null).feature("voice_notes"))
+    }
 }
