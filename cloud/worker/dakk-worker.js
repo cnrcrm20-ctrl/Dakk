@@ -48,13 +48,12 @@ const CONFIG_FIELDS = {
   maintenance_enabled: "boolean",
   maintenance_message: "string",
   images_enabled: "boolean",
-  // 2.6.0+: güncelleme gerektirmeden değişen içerik.
-  event_json: "string",
+  // 2.6.0+: sohbet listesinin üstündeki duyuru bandı.
   home_banner: "string",
   home_banner_url: "string",
   home_banner_until: "string",
 };
-const CONFIG_MAX_LENGTH = { event_json: 12000, home_banner: 300, home_banner_url: 500, home_banner_until: 40 };
+const CONFIG_MAX_LENGTH = { home_banner: 300, home_banner_url: 500, home_banner_until: 40 };
 
 // İzolat (Worker örneği) yaşadığı sürece tutulan önbellekler.
 let jwksCache = { keys: null, expires: 0 };
@@ -731,13 +730,10 @@ async function handleConfig(request, ctx) {
   const set = body.set && typeof body.set === "object" ? body.set : null;
   if (set) {
     const fields = {};
-    for (const [k, raw] of Object.entries(set)) {
+    for (const [k, v] of Object.entries(set)) {
       const type = configFieldType(k);
-      // Etkinlikler nesne olarak da gönderilebilir; belgeye metin olarak yazılır.
-      const v = k === "event_json" && raw && typeof raw === "object" ? JSON.stringify(raw) : raw;
       if (!type || typeof v !== type) throw httpError(400, `İzin verilmeyen alan: ${k}`);
       if (type === "string" && v.length > (CONFIG_MAX_LENGTH[k] || 2000)) throw httpError(400, `Çok uzun: ${k}`);
-      if (k === "event_json" && v !== "") validateEvents(v);
       if (k === "home_banner_url" && v !== "" && !v.startsWith("https://")) throw httpError(400, "home_banner_url https:// ile başlamalı");
       fields[k] = v;
     }
@@ -749,47 +745,6 @@ async function handleConfig(request, ctx) {
   const view = {};
   for (const k of Object.keys(pub)) if (configFieldType(k)) view[k] = pub[k];
   return json({ ok: true, config: view });
-}
-
-/** event_json'un uygulamanın okuyabileceği biçimde olduğunu denetler (ayrıntı: util/Events.kt). */
-function validateEvents(text) {
-  let root;
-  try {
-    root = JSON.parse(text);
-  } catch (_) {
-    throw httpError(400, "event_json geçerli JSON değil");
-  }
-  if (!root || typeof root !== "object" || Array.isArray(root)) throw httpError(400, "event_json bir nesne olmalı");
-  if (root.yilbasi !== undefined && typeof root.yilbasi !== "boolean") throw httpError(400, "yilbasi true/false olmalı");
-  const events = root.events === undefined ? [] : root.events;
-  if (!Array.isArray(events) || events.length > 30) throw httpError(400, "events en fazla 30 öğelik bir liste olmalı");
-  const date = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?$/;
-  const ids = new Set();
-  events.forEach((e, i) => {
-    const where = `events[${i}]`;
-    if (!e || typeof e !== "object") throw httpError(400, `${where} nesne olmalı`);
-    if (typeof e.id !== "string" || !/^[a-z0-9_-]{1,40}$/.test(e.id)) throw httpError(400, `${where}.id küçük harf/rakam/-/_ olmalı`);
-    if (ids.has(e.id)) throw httpError(400, `${where}.id tekrar ediyor`);
-    ids.add(e.id);
-    for (const key of ["start", "end"]) {
-      if (typeof e[key] !== "string" || !date.test(e[key])) throw httpError(400, `${where}.${key} "YYYY-AA-GG" olmalı`);
-    }
-    if (e.countdown_to !== undefined && (typeof e.countdown_to !== "string" || !date.test(e.countdown_to))) {
-      throw httpError(400, `${where}.countdown_to "YYYY-AA-GG" veya "YYYY-AA-GGTSS:DD" olmalı`);
-    }
-    if (e.end.slice(0, 10) < e.start.slice(0, 10)) throw httpError(400, `${where}: end, start'tan önce`);
-    for (const key of ["cards", "greetings", "colors"]) {
-      if (e[key] !== undefined && (!Array.isArray(e[key]) || e[key].some((x) => typeof x !== "string"))) {
-        throw httpError(400, `${where}.${key} metin listesi olmalı`);
-      }
-    }
-    for (const card of e.cards || []) {
-      if (!card.startsWith("https://") && !/^yerlesik:[1-4]$/.test(card)) throw httpError(400, `${where}.cards: https:// veya yerlesik:1-4`);
-    }
-    for (const c of e.colors || []) {
-      if (!/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(c)) throw httpError(400, `${where}.colors: #RRGGBB`);
-    }
-  });
 }
 
 /** Sunucudan açılıp kapatılan özellikler (2.6.0+): `feature_<ad>` alanları her zaman boolean'dır. */

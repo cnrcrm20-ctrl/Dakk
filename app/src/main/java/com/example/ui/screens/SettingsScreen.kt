@@ -86,8 +86,6 @@ fun SettingsScreen(viewModel: DakkViewModel) {
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
     val dataSaver by viewModel.dataSaver.collectAsStateWithLifecycle()
     val saverLevel by viewModel.saverLevel.collectAsStateWithLifecycle()
-    val seasonEvent by viewModel.seasonEvent.collectAsStateWithLifecycle()
-    val festivePref by viewModel.festivePref.collectAsStateWithLifecycle()
 
     var showQr by remember { mutableStateOf(false) }
     var showEditName by remember { mutableStateOf(false) }
@@ -165,33 +163,6 @@ fun SettingsScreen(viewModel: DakkViewModel) {
                 onCheckedChange = { viewModel.setChatBackup(it) },
                 colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
             )
-        }
-        val shownEvent = seasonEvent
-        if (shownEvent != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { viewModel.setFestiveEnabled(!festivePref) }
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(shownEvent.emoji, fontSize = 20.sp, modifier = Modifier.width(24.dp))
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(if (shownEvent.hat) "Yılbaşı süsleri" else "Etkinlik süsleri", color = Color.White, fontSize = 16.sp)
-                    Text(
-                        if (shownEvent.hat) "Kar, geri sayım, şapkalı ördek ve konfeti. 2 Ocak'ta kendiliğinden kalkar"
-                        else "Geri sayım, kartlar ve konfeti. ${java.text.SimpleDateFormat("d MMMM", java.util.Locale("tr")).format(java.util.Date(shownEvent.end))} tarihinde kendiliğinden kalkar",
-                        color = DakkTextSecondaryDark,
-                        fontSize = 13.sp
-                    )
-                }
-                Switch(
-                    checked = festivePref,
-                    onCheckedChange = { viewModel.setFestiveEnabled(it) },
-                    colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
-                )
-            }
         }
         SettingRow(
             Icons.Default.DataSaverOn,

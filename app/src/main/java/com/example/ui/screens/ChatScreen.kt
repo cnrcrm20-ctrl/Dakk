@@ -24,8 +24,6 @@ import android.widget.Toast
 import com.example.data.ChatIds
 import com.example.media.VoiceMeta
 import com.example.media.VoicePlayback
-import com.example.ui.components.ConfettiBurst
-import com.example.ui.components.EventCardPicker
 import com.example.ui.components.VoiceMessageContent
 import com.example.ui.components.VoiceRecordingBar
 import com.example.ui.components.CreatePollDialog
@@ -169,7 +167,6 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     val playback by viewModel.voicePlayback.collectAsStateWithLifecycle()
     val voiceElapsed by viewModel.voiceElapsed.collectAsStateWithLifecycle()
     val voiceLevel by viewModel.voiceLevel.collectAsStateWithLifecycle()
-    val event by viewModel.activeEvent.collectAsStateWithLifecycle()
 
     val chat = activeChat?.takeIf { it.key == peerUid }
     val isGroup = ChatIds.isGroup(peerUid)
@@ -191,9 +188,6 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     var pendingMention by remember { mutableStateOf<String?>(null) }
     var replyingTo by remember(peerUid) { mutableStateOf<UiMessage?>(null) }
     var creatingPoll by remember { mutableStateOf(false) }
-    var pickingCard by remember { mutableStateOf(false) }
-    var confetti by remember { mutableIntStateOf(0) }
-    val celebrated = remember(peerUid) { mutableSetOf<String>() }
     val recording = voiceElapsed >= 0
     val voiceEnabled = config.feature(DakkViewModel.FEATURE_VOICE, true)
     var searching by rememberSaveable(peerUid) { mutableStateOf(false) }
@@ -281,16 +275,6 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
         viewModel.consumeJumpRequest()
     }
 
-    // Etkinlikte (yılbaşı, bayram…) kutlama sözü yazan yeni bir mesaj gelince/gidince konfeti patlar.
-    val lastMessage = allMessages.lastOrNull()
-    LaunchedEffect(lastMessage?.id, event) {
-        val m = lastMessage ?: return@LaunchedEffect
-        val current = event
-        if (current == null || m.id in celebrated) return@LaunchedEffect
-        celebrated += m.id
-        val fresh = System.currentTimeMillis() - m.timestamp < 90_000
-        if (fresh && current.isGreeting(m.text)) confetti++
-    }
     LaunchedEffect(chatItems.size, assistantTyping, typers.isNotEmpty()) {
         val extra = (if (assistantTyping) 1 else 0) + 1
         if (chatItems.isNotEmpty() && !(searching && query.isNotBlank())) {
@@ -498,16 +482,6 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    val cardEvent = event
-                    if (cardEvent != null && cardEvent.cards.isNotEmpty() && config.imagesEnabled) {
-                        IconButton(
-                            onClick = { pickingCard = true },
-                            enabled = canSend,
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Text(cardEvent.emoji, fontSize = 22.sp)
-                        }
-                    }
                     if (config.imagesEnabled) {
                         IconButton(
                             onClick = {
@@ -695,7 +669,6 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                     }
                 }
             }
-            ConfettiBurst(trigger = confetti)
         }
     }
 
@@ -816,18 +789,6 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                 }
             },
             onDismiss = { pendingMention = null }
-        )
-    }
-
-    val pickerEvent = event
-    if (pickingCard && pickerEvent != null) {
-        EventCardPicker(
-            event = pickerEvent,
-            onPick = { card ->
-                pickingCard = false
-                viewModel.sendEventCard(peerUid, card)
-            },
-            onDismiss = { pickingCard = false }
         )
     }
 

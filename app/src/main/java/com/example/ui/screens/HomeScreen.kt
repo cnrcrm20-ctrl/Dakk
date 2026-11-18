@@ -1,7 +1,5 @@
 package com.example.ui.screens
 
-import com.example.ui.components.EventCountdownCard
-import com.example.ui.components.SnowOverlay
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -115,7 +113,6 @@ fun HomeScreen(viewModel: DakkViewModel) {
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val typingLabels by viewModel.typingLabels.collectAsStateWithLifecycle()
-    val event by viewModel.activeEvent.collectAsStateWithLifecycle()
     val banner by viewModel.homeBanner.collectAsStateWithLifecycle()
 
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -154,7 +151,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
-                                    painter = painterResource(if (event?.hat == true) R.drawable.dakk_logo_xmas else R.drawable.dakk_logo),
+                                    painter = painterResource(R.drawable.dakk_logo),
                                     contentDescription = null,
                                     modifier = Modifier.size(28.dp)
                                 )
@@ -303,8 +300,6 @@ fun HomeScreen(viewModel: DakkViewModel) {
                             config.assistantEnabled -> ChatList(
                                 chats = filtered,
                                 typing = typingLabels,
-                                event = event,
-                                festiveClock = viewModel.festiveClock,
                                 banner = banner,
                                 onDismissBanner = { viewModel.dismissHomeBanner() },
                                 showAssistant = true,
@@ -320,8 +315,6 @@ fun HomeScreen(viewModel: DakkViewModel) {
                             else -> ChatList(
                                 filtered,
                                 typing = typingLabels,
-                                event = event,
-                                festiveClock = viewModel.festiveClock,
                                 banner = banner,
                                 onDismissBanner = { viewModel.dismissHomeBanner() },
                                 showAssistant = false
@@ -346,7 +339,6 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 }
                 HomeTab.SETTINGS -> SettingsScreen(viewModel)
             }
-            if (event?.snow == true && tab == HomeTab.CHATS) SnowOverlay(count = 26)
         }
     }
 
@@ -360,8 +352,6 @@ private fun ChatList(
     chats: List<ChatSummary>,
     typing: Map<String, String>,
     showAssistant: Boolean,
-    event: com.example.util.DakkEvent? = null,
-    festiveClock: kotlinx.coroutines.flow.StateFlow<Long>? = null,
     banner: com.example.config.PublicConfig? = null,
     onDismissBanner: () -> Unit = {},
     onAssistant: () -> Unit = {},
@@ -379,12 +369,6 @@ private fun ChatList(
         if (banner != null) {
             item(key = "home_banner") {
                 HomeBanner(banner.homeBanner, banner.homeBannerUrl, onDismissBanner)
-            }
-        }
-        if (event != null && festiveClock != null) {
-            item(key = "festive_countdown") {
-                val now by festiveClock.collectAsStateWithLifecycle()
-                EventCountdownCard(event = event, now = now, onSendCard = null)
             }
         }
         if (showAssistant) {

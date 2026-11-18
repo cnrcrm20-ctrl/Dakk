@@ -27,15 +27,4 @@ class TurkishSuffixTest {
         assertEquals("Gül'ün", TurkishSuffix.genitive("Gül"))
         assertEquals("Örs'ün", TurkishSuffix.genitive("Örs"))
     }
-
-    @Test
-    fun dativeNumbersFollowPronunciation() {
-        assertEquals("2026'ya", TurkishSuffix.dativeNumber(2026))
-        assertEquals("2027'ye", TurkishSuffix.dativeNumber(2027))
-        assertEquals("2028'e", TurkishSuffix.dativeNumber(2028))
-        assertEquals("2029'a", TurkishSuffix.dativeNumber(2029))
-        assertEquals("2030'a", TurkishSuffix.dativeNumber(2030))
-        assertEquals("2000'e", TurkishSuffix.dativeNumber(2000))
-        assertEquals("100'e", TurkishSuffix.dativeNumber(100))
-    }
 }

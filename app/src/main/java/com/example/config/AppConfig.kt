@@ -27,8 +27,6 @@ data class PublicConfig(
      * veya /admin/config ile uygulama güncellemesi gerekmeden açılır/kapatılır.
      */
     val features: Map<String, Boolean> = emptyMap(),
-    /** Etkinlikler (bayram, özel gün…) — biçim: [com.example.util.Events.parse]. Boşsa yalnızca yerleşik yılbaşı. */
-    val eventJson: String = "",
     /** Sohbet listesinin üstündeki kısa duyuru bandı (boşsa gösterilmez). */
     val homeBanner: String = "",
     val homeBannerUrl: String = "",
@@ -70,10 +68,9 @@ data class PublicConfig(
                 maintenanceMessage = data.str("maintenance_message") ?: "",
                 serverUrl = data.str("server_url")?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: DEFAULT_SERVER_URL,
                 announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) },
-                eventJson = data.str("event_json")?.trim().orEmpty(),
                 homeBanner = data.str("home_banner")?.trim()?.take(300).orEmpty(),
                 homeBannerUrl = data.str("home_banner_url")?.trim()?.takeIf { it.startsWith("https://") }.orEmpty(),
-                homeBannerUntil = data.str("home_banner_until")?.let { com.example.util.Events.time(it, endOfDay = true) }
+                homeBannerUntil = data.str("home_banner_until")?.let { bannerUntil(it) }
                     ?: data.long("home_banner_until") ?: 0L,
                 features = data.entries
                     .filter { (k, v) -> k.startsWith(FEATURE_PREFIX) && k.length > FEATURE_PREFIX.length && v is Boolean }
@@ -165,4 +162,17 @@ internal fun Map<*, *>.long(key: String): Long? = when (val v = this[key]) {
     is String -> v.trim().toLongOrNull()
     is com.google.firebase.Timestamp -> v.toDate().time
     else -> null
+}
+
+/** "2026-12-31" → o günün sonu (telefonun saat diliminde); epoch milisaniye de kabul edilir. Geçersizse null. */
+internal fun bannerUntil(value: String, tz: java.util.TimeZone = java.util.TimeZone.getDefault()): Long? {
+    val s = value.trim()
+    s.toLongOrNull()?.let { return it.takeIf { v -> v > 0 } }
+    val m = Regex("""(\d{4})-(\d{2})-(\d{2})""").matchEntire(s) ?: return null
+    val c = java.util.Calendar.getInstance(tz).apply {
+        isLenient = false
+        clear()
+        set(m.groupValues[1].toInt(), m.groupValues[2].toInt() - 1, m.groupValues[3].toInt())
+    }
+    return runCatching { c.timeInMillis + 86_400_000L }.getOrNull()
 }

@@ -39,11 +39,6 @@ import com.example.data.LocalPhoto
 import com.example.data.PollView
 import com.example.push.TypingClient
 import com.example.util.DataSaver
-import com.example.util.DakkEvent
-import com.example.util.EventCard
-import com.example.util.Events
-import com.example.util.Festive
-import com.example.ui.components.FESTIVE_CARDS
 import com.example.util.Disappearing
 import com.example.util.MuteOptions
 import com.example.util.Polls
@@ -309,62 +304,20 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private val _config = MutableStateFlow(PublicConfig())
     val config: StateFlow<PublicConfig> = _config
 
-    // ------------------------------------------------------------------ Etkinlikler (yılbaşı, bayram…)
+    // ------------------------------------------------------------------ Duyuru bandı (sunucudan)
 
-    private val _festivePref = MutableStateFlow(prefs.getBoolean(PREF_FESTIVE, true))
-    /** Ayarlar → Uygulama → "Yılbaşı/Etkinlik süsleri" (yalnızca bu cihaz). */
-    val festivePref: StateFlow<Boolean> = _festivePref
-
-    /** Sunucudaki etkinlik listesi; açılışta ayarlar gelmeden de çalışsın diye son hali saklanır. */
-    private val _eventJson = MutableStateFlow(prefs.getString(PREF_EVENT_JSON, "").orEmpty())
-    private val _newYearAllowed = MutableStateFlow(prefs.getBoolean(PREF_FESTIVE_REMOTE, true))
-    private val eventSpec: StateFlow<Events.Spec?> = _eventJson.map { Events.parse(it) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, Events.parse(_eventJson.value))
-
-    private fun eventAt(now: Long): DakkEvent? = Events.active(eventSpec.value, now, _newYearAllowed.value)
-
-    /** Saat: geri sayım ve etkinlik sınırları için. Son saatte saniyede bir, öncesinde 30 sn'de bir ilerler. */
-    val festiveClock: StateFlow<Long> = kotlinx.coroutines.flow.flow {
+    /** Bandın bitiş tarihini kontrol etmek için dakikada bir ilerleyen saat. */
+    private val bannerClock: StateFlow<Long> = kotlinx.coroutines.flow.flow {
         while (true) {
-            val now = System.currentTimeMillis()
-            emit(now)
-            delay(eventAt(now)?.tickMillis(now) ?: 60_000L)
+            emit(System.currentTimeMillis())
+            delay(60_000L)
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), System.currentTimeMillis())
-
-    /** Şu an süren etkinlik (kullanıcı süsleri kapatmış olsa bile; Ayarlar'daki anahtar bunu gösterir). */
-    val seasonEvent: StateFlow<DakkEvent?> = combine(eventSpec, _newYearAllowed, festiveClock) { spec, newYear, now ->
-        Events.active(spec, now, newYear)
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    /** Gösterilecek etkinlik süsleri; null = süs yok. */
-    val activeEvent: StateFlow<DakkEvent?> = combine(seasonEvent, _festivePref) { event, enabled -> event?.takeIf { enabled } }
-        .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    private val _celebrated = MutableStateFlow(prefs.getStringSet(PREF_EVENT_CELEBRATED, emptySet()).orEmpty().toSet())
-
-    /** Geri sayım bitince (ör. 1 Ocak 00:00) bir kez gösterilen tam ekran kutlama. */
-    val celebration: StateFlow<DakkEvent?> = combine(activeEvent, festiveClock, _celebrated) { event, now, done ->
-        event?.takeIf { it.celebrating(now) && it.id !in done }
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    fun dismissCelebration(eventId: String) {
-        _celebrated.update { (it + eventId).toList().takeLast(30).toSet() }
-        prefs.edit().putStringSet(PREF_EVENT_CELEBRATED, _celebrated.value).apply()
-    }
-
-    fun setFestiveEnabled(enabled: Boolean) {
-        _festivePref.value = enabled
-        prefs.edit().putBoolean(PREF_FESTIVE, enabled).apply()
-    }
-
-    /** Açılış animasyonunda şapkalı ördek mi? (Ayarlar henüz yüklenmeden: son bilinen sunucu ayarı.) */
-    fun festiveNow(): Boolean = _festivePref.value && eventAt(System.currentTimeMillis())?.hat == true
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, System.currentTimeMillis())
 
     private val _dismissedBanner = MutableStateFlow(prefs.getString(PREF_BANNER_DISMISSED, "").orEmpty())
 
     /** Sohbet listesinin üstündeki duyuru bandı (sunucudan: home_banner). */
-    val homeBanner: StateFlow<PublicConfig?> = combine(_config, festiveClock, _dismissedBanner) { cfg, now, dismissed ->
+    val homeBanner: StateFlow<PublicConfig?> = combine(_config, bannerClock, _dismissedBanner) { cfg, now, dismissed ->
         cfg.takeIf {
             it.homeBanner.isNotBlank() && (it.homeBannerUntil <= 0 || now < it.homeBannerUntil) &&
                 bannerKey(it) != dismissed
@@ -588,15 +541,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             launch {
                 configRepo.observePublic().retrying("Ayarlar", uid).collect { cfg ->
                     _config.value = cfg
-                    val festiveRemote = cfg.feature(Festive.FEATURE, true)
-                    if (_newYearAllowed.value != festiveRemote || _eventJson.value != cfg.eventJson) {
-                        _newYearAllowed.value = festiveRemote
-                        _eventJson.value = cfg.eventJson
-                        prefs.edit()
-                            .putBoolean(PREF_FESTIVE_REMOTE, festiveRemote)
-                            .putString(PREF_EVENT_JSON, cfg.eventJson)
-                            .apply()
-                    }
                     updatePushActive()
                     if (cfg.serverUrl != checkedServerUrl) {
                         checkedServerUrl = cfg.serverUrl
@@ -1866,61 +1810,6 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /**
-     * Etkinlik kartı: fotoğraf gibi şifrelenip gönderilir. Uygulamadaki kartlar doğrudan, sunucudaki kartlar
-     * önce indirilip (bir kez, telefonda saklanır) gönderilir.
-     */
-    fun sendEventCard(peerUid: String, card: EventCard) {
-        if (activeEvent.value?.cards?.contains(card) != true) return
-        val app = getApplication<Application>()
-        when (card) {
-            is EventCard.Builtin -> {
-                val res = FESTIVE_CARDS.getOrNull(card.index) ?: return
-                sendImage(peerUid, Uri.parse("android.resource://${app.packageName}/$res"))
-            }
-            is EventCard.Remote -> viewModelScope.launch {
-                val file = withContext(Dispatchers.IO) { downloadEventCard(card.url) }
-                if (file == null) _events.tryEmit("Kart indirilemedi. İnternet bağlantını kontrol et.")
-                else sendImage(peerUid, Uri.fromFile(file))
-            }
-        }
-    }
-
-    private fun downloadEventCard(url: String): File? {
-        val dir = File(getApplication<Application>().cacheDir, "event_cards").apply { mkdirs() }
-        val file = File(dir, Integer.toHexString(url.hashCode()) + ".img")
-        if (file.isFile && file.length() > 0) return file
-        return try {
-            val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 20_000
-                instanceFollowRedirects = true
-            }
-            try {
-                if (conn.responseCode !in 200..299) return null
-                val bytes = conn.inputStream.use { input ->
-                    val out = java.io.ByteArrayOutputStream()
-                    val buf = ByteArray(16 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        if (out.size() > MAX_EVENT_CARD_BYTES) return null
-                    }
-                    out.toByteArray()
-                }
-                val tmp = File(dir, file.name + ".part")
-                tmp.writeBytes(bytes)
-                if (tmp.renameTo(file)) file else null
-            } finally {
-                conn.disconnect()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Etkinlik kartı indirilemedi", e)
-            null
-        }
-    }
-
     /** Galeriden seçilen fotoğrafı sıkıştırır, şifreler ve gönderir. */
     fun sendImage(peerUid: String, uri: Uri) {
         val myUid = sessionUid ?: return
@@ -3160,12 +3049,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         private const val TAG = "DakkViewModel"
         private const val PREF_STARRED = "starred_messages"
-        private const val PREF_FESTIVE = "festive_enabled"
-        private const val PREF_FESTIVE_REMOTE = "festive_remote"
-        private const val PREF_EVENT_CELEBRATED = "event_celebrated"
-        private const val PREF_EVENT_JSON = "event_json_cache"
         private const val PREF_BANNER_DISMISSED = "home_banner_dismissed"
-        private const val MAX_EVENT_CARD_BYTES = 4_000_000
         private const val PREF_AUTO_UPDATE = "auto_update"
         private const val PREF_DATA_SAVER = "data_saver"
         private const val PREF_LOCAL_OWNER = "local_store_owner"
