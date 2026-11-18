@@ -96,7 +96,7 @@ jobs:
       - uses: supabase/setup-cli@v1
         if: steps.token.outputs.ok == 'true'
         with:
-          version: latest
+          version: 2.122.1   # "latest" GitHub API hız sınırına takılıyor; sabit sürüm doğrudan indirilir
       - name: Yükle
         if: steps.token.outputs.ok == 'true'
         env:
