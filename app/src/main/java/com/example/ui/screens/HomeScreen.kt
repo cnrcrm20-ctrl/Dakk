@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.ui.components.NewYearCountdownCard
+import com.example.ui.components.SnowOverlay
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -113,6 +115,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val typingLabels by viewModel.typingLabels.collectAsStateWithLifecycle()
+    val festive by viewModel.festiveActive.collectAsStateWithLifecycle()
 
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -150,7 +153,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
-                                    painter = painterResource(R.drawable.dakk_logo),
+                                    painter = painterResource(if (festive) R.drawable.dakk_logo_xmas else R.drawable.dakk_logo),
                                     contentDescription = null,
                                     modifier = Modifier.size(28.dp)
                                 )
@@ -299,6 +302,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                             config.assistantEnabled -> ChatList(
                                 chats = filtered,
                                 typing = typingLabels,
+                                festiveClock = if (festive) viewModel.festiveClock else null,
                                 showAssistant = true,
                                 onAssistant = { viewModel.openAssistant() },
                                 onAddContact = { showAddContact = true }
@@ -309,7 +313,12 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 action = "Kişi ekle",
                                 onAction = { showAddContact = true }
                             )
-                            else -> ChatList(filtered, typing = typingLabels, showAssistant = false) { viewModel.openChat(it.peerUid) }
+                            else -> ChatList(
+                                filtered,
+                                typing = typingLabels,
+                                festiveClock = if (festive) viewModel.festiveClock else null,
+                                showAssistant = false
+                            ) { viewModel.openChat(it.peerUid) }
                         }
                     }
                 }
@@ -330,6 +339,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 }
                 HomeTab.SETTINGS -> SettingsScreen(viewModel)
             }
+            if (festive && tab == HomeTab.CHATS) SnowOverlay(count = 26)
         }
     }
 
@@ -343,6 +353,7 @@ private fun ChatList(
     chats: List<ChatSummary>,
     typing: Map<String, String>,
     showAssistant: Boolean,
+    festiveClock: kotlinx.coroutines.flow.StateFlow<Long>? = null,
     onAssistant: () -> Unit = {},
     onAddContact: () -> Unit = {},
     onClick: (ChatSummary) -> Unit
@@ -355,6 +366,12 @@ private fun ChatList(
         if (topChatId != null && listState.firstVisibleItemIndex <= 2) listState.animateScrollToItem(0)
     }
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
+        if (festiveClock != null) {
+            item(key = "festive_countdown") {
+                val now by festiveClock.collectAsStateWithLifecycle()
+                NewYearCountdownCard(now = now, onSendCard = null)
+            }
+        }
         if (showAssistant) {
             item(key = "dakk_assistant") {
                 Row(

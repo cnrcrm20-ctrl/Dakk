@@ -86,6 +86,8 @@ fun SettingsScreen(viewModel: DakkViewModel) {
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
     val dataSaver by viewModel.dataSaver.collectAsStateWithLifecycle()
     val saverLevel by viewModel.saverLevel.collectAsStateWithLifecycle()
+    val festiveSeason by viewModel.festiveSeason.collectAsStateWithLifecycle()
+    val festivePref by viewModel.festivePref.collectAsStateWithLifecycle()
 
     var showQr by remember { mutableStateOf(false) }
     var showEditName by remember { mutableStateOf(false) }
@@ -140,7 +142,7 @@ fun SettingsScreen(viewModel: DakkViewModel) {
             }
             runCatching { context.startActivity(intent) }
         }
-        SettingRow(Icons.Default.VerifiedUser, "İzinler", "Bildirim, kamera, güncelleme ve pil") { viewModel.openPermissions() }
+        SettingRow(Icons.Default.VerifiedUser, "İzinler", "Bildirim, kamera, mikrofon, güncelleme ve pil") { viewModel.openPermissions() }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,6 +165,31 @@ fun SettingsScreen(viewModel: DakkViewModel) {
                 onCheckedChange = { viewModel.setChatBackup(it) },
                 colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
             )
+        }
+        if (festiveSeason) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.setFestiveEnabled(!festivePref) }
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("🎄", fontSize = 20.sp, modifier = Modifier.width(24.dp))
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Yılbaşı süsleri", color = Color.White, fontSize = 16.sp)
+                    Text(
+                        "Kar, geri sayım, şapkalı ördek ve konfeti. 2 Ocak'ta kendiliğinden kalkar",
+                        color = DakkTextSecondaryDark,
+                        fontSize = 13.sp
+                    )
+                }
+                Switch(
+                    checked = festivePref,
+                    onCheckedChange = { viewModel.setFestiveEnabled(it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
+                )
+            }
         }
         SettingRow(
             Icons.Default.DataSaverOn,

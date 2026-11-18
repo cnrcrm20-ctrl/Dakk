@@ -23,7 +23,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 
-/** Gönderilmeye hazır, sıkıştırılmış fotoğraf. */
 /**
  * Gönderime hazır fotoğraf. [jpeg] telefonda saklanan ve galeriye kaydedilen haldir. [transit] doluysa
  * yalnızca yolda kullanılan daha küçük WebP kopyasıdır; alıcı onu açıp JPEG olarak saklar (2.5.0+).
@@ -234,31 +233,139 @@ class MediaManager(
         val wire = image.transit ?: image.jpeg
         val encrypted = withContext(Dispatchers.Default) { encrypt(wire) }
         withContext(Dispatchers.IO) { localFile(mediaId).writeBytes(image.jpeg) }
+        val (remote, chunks) = uploadEncrypted(chatId, myUid, mediaId, encrypted)
+        return ImageMeta(
+            mediaId, chunks, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64,
+            remote = remote, transitWebp = image.transit != null
+        )
+    }
+
+    /**
+     * Şifreli veriyi medya deposuna, olmazsa Firestore parçalarına yükler.
+     * Dönüş: (medya deposunda mı, parça sayısı).
+     */
+    private suspend fun uploadEncrypted(chatId: String, myUid: String, mediaId: String, encrypted: ByteArray): Pair<Boolean, Int> {
         val server = mediaServer
         if (server.isNotBlank() && encrypted.size <= PushClient.MAX_MEDIA_BYTES) {
             val uploaded = runCatching { push.uploadMedia(server, chatId, mediaId, encrypted) }.getOrDefault(false)
-            if (uploaded) {
-                return ImageMeta(
-                    mediaId, 1, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64,
-                    remote = true, transitWebp = image.transit != null
-                )
-            }
-            Log.w(TAG, "Fotoğraf deposuna yüklenemedi; Firestore'a yükleniyor")
+            if (uploaded) return true to 1
+            Log.w(TAG, "Medya deposuna yüklenemedi; Firestore'a yükleniyor")
         }
         val parts = (encrypted.indices step CHUNK_BYTES).map { start ->
             val end = minOf(start + CHUNK_BYTES, encrypted.size)
             Base64.encodeToString(encrypted, start, end - start, Base64.NO_WRAP)
         }
-        require(parts.size <= MAX_CHUNKS) { "Fotoğraf çok büyük" }
+        require(parts.size <= MAX_CHUNKS) { "Dosya çok büyük" }
         parts.forEachIndexed { index, part ->
             repo.uploadBlob(chatId, mediaId, index, parts.size, myUid, part)
         }
         rememberUpload(chatId, mediaId, parts.size)
-        return ImageMeta(
-            mediaId, parts.size, image.width, image.height, image.jpeg.size.toLong(), image.thumbBase64,
-            transitWebp = image.transit != null
-        )
+        return false to parts.size
     }
+
+    // ------------------------------------------------------------------ Sesli mesajlar (2.6.0+)
+
+    fun voiceFile(mediaId: String): File = File(dir, "$mediaId.m4a")
+
+    fun hasVoice(mediaId: String): Boolean = voiceFile(mediaId).let { it.isFile && it.length() > 0 }
+
+    /** Ses kaydını birebir sohbette karşı tarafın açık anahtarıyla şifreleyip yükler. */
+    suspend fun uploadVoice(chatId: String, myUid: String, peerPublicKey: String, mediaId: String, clip: VoiceClip): VoiceMeta =
+        uploadVoice(chatId, myUid, mediaId, clip) { crypto.encryptBytes(it, peerPublicKey) }
+
+    /** Ses kaydını verilen şifreleyiciyle (ör. grup mesaj anahtarı) şifreleyip yükler. */
+    suspend fun uploadVoice(
+        chatId: String,
+        myUid: String,
+        mediaId: String,
+        clip: VoiceClip,
+        encrypt: (ByteArray) -> ByteArray
+    ): VoiceMeta {
+        val bytes = withContext(Dispatchers.IO) { clip.file.readBytes() }
+        require(bytes.isNotEmpty() && bytes.size <= MAX_VOICE_BYTES) { "Ses kaydı çok büyük" }
+        val encrypted = withContext(Dispatchers.Default) { encrypt(bytes) }
+        withContext(Dispatchers.IO) {
+            voiceFile(mediaId).writeBytes(bytes)
+            clip.file.delete()
+        }
+        val (remote, chunks) = uploadEncrypted(chatId, myUid, mediaId, encrypted)
+        return VoiceMeta(mediaId, chunks, clip.durationMs, bytes.size.toLong(), clip.waveform, remote)
+    }
+
+    suspend fun downloadVoice(
+        chatId: String,
+        meta: VoiceMeta,
+        senderKey: String,
+        recipientKey: String,
+        deleteAfter: Boolean
+    ): DownloadResult = downloadVoice(chatId, meta, deleteAfter) { crypto.decryptBytes(it, senderKey, recipientKey) }
+
+    /** Ses kaydını indirir, çözer ve cihaza kaydeder. Birebir sohbette alıcı indirince sunucudan silinir. */
+    suspend fun downloadVoice(
+        chatId: String,
+        meta: VoiceMeta,
+        deleteAfter: Boolean,
+        decrypt: (ByteArray) -> ByteArray?
+    ): DownloadResult {
+        if (hasVoice(meta.mediaId)) return DownloadResult.Ok(voiceFile(meta.mediaId))
+        return try {
+            val encrypted = when (val fetched = fetchEncrypted(chatId, meta.mediaId, meta.remote, meta.chunks)) {
+                is Fetched.Ok -> fetched.bytes
+                Fetched.Expired -> return DownloadResult.Expired
+                Fetched.Failed -> return DownloadResult.Failed
+            }
+            val plain = withContext(Dispatchers.Default) { decrypt(encrypted) } ?: return DownloadResult.Failed
+            val file = voiceFile(meta.mediaId)
+            withContext(Dispatchers.IO) {
+                val tmp = File(dir, "${meta.mediaId}.vpart")
+                tmp.writeBytes(plain)
+                tmp.renameTo(file)
+            }
+            if (deleteAfter) {
+                runCatching { removeRemote(chatId, meta.mediaId, meta.remote, meta.chunks) }
+                    .onFailure { Log.w(TAG, "Ses kaydı sunucudan silinemedi", it) }
+            }
+            DownloadResult.Ok(file)
+        } catch (e: Exception) {
+            Log.w(TAG, "Ses kaydı indirilemedi", e)
+            DownloadResult.Failed
+        }
+    }
+
+    /** Silinen veya süresi dolan bir sesli mesajın sunucudaki ve cihazdaki kopyasını kaldırır. */
+    suspend fun deleteVoice(chatId: String, meta: VoiceMeta) {
+        runCatching { removeRemote(chatId, meta.mediaId, meta.remote, meta.chunks) }
+        withContext(Dispatchers.IO) { voiceFile(meta.mediaId).delete() }
+    }
+
+    private sealed class Fetched {
+        class Ok(val bytes: ByteArray) : Fetched()
+        object Expired : Fetched()
+        object Failed : Fetched()
+    }
+
+    private suspend fun fetchEncrypted(chatId: String, mediaId: String, remote: Boolean, chunks: Int): Fetched =
+        if (remote) {
+            val server = mediaServer.ifBlank { null }
+            if (server == null) Fetched.Failed
+            else when (val fetched = push.downloadMedia(server, chatId, mediaId)) {
+                is PushClient.MediaFetch.Ok -> Fetched.Ok(fetched.bytes)
+                PushClient.MediaFetch.Expired -> Fetched.Expired
+                PushClient.MediaFetch.Failed -> Fetched.Failed
+            }
+        } else {
+            val out = ByteArrayOutputStream()
+            var expired = false
+            for (i in 0 until chunks) {
+                val part = repo.getBlob(chatId, mediaId, i)
+                if (part == null) {
+                    expired = true
+                    break
+                }
+                out.write(Base64.decode(part, Base64.NO_WRAP))
+            }
+            if (expired) Fetched.Expired else Fetched.Ok(out.toByteArray())
+        }
 
     /** Grup veya kişi fotoğrafı için küçük, kare kırpılmış JPEG üretir. */
     suspend fun prepareAvatar(uri: Uri): ByteArray = withContext(Dispatchers.IO) {
@@ -317,20 +424,10 @@ class MediaManager(
     ): DownloadResult {
         if (hasLocal(meta.mediaId)) return DownloadResult.Ok(localFile(meta.mediaId))
         return try {
-            val encrypted = if (meta.remote) {
-                val server = mediaServer.ifBlank { null } ?: return DownloadResult.Failed
-                when (val fetched = push.downloadMedia(server, chatId, meta.mediaId)) {
-                    is PushClient.MediaFetch.Ok -> fetched.bytes
-                    PushClient.MediaFetch.Expired -> return DownloadResult.Expired
-                    PushClient.MediaFetch.Failed -> return DownloadResult.Failed
-                }
-            } else {
-                val out = ByteArrayOutputStream()
-                for (i in 0 until meta.chunks) {
-                    val part = repo.getBlob(chatId, meta.mediaId, i) ?: return DownloadResult.Expired
-                    out.write(Base64.decode(part, Base64.NO_WRAP))
-                }
-                out.toByteArray()
+            val encrypted = when (val fetched = fetchEncrypted(chatId, meta.mediaId, meta.remote, meta.chunks)) {
+                is Fetched.Ok -> fetched.bytes
+                Fetched.Expired -> return DownloadResult.Expired
+                Fetched.Failed -> return DownloadResult.Failed
             }
             val decrypted = withContext(Dispatchers.Default) { decrypt(encrypted) } ?: return DownloadResult.Failed
             // Kaydedilen ve paylaşılan fotoğraflar her zaman JPEG'dir; WebP yalnızca yolda kullanılır.
@@ -344,7 +441,7 @@ class MediaManager(
                 tmp.renameTo(file)
             }
             if (deleteAfter) {
-                runCatching { removeRemote(chatId, meta) }
+                runCatching { removeRemote(chatId, meta.mediaId, meta.remote, meta.chunks) }
                     .onFailure { Log.w(TAG, "Fotoğraf sunucudan silinemedi", it) }
             }
             DownloadResult.Ok(file)
@@ -383,15 +480,15 @@ class MediaManager(
 
     /** Silinen bir fotoğraf mesajının sunucudaki parçalarını ve yerel kopyasını kaldırır. */
     suspend fun deleteMedia(chatId: String, meta: ImageMeta) {
-        runCatching { removeRemote(chatId, meta) }
+        runCatching { removeRemote(chatId, meta.mediaId, meta.remote, meta.chunks) }
         withContext(Dispatchers.IO) { localFile(meta.mediaId).delete() }
     }
 
-    private suspend fun removeRemote(chatId: String, meta: ImageMeta) {
-        if (meta.remote) {
-            mediaServer.ifBlank { null }?.let { push.deleteMedia(it, chatId, meta.mediaId) }
+    private suspend fun removeRemote(chatId: String, mediaId: String, remote: Boolean, chunks: Int) {
+        if (remote) {
+            mediaServer.ifBlank { null }?.let { push.deleteMedia(it, chatId, mediaId) }
         } else {
-            repo.deleteBlobs(chatId, meta.mediaId, meta.chunks)
+            repo.deleteBlobs(chatId, mediaId, chunks)
         }
     }
 
@@ -441,5 +538,7 @@ class MediaManager(
         const val UPLOAD_TTL_MS = 7L * 24 * 60 * 60 * 1000
         const val AVATAR_DIMENSION = 256
         const val MAX_AVATAR_BYTES = 40_000
+        /** 5 dakikalık kayıt 32 kbps ile ≈1,2 MB; şifreleme payıyla birlikte medya sınırının altında kalır. */
+        const val MAX_VOICE_BYTES = 1_800_000
     }
 }

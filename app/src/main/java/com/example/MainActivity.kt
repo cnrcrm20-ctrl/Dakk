@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.ui.components.MidnightCelebration
 import android.Manifest
 import android.app.Activity.ScreenCaptureCallback
 import android.content.Context
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var showSplash by rememberSaveable { mutableStateOf(playSplash) }
+            val festiveSplash = remember { viewModel.festiveNow() }
             DakkTheme(darkTheme = true) {
                 Box(Modifier.fillMaxSize()) {
                     Surface(modifier = Modifier.fillMaxSize(), color = DakkDarkBg) {
@@ -93,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         enter = EnterTransition.None,
                         exit = fadeOut(tween(350))
                     ) {
-                        DakkSplashAnimation(onFinished = { showSplash = false })
+                        DakkSplashAnimation(festive = festiveSplash, onFinished = { showSplash = false })
                     }
                 }
             }
@@ -164,6 +166,7 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
     val announcement by viewModel.announcement.collectAsStateWithLifecycle()
     val preview by viewModel.previewAnnouncement.collectAsStateWithLifecycle()
+    val celebrationYear by viewModel.celebrationYear.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
@@ -245,6 +248,11 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
     }
     if (tutorialVisible && screen == Screen.Home) {
         TutorialOverlay(onFinish = { viewModel.finishTutorial() })
+        return
+    }
+    if (dialogsAllowed && celebrationYear > 0) {
+        val year = celebrationYear
+        MidnightCelebration(year) { viewModel.dismissCelebration(year) }
         return
     }
     if (dialogsAllowed) FoundContactDialog(viewModel)

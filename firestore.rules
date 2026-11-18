@@ -84,6 +84,16 @@ service cloud.firestore {
               (!(target in after) || (after[target] is string && after[target].size() >= 1 && after[target].size() <= 40)));
     }
 
+    // Sabitlenen mesaj (2.6.0+): yalnızca mesaj kimliği; sabitleyen kişi kendisi olmalı.
+    function isValidPinChange() {
+      let data = request.resource.data;
+      return !('pinned' in changedKeys()) || !('pinned' in data) ||
+             (data.pinned is map && data.pinned.keys().hasOnly(['id', 'by', 'at']) &&
+              data.pinned.id is string && data.pinned.id.size() >= 1 && data.pinned.id.size() <= 64 &&
+              data.pinned.by == request.auth.uid &&
+              data.pinned.at is timestamp && data.pinned.at <= request.time);
+    }
+
     function isValidDisappearing(data) {
       return !('disappearSeconds' in data) || data.disappearSeconds in [0, 86400, 604800];
     }
@@ -132,6 +142,11 @@ service cloud.firestore {
       return changedKeys().hasOnly(['disappearSeconds', 'updatedAt']);
     }
 
+    // Herhangi bir üye: mesaj sabitleme.
+    function isGroupPinUpdate() {
+      return changedKeys().hasOnly(['pinned', 'updatedAt']) && isValidPinChange();
+    }
+
     // Yalnızca yöneticiler: ad, fotoğraf, üyeler, yöneticiler, davet bağlantısı, yazıyor anahtarı.
     function isGroupAdminUpdate() {
       return isGroupAdmin(resource.data) &&
@@ -161,7 +176,8 @@ service cloud.firestore {
       return request.resource.data.isGroup == true &&
              !('createdBy' in changedKeys()) && !('isGroup' in changedKeys()) && !('chatId' in changedKeys()) &&
              ((isMember && isValidGroupFields(request.resource.data) &&
-               (isGroupPreviewUpdate() || isGroupNicknameUpdate() || isGroupDisappearingUpdate() || isGroupAdminUpdate())) ||
+               (isGroupPreviewUpdate() || isGroupNicknameUpdate() || isGroupDisappearingUpdate() || isGroupPinUpdate() ||
+                isGroupAdminUpdate())) ||
               (isMember && isGroupLeave()) ||
               (!isMember && isGroupJoin()));
     }
@@ -183,6 +199,7 @@ service cloud.firestore {
              request.resource.data.memberUids.toSet() == resource.data.memberUids.toSet() &&
              isValidChat(request.resource.data) &&
              isValidDisappearing(request.resource.data) &&
+             isValidPinChange() &&
              isValidNicknameChange();
     }
 

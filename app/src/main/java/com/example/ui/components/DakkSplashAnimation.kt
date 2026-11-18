@@ -52,6 +52,20 @@ private val FRAMES = intArrayOf(
     R.drawable.dakk_splash_27, R.drawable.dakk_splash_28, R.drawable.dakk_splash_29
 )
 
+/** Yılbaşı dönemi kareleri: aynı animasyon, ördeğin başında Noel Baba şapkası. */
+private val FRAMES_FESTIVE = intArrayOf(
+    R.drawable.dakk_splash_xmas_00, R.drawable.dakk_splash_xmas_01, R.drawable.dakk_splash_xmas_02,
+    R.drawable.dakk_splash_xmas_03, R.drawable.dakk_splash_xmas_04, R.drawable.dakk_splash_xmas_05,
+    R.drawable.dakk_splash_xmas_06, R.drawable.dakk_splash_xmas_07, R.drawable.dakk_splash_xmas_08,
+    R.drawable.dakk_splash_xmas_09, R.drawable.dakk_splash_xmas_10, R.drawable.dakk_splash_xmas_11,
+    R.drawable.dakk_splash_xmas_12, R.drawable.dakk_splash_xmas_13, R.drawable.dakk_splash_xmas_14,
+    R.drawable.dakk_splash_xmas_15, R.drawable.dakk_splash_xmas_16, R.drawable.dakk_splash_xmas_17,
+    R.drawable.dakk_splash_xmas_18, R.drawable.dakk_splash_xmas_19, R.drawable.dakk_splash_xmas_20,
+    R.drawable.dakk_splash_xmas_21, R.drawable.dakk_splash_xmas_22, R.drawable.dakk_splash_xmas_23,
+    R.drawable.dakk_splash_xmas_24, R.drawable.dakk_splash_xmas_25, R.drawable.dakk_splash_xmas_26,
+    R.drawable.dakk_splash_xmas_27, R.drawable.dakk_splash_xmas_28, R.drawable.dakk_splash_xmas_29
+)
+
 /**
  * Dakk açılış animasyonu: 30 kare, 100 ms/kare (≈3 sn).
  *
@@ -62,6 +76,7 @@ private val FRAMES = intArrayOf(
 @Composable
 fun DakkSplashAnimation(
     modifier: Modifier = Modifier,
+    festive: Boolean = false,
     onFinished: () -> Unit
 ) {
     val context = LocalContext.current
@@ -72,7 +87,7 @@ fun DakkSplashAnimation(
     LightStatusBarWhileVisible()
 
     LaunchedEffect(Unit) {
-        val decoded = withContext(Dispatchers.Default) { decodeFrames(context) }
+        val decoded = withContext(Dispatchers.Default) { decodeFrames(context, if (festive) FRAMES_FESTIVE else FRAMES) }
         if (decoded.isEmpty()) {
             finish()
             return@LaunchedEffect
@@ -112,10 +127,10 @@ fun DakkSplashAnimation(
     }
 }
 
-private fun decodeFrames(context: Context): List<ImageBitmap> {
+private fun decodeFrames(context: Context, ids: IntArray): List<ImageBitmap> {
     val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
     return try {
-        FRAMES.map { id -> BitmapFactory.decodeResource(context.resources, id, options).asImageBitmap() }
+        ids.map { id -> BitmapFactory.decodeResource(context.resources, id, options).asImageBitmap() }
     } catch (_: Throwable) {
         emptyList()
     }

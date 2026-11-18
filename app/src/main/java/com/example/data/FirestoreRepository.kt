@@ -175,7 +175,9 @@ class FirestoreRepository(context: Context) {
         nicknames = stringMap("nicknames"),
         disappearSeconds = getLong("disappearSeconds") ?: 0L,
         lastMessageKeys = stringMap("lastMessageKeys"),
-        lastMessageExpiresAt = getLong("lastMessageExpiresAt") ?: 0L
+        lastMessageExpiresAt = getLong("lastMessageExpiresAt") ?: 0L,
+        pinnedId = ((get("pinned") as? Map<*, *>)?.get("id") as? String).orEmpty(),
+        pinnedBy = ((get("pinned") as? Map<*, *>)?.get("by") as? String).orEmpty()
     )
 
     fun observeMessages(chatId: String): Flow<List<MessageDoc>> =
@@ -541,6 +543,18 @@ class FirestoreRepository(context: Context) {
             FieldPath.of("nickTarget"), targetUid,
             FieldPath.of("updatedAt"), FieldValue.serverTimestamp()
         ).await()
+    }
+
+    /**
+     * Sohbette bir mesajı sabitler ([messageId] null ise sabitlemeyi kaldırır). Sohbet başına tek sabitlenen
+     * mesaj vardır; yalnızca mesajın kimliği yazılır, içerik şifreli mesajın kendisinde kalır.
+     */
+    suspend fun setPinned(chatId: String, myUid: String, messageId: String?) {
+        val value: Any = if (messageId == null) FieldValue.delete()
+        else mapOf("id" to messageId, "by" to myUid, "at" to FieldValue.serverTimestamp())
+        db.collection("chats").document(chatId)
+            .update(mapOf("pinned" to value, "updatedAt" to FieldValue.serverTimestamp()))
+            .await()
     }
 
     suspend fun setDisappearing(chatId: String, seconds: Long) {

@@ -57,7 +57,9 @@
       "title": "Özellikler",
       "description": "2.6.0 ve sonrası: yeni özellikler burada feature_… anahtarlarıyla, uygulama güncellemesi gerekmeden açılıp kapatılır.",
       "fields": [
-        { "key": "images_enabled", "doc": "public", "type": "switch", "label": "Fotoğraf gönderme", "help": "Firestore ücretsiz kotası dolmak üzereyse geçici olarak kapatabilirsiniz.", "default": true }
+        { "key": "images_enabled", "doc": "public", "type": "switch", "label": "Fotoğraf gönderme", "help": "Firestore ücretsiz kotası dolmak üzereyse geçici olarak kapatabilirsiniz.", "default": true },
+        { "key": "feature_sesli_mesaj", "doc": "public", "type": "switch", "label": "Sesli mesajlar", "help": "Kapatılırsa mikrofon düğmesi gizlenir. Gönderilmiş sesli mesajlar dinlenmeye devam eder.", "default": true },
+        { "key": "feature_yilbasi", "doc": "public", "type": "switch", "label": "Yılbaşı süsleri", "help": "15 Aralık – 1 Ocak arasında kar, geri sayım, şapkalı ördek, kartlar ve konfeti. Dönem dışında zaten görünmez.", "default": true }
       ]
     },
     {

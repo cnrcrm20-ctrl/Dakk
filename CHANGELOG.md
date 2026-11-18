@@ -4,6 +4,18 @@ Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik 
 
 ## [2.6.0] - Geliştiriliyor
 
+### Yeni
+- **Sesli mesajlar 🎤:** Yazı alanı boşken gönder düğmesi mikrofona dönüşüyor; dokun, konuş, gönder. En fazla
+  5 dakika. Kayıtlar fotoğraflar gibi uçtan uca şifreleniyor. Dinlerken dalga formuna dokunarak ileri/geri
+  sarılabiliyor, 1× / 1,5× / 2× hız seçilebiliyor. Sohbetteki herkesin 2.6.0 kullanması gerekiyor.
+- **Yıldızlı mesajlar ⭐:** Bir mesaja basılı tut → *Yıldızla*. Sohbet bilgilerindeki *Yıldızlı* düğmesinden
+  hepsini gör, dokununca mesaja git. Yıldızlar yalnızca senin telefonunda tutuluyor.
+- **Mesaj sabitleme 📌:** Önemli bir mesajı sohbetin üstüne sabitle (basılı tut → *Sabitle*). Sabitlenen mesaj
+  herkesin sohbetinin üstünde görünüyor; dokununca mesaja gidiyor. İçerik yine şifreli kalıyor.
+- **Yılbaşı 🎄 (15 Aralık – 1 Ocak):** Noel Baba şapkalı ördek, sohbet listesinde kar ve yeni yıla geri sayım,
+  sohbette gönderilebilen 4 yılbaşı kartı, "mutlu yıllar" yazınca konfeti ve gece yarısı kutlaması.
+  Ayarlar'dan kapatılabiliyor; 2 Ocak'ta kendiliğinden kalkıyor.
+
 ### İyileştirildi
 - **Özellikler uzaktan açılabiliyor:** Yeni özellikler, uygulamayı yeniden indirmeye gerek kalmadan sunucudan
   açılıp kapatılabiliyor. Bir sorun çıkarsa özellik herkes için anında kapatılabiliyor.

@@ -19,6 +19,12 @@ import com.example.data.ImageState
 import com.example.media.DownloadResult
 import com.example.media.ImageMeta
 import com.example.media.MediaManager
+import com.example.media.VoiceClip
+import com.example.media.VoiceMeta
+import com.example.media.VoicePlayback
+import com.example.media.VoicePlayer
+import com.example.media.VoiceRecorder
+import com.example.data.VoiceAttachment
 import com.example.push.AppState
 import com.example.push.PushClient
 import com.example.auth.GoogleAuth
@@ -33,6 +39,7 @@ import com.example.data.LocalPhoto
 import com.example.data.PollView
 import com.example.push.TypingClient
 import com.example.util.DataSaver
+import com.example.util.Festive
 import com.example.util.Disappearing
 import com.example.util.MuteOptions
 import com.example.util.Polls
@@ -141,7 +148,10 @@ data class ActiveChat(
     val inviteLink: String?,
     val canSend: Boolean,
     val hasCustomPhoto: Boolean,
-    val peer: UserProfile?
+    val peer: UserProfile?,
+    /** Sabitlenen mesajın kimliği (boşsa yok). */
+    val pinnedId: String = "",
+    val pinnedBy: String = ""
 ) {
     fun member(uid: String): ChatMember? = members.firstOrNull { it.uid == uid }
 }
@@ -180,6 +190,15 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private val media = MediaManager(app, repo, crypto, push)
     private val localStore = LocalMessageStore(app)
     private val typingClient = TypingClient(viewModelScope)
+    private val voiceRecorder = VoiceRecorder(app, viewModelScope)
+    private val voicePlayer = VoicePlayer(viewModelScope)
+
+    /** Sesli mesaj çalma durumu (aynı anda tek mesaj). */
+    val voicePlayback: StateFlow<VoicePlayback> = voicePlayer.state
+    /** Kayıt sürüyorsa geçen süre (ms), yoksa -1. */
+    val voiceElapsed: StateFlow<Long> = voiceRecorder.elapsed
+    /** Kayıt sırasında ses seviyesi (0–1). */
+    val voiceLevel: StateFlow<Float> = voiceRecorder.level
 
     val appVersion: String = BuildConfig.VERSION_NAME
 
@@ -237,6 +256,14 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     /** Bilgi ekranındaki "Ara" düğmesi: sohbet açılınca arama çubuğu gösterilir. */
     val chatSearchRequest: StateFlow<String?> = _chatSearchRequest
 
+    private val _jumpRequest = MutableStateFlow<Pair<String, String>?>(null)
+    /** (sohbet anahtarı, mesaj kimliği): sohbet açılınca o mesaja kaydırılır (yıldızlı/sabitlenen mesajlar). */
+    val jumpRequest: StateFlow<Pair<String, String>?> = _jumpRequest
+
+    private val _starred = MutableStateFlow(prefs.getStringSet(PREF_STARRED, emptySet()).orEmpty().toSet())
+    /** Yıldızlı mesajlar ("sohbetKimliği/mesajKimliği"). Yalnızca bu cihazda tutulur. */
+    val starred: StateFlow<Set<String>> = _starred
+
     private val _busy = MutableStateFlow(false)
     /** Grup oluşturma gibi kısa süren işlemler sürerken true. */
     val busy: StateFlow<Boolean> = _busy
@@ -277,6 +304,60 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     // Uzak ayarlar (Kurucu paneli) ---------------------------------------
     private val _config = MutableStateFlow(PublicConfig())
     val config: StateFlow<PublicConfig> = _config
+
+    // ------------------------------------------------------------------ Yılbaşı (15 Aralık – 1 Ocak)
+
+    private val _festivePref = MutableStateFlow(prefs.getBoolean(PREF_FESTIVE, true))
+    /** Ayarlar → Uygulama → "Yılbaşı süsleri" (yalnızca bu cihaz). */
+    val festivePref: StateFlow<Boolean> = _festivePref
+
+    /** Saat: geri sayım ve dönem sınırları için. Son saatte saniyede bir, öncesinde 30 sn'de bir ilerler. */
+    val festiveClock: StateFlow<Long> = kotlinx.coroutines.flow.flow {
+        while (true) {
+            val now = System.currentTimeMillis()
+            emit(now)
+            delay(if (Festive.isSeason(now)) Festive.tickMillis(now) else 60_000L)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), System.currentTimeMillis())
+
+    /** Yılbaşı dönemi mi ve sunucuda kapatılmamış mı? (Ayarlar'daki anahtar bu durumda görünür.) */
+    val festiveSeason: StateFlow<Boolean> = combine(_config, festiveClock) { cfg, now ->
+        Festive.isSeason(now) && cfg.feature(Festive.FEATURE, true)
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Yılbaşı süsleri şu an gösterilsin mi? */
+    val festiveActive: StateFlow<Boolean> = combine(festiveSeason, _festivePref) { season, enabled -> season && enabled }
+        .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _celebratedYear = MutableStateFlow(prefs.getInt(PREF_FESTIVE_CELEBRATED, 0))
+
+    /** 1 Ocak'ta (gece yarısı uygulama açıksa hemen) bir kez gösterilen kutlama; 0 = gösterme. */
+    val celebrationYear: StateFlow<Int> = combine(festiveActive, festiveClock, _celebratedYear) { active, now, done ->
+        val year = Festive.newYear(now)
+        if (active && Festive.isNewYearsDay(now) && year != done) year else 0
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    fun dismissCelebration(year: Int) {
+        _celebratedYear.value = year
+        prefs.edit().putInt(PREF_FESTIVE_CELEBRATED, year).apply()
+    }
+
+    fun setFestiveEnabled(enabled: Boolean) {
+        _festivePref.value = enabled
+        prefs.edit().putBoolean(PREF_FESTIVE, enabled).apply()
+    }
+
+    /** Açılış animasyonu için (ayarlar henüz yüklenmeden): son bilinen sunucu anahtarı kullanılır. */
+    fun festiveNow(): Boolean =
+        Festive.isSeason(System.currentTimeMillis()) && _festivePref.value && prefs.getBoolean(PREF_FESTIVE_REMOTE, true)
+
+    /** Yılbaşı kartı ekranında "kartlar ücretsiz ve şifreli" ipucu bir kez gösterilir. */
+    fun festiveCardHintSeen(): Boolean = prefs.getBoolean(PREF_FESTIVE_CARD_HINT, false)
+
+    fun markFestiveCardHintSeen() {
+        prefs.edit().putBoolean(PREF_FESTIVE_CARD_HINT, true).apply()
+    }
+
 
     private val _isFounder = MutableStateFlow(false)
     val isFounder: StateFlow<Boolean> = _isFounder
@@ -421,6 +502,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        voiceRecorder.cancel()
+        voicePlayer.stop()
         auth.removeAuthStateListener(authListener)
         super.onCleared()
     }
@@ -485,6 +568,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             launch {
                 configRepo.observePublic().retrying("Ayarlar", uid).collect { cfg ->
                     _config.value = cfg
+                    val festiveRemote = cfg.feature(Festive.FEATURE, true)
+                    if (prefs.getBoolean(PREF_FESTIVE_REMOTE, true) != festiveRemote) {
+                        prefs.edit().putBoolean(PREF_FESTIVE_REMOTE, festiveRemote).apply()
+                    }
                     updatePushActive()
                     if (cfg.serverUrl != checkedServerUrl) {
                         checkedServerUrl = cfg.serverUrl
@@ -717,6 +804,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         if (_activeKey.value == key && activeChatJob?.isActive == true) return
 
         sendTypingStop()
+        voiceRecorder.cancel()
+        voicePlayer.stop()
         _activeKey.value = key
         activeChatJob?.cancel()
         _activeMessages.value = emptyList()
@@ -793,7 +882,15 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private fun allMembersSupportV2(chatId: String, myUid: String): Boolean {
         val members = membersOf(chatId) ?: return false
         val profiles = _profiles.value
-        return members.all { it == myUid || (profiles[it]?.caps ?: 0) >= CAPS }
+        return members.all { it == myUid || (profiles[it]?.caps ?: 0) >= CAPS_PACK }
+    }
+
+    /** Sohbetteki herkes en az [level] özellik düzeyinde mi? Değilse eski sürümdeki ilk kişinin adı döner. */
+    private fun firstMemberBelow(chatId: String, myUid: String, level: Int): String? {
+        val members = membersOf(chatId) ?: return null
+        val profiles = _profiles.value
+        val old = members.firstOrNull { it != myUid && (profiles[it]?.caps ?: 0) < level } ?: return null
+        return displayNameOf(old)
     }
 
     /**
@@ -887,7 +984,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun resendPendingTo(peer: UserProfile, oldKey: String, newKey: String, myUid: String) {
         val myKey = withContext(Dispatchers.Default) { crypto.publicKeyBase64() }
-        val pack = peer.caps >= CAPS
+        val pack = peer.caps >= CAPS_PACK
         val direct = ChatIds.of(myUid, peer.uid)
         if (chatDoc(direct) != null) {
             val docs = repo.recentMessagesOnce(direct, 100)
@@ -976,6 +1073,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             SystemNotes.MESSAGE_TYPE -> "S" to (d.systemText ?: return null)
             ScreenshotNotice.MESSAGE_TYPE -> return null
             "IMAGE" -> "T" to "📷 Fotoğraf"
+            VoiceMeta.MESSAGE_TYPE -> "T" to VoiceMeta.LABEL
             Polls.MESSAGE_TYPE -> "T" to ("📊 " + (Polls.parse(decryptContent(d, myUid))?.question ?: return null))
             else -> "T" to (decryptContent(d, myUid) ?: return null)
         }
@@ -1094,6 +1192,52 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _screen.value = Screen.Chat(key)
     }
 
+    /** Yıldızlı mesajlar listesinden: sohbete dönüp mesaja kaydırır. */
+    fun openMessage(key: String, messageId: String) {
+        _jumpRequest.value = key to messageId
+        _screen.value = Screen.Chat(key)
+    }
+
+    fun consumeJumpRequest() {
+        _jumpRequest.value = null
+    }
+
+    // ------------------------------------------------------------------ Yıldızlı mesajlar (yalnızca bu cihaz)
+
+    fun starKey(chatId: String, messageId: String): String = "$chatId/$messageId"
+
+    fun toggleStar(peerUid: String, messageId: String) {
+        val myUid = sessionUid ?: return
+        val k = starKey(chatIdFor(peerUid, myUid), messageId)
+        val starredNow = k !in _starred.value
+        _starred.update { if (starredNow) it + k else it - k }
+        prefs.edit().putStringSet(PREF_STARRED, _starred.value).apply()
+        _events.tryEmit(if (starredNow) "⭐ Yıldızlı mesajlara eklendi" else "Yıldız kaldırıldı")
+    }
+
+    /** Silinen mesajların yıldızlarını temizler. */
+    private fun dropStars(chatId: String, ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val gone = ids.map { starKey(chatId, it) }.toSet()
+        if (_starred.value.none { it in gone }) return
+        _starred.update { it - gone }
+        prefs.edit().putStringSet(PREF_STARRED, _starred.value).apply()
+    }
+
+    // ------------------------------------------------------------------ Sabitlenen mesaj
+
+    /** Mesajı sohbette herkes için sabitler ([messageId] null ise sabitlemeyi kaldırır). */
+    fun setPinned(key: String, messageId: String?) {
+        val myUid = sessionUid ?: return
+        if (messageId != null && messageId.startsWith("upload_")) return
+        groupAction(if (messageId == null) "Sabitleme kaldırılamadı." else "Mesaj sabitlenemedi.") {
+            val chatId = ensureChatFor(key, myUid)
+            if (chatDoc(chatId)?.pinnedId.orEmpty() == messageId.orEmpty()) return@groupAction
+            repo.setPinned(chatId, myUid, messageId)
+            repo.sendSystemNote(chatId, myUid, myDisplayName(myUid), SystemNotes.pinned(myDisplayName(myUid), messageId != null))
+        }
+    }
+
     fun consumeChatSearchRequest() {
         _chatSearchRequest.value = null
     }
@@ -1124,8 +1268,14 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 val meta = withContext(Dispatchers.Default) { ImageMeta.parse(decryptContent(doc, myUid)) } ?: return@forEach
                 runCatching { media.deleteMedia(chatId, meta) }
             }
+            fresh.filter { it.messageType == VoiceMeta.MESSAGE_TYPE }.forEach { doc ->
+                val meta = withContext(Dispatchers.Default) { VoiceMeta.parse(decryptContent(doc, myUid)) } ?: return@forEach
+                if (voicePlayback.value.id == meta.mediaId) voicePlayer.stop()
+                runCatching { media.deleteVoice(chatId, meta) }
+            }
             runCatching { repo.deleteMessages(chatId, fresh.map { it.id }) }
                 .onFailure { Log.w(TAG, "Kaybolan mesajlar silinemedi", it) }
+            dropStars(chatId, fresh.map { it.id })
             withContext(Dispatchers.IO) { runCatching { localStore.delete(chatId, fresh.map { it.id }) } }
         }
     }
@@ -1134,6 +1284,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     private fun startImageDownloads(chatId: String, docs: List<MessageDoc>, ui: List<UiMessage>) {
         val myUid = sessionUid ?: return
         val byId = docs.associateBy { it.id }
+        ui.forEach { m -> m.voice?.let { startVoiceDownload(chatId, myUid, m.id, it, byId) } }
         ui.forEach { m ->
             val image = m.image ?: return@forEach
             if (image.state != ImageState.DOWNLOADING || image.mediaId in downloadsInFlight) return@forEach
@@ -1164,6 +1315,32 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Sesli mesajlar küçük olduğu için (dakikası ≈240 KB) veri tasarrufunda bile kendiliğinden indirilir. */
+    private fun startVoiceDownload(chatId: String, myUid: String, id: String, voice: VoiceAttachment, byId: Map<String, MessageDoc>) {
+        if (voice.state != ImageState.DOWNLOADING || voice.mediaId in downloadsInFlight) return
+        val doc = byId[id] ?: return
+        if (doc.isPending) return
+        downloadsInFlight += voice.mediaId
+        viewModelScope.launch {
+            val meta = VoiceMeta(voice.mediaId, voice.chunks, voice.durationMs, voice.size, voice.waveform, voice.remote)
+            val result = if (doc.keys.isNotEmpty()) {
+                val key = messageKey(doc, myUid)
+                if (key == null) DownloadResult.Failed
+                else media.downloadVoice(chatId, meta, deleteAfter = false) { crypto.decryptBytesWithKey(it, key) }
+            } else {
+                media.downloadVoice(chatId, meta, doc.senderKey, doc.recipientKey, deleteAfter = doc.senderId != myUid)
+            }
+            downloadsInFlight -= voice.mediaId
+            val state = when (result) {
+                is DownloadResult.Ok -> ImageState.READY
+                DownloadResult.Expired -> ImageState.EXPIRED
+                DownloadResult.Failed -> ImageState.FAILED
+            }
+            _imageStates.update { it + (voice.mediaId to state) }
+            rebuildActiveMessages(chatId, myUid)
+        }
+    }
+
     /** İndirilemeyen bir fotoğrafı yeniden dener. */
     fun retryImage(peerUid: String, mediaId: String) {
         val myUid = sessionUid ?: return
@@ -1186,6 +1363,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeChat() {
+        voiceRecorder.cancel()
+        voicePlayer.stop()
         sendTypingStop()
         activeChatJob?.cancel()
         activeChatJob = null
@@ -1304,12 +1483,28 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         } else null
+        val voice = if (messageType == VoiceMeta.MESSAGE_TYPE) {
+            VoiceMeta.parse(plain)?.let { meta ->
+                val local = media.hasVoice(meta.mediaId)
+                VoiceAttachment(
+                    mediaId = meta.mediaId,
+                    chunks = meta.chunks,
+                    durationMs = meta.durationMs,
+                    size = meta.size,
+                    waveform = meta.waveform,
+                    localPath = if (local) media.voiceFile(meta.mediaId).absolutePath else null,
+                    state = if (local) ImageState.READY else _imageStates.value[meta.mediaId] ?: ImageState.DOWNLOADING,
+                    remote = meta.remote
+                )
+            }
+        } else null
         val poll = if (messageType == Polls.MESSAGE_TYPE) pollView(this, myUid, plain) else null
         val isGroupMessage = keys.isNotEmpty()
         return UiMessage(
             id = id,
             text = when {
                 messageType == "IMAGE" -> null
+                messageType == VoiceMeta.MESSAGE_TYPE -> if (voice == null && plain != null) "🎤 Sesli mesaj açılamadı" else null
                 poll != null -> poll.question
                 else -> plain
             },
@@ -1321,6 +1516,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 else -> MessageStatus.SENT
             },
             image = image,
+            voice = voice,
             isAssistant = isAssistant,
             reactions = decryptReactions(this, myUid),
             reply = replyQuote(this, myUid),
@@ -1329,6 +1525,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             expiresAt = expiresAt,
             lockedText = if (plain == null && isGroupMessage && myUid !in keys) {
                 if (messageType == Polls.MESSAGE_TYPE) "🔒 Bu anket sen gruba katılmadan önce açıldı."
+                else if (messageType == VoiceMeta.MESSAGE_TYPE) "🔒 Bu sesli mesaj sen gruba katılmadan önce gönderildi."
                 else "🔒 Bu mesaj sen gruba katılmadan önce gönderildi."
             } else null
         )
@@ -1417,7 +1614,10 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             myUid != null && !it.isScreenshotNotice && it.systemText == null && !it.id.startsWith("upload_")
         }?.let {
             val sender = if (it.isFromMe) myUid!! else it.senderUid.ifBlank { peerUid }
-            ReplyDraft(it.id, sender, ReplySnippets.of(it.poll?.let { p -> "📊 ${p.question}" } ?: it.text, it.image != null))
+            ReplyDraft(
+                it.id, sender,
+                ReplySnippets.of(it.poll?.let { p -> "📊 ${p.question}" } ?: it.voice?.let { VoiceMeta.LABEL } ?: it.text, it.image != null)
+            )
         }
         val sent = sendEncrypted(peerUid, text, previewOf(text), "TEXT", isAssistant = false, reply = reply)
         if (sent) sendTypingStop()
@@ -1460,7 +1660,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         else Disappearing.expiryFor(chatDoc(chatId)?.disappearSeconds ?: 0L, System.currentTimeMillis())
 
         // Karşı taraf 2.5.0+ ise metin şifrelemeden önce sıkıştırılır.
-        val pack = peer.caps >= CAPS
+        val pack = peer.caps >= CAPS_PACK
         viewModelScope.launch {
             try {
                 val (content, encPreview, myKey) = withContext(Dispatchers.Default) {
@@ -1641,6 +1841,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /** Yılbaşı kartı: uygulamanın içindeki kart görseli fotoğraf gibi şifrelenip gönderilir. */
+    fun sendFestiveCard(peerUid: String, @androidx.annotation.DrawableRes card: Int) {
+        if (!festiveActive.value) return
+        val app = getApplication<Application>()
+        sendImage(peerUid, Uri.parse("android.resource://${app.packageName}/$card"))
+    }
+
     /** Galeriden seçilen fotoğrafı sıkıştırır, şifreler ve gönderir. */
     fun sendImage(peerUid: String, uri: Uri) {
         val myUid = sessionUid ?: return
@@ -1693,6 +1900,129 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 Log.e(TAG, "Fotoğraf gönderilemedi", e)
                 _events.tryEmit("Fotoğraf gönderilemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.")
+            } finally {
+                _uploads.update { map ->
+                    val rest = map[peerUid].orEmpty().filterNot { it.id == placeholderId }
+                    if (rest.isEmpty()) map - peerUid else map + (peerUid to rest)
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ Sesli mesajlar (2.6.0+)
+
+    /** Sesli mesaj düğmesi gösterilsin mi (sunucudan `feature_sesli_mesaj` ile kapatılabilir)? */
+    fun voiceEnabled(): Boolean = _config.value.feature(FEATURE_VOICE, true)
+
+    /**
+     * Kaydı başlatır. Sohbetteki biri sesli mesajları desteklemeyen eski bir sürümdeyse veya mikrofon
+     * açılamazsa false döner (kullanıcıya nedeni bildirilir).
+     */
+    fun startVoiceRecording(peerUid: String): Boolean {
+        val myUid = sessionUid ?: return false
+        if (!voiceEnabled()) {
+            _events.tryEmit("Sesli mesajlar şu an kapalı.")
+            return false
+        }
+        val chatId = chatIdFor(peerUid, myUid)
+        if (ChatIds.isGroup(peerUid)) {
+            val doc = chatDoc(peerUid)
+            if (doc == null || myUid !in doc.memberUids) {
+                _events.tryEmit("Bu grubun üyesi değilsiniz.")
+                return false
+            }
+        } else {
+            val peer = _profiles.value[peerUid]
+            if (peer == null || peer.publicKey.isBlank()) {
+                _events.tryEmit("Bu kişi henüz Dakk'ın güncel sürümüne giriş yapmamış. Şifreli mesaj gönderilemiyor.")
+                return false
+            }
+        }
+        firstMemberBelow(chatId, myUid, CAPS_VOICE)?.let { name ->
+            _events.tryEmit("$name Dakk'ı güncelleyince sesli mesaj gönderebilirsin.")
+            return false
+        }
+        voicePlayer.stop()
+        sendTypingStop()
+        val started = voiceRecorder.start(onLimit = { finishVoiceRecording(peerUid) })
+        if (!started) _events.tryEmit("Mikrofon açılamadı. Başka bir uygulama kullanıyor olabilir.")
+        return started
+    }
+
+    /** Kaydı bitirip gönderir. */
+    fun finishVoiceRecording(peerUid: String) {
+        if (!voiceRecorder.isRecording) return
+        val clip = voiceRecorder.stop()
+        if (clip == null) {
+            _events.tryEmit("Kayıt çok kısa. Basılı tutarak konuş.")
+            return
+        }
+        sendVoice(peerUid, clip)
+    }
+
+    fun cancelVoiceRecording() {
+        voiceRecorder.cancel()
+    }
+
+    /** Sesli mesajı çalar/duraklatır. */
+    fun toggleVoice(mediaId: String) {
+        if (voiceRecorder.isRecording) return
+        val file = media.voiceFile(mediaId)
+        if (!file.isFile) return
+        voicePlayer.toggle(mediaId, file)
+    }
+
+    fun seekVoice(mediaId: String, fraction: Float) {
+        val state = voicePlayback.value
+        if (state.id == mediaId) voicePlayer.seek(mediaId, fraction)
+        else media.voiceFile(mediaId).takeIf { it.isFile }?.let { voicePlayer.toggle(mediaId, it, fraction) }
+    }
+
+    fun cycleVoiceSpeed() = voicePlayer.cycleSpeed()
+
+    fun stopVoicePlayback() = voicePlayer.stop()
+
+    /** İndirilemeyen bir sesli mesajı yeniden dener. */
+    fun retryVoice(peerUid: String, mediaId: String) = retryImage(peerUid, mediaId)
+
+    private fun sendVoice(peerUid: String, clip: VoiceClip) {
+        val myUid = sessionUid ?: return
+        val isGroup = ChatIds.isGroup(peerUid)
+        val peer = if (isGroup) null else _profiles.value[peerUid]
+        if (!isGroup && (peer == null || peer.publicKey.isBlank())) return
+        val chatId = chatIdFor(peerUid, myUid)
+        val mediaId = media.newMediaId()
+        val placeholderId = "upload_$mediaId"
+        val preview = VoiceMeta.preview(clip.durationMs)
+        viewModelScope.launch {
+            try {
+                if (serverReady) launch { push.refreshIfStale(_config.value.serverUrl) }
+                val placeholder = UiMessage(
+                    id = placeholderId,
+                    text = null,
+                    isFromMe = true,
+                    timestamp = System.currentTimeMillis(),
+                    status = MessageStatus.PENDING,
+                    voice = VoiceAttachment(
+                        mediaId, 1, clip.durationMs, clip.file.length(), clip.waveform,
+                        clip.file.absolutePath, ImageState.UPLOADING
+                    ),
+                    senderUid = myUid
+                )
+                _uploads.update { it + (peerUid to (it[peerUid].orEmpty() + placeholder)) }
+                if (isGroup) {
+                    val messageKey = crypto.newMessageKey()
+                    val meta = media.uploadVoice(chatId, myUid, mediaId, clip) { crypto.encryptBytesWithKey(it, messageKey) }
+                    sendEncrypted(peerUid, meta.toJson(), preview, VoiceMeta.MESSAGE_TYPE, isAssistant = false, presetKey = messageKey)
+                } else {
+                    repo.ensureChat(chatId, myUid, peerUid)
+                    val meta = media.uploadVoice(chatId, myUid, peer!!.publicKey, mediaId, clip)
+                    sendEncrypted(peerUid, meta.toJson(), preview, VoiceMeta.MESSAGE_TYPE, isAssistant = false)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Sesli mesaj gönderilemedi", e)
+                clip.file.delete()
+                _events.tryEmit("Sesli mesaj gönderilemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.")
             } finally {
                 _uploads.update { map ->
                     val rest = map[peerUid].orEmpty().filterNot { it.id == placeholderId }
@@ -1882,6 +2212,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             }
             val body = when {
                 m.image != null -> "[fotoğraf]"
+                m.voice != null -> "[sesli mesaj]"
                 m.poll != null -> "[anket: ${m.poll.question}]"
                 m.text == null -> "[okunamayan mesaj]"
                 else -> m.text
@@ -1957,14 +2288,21 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val isGroup = ChatIds.isGroup(peerUid)
         val wasLast = _activeMessages.value.lastOrNull { it.systemText == null && !it.isScreenshotNotice }?.id == messageId
         val image = _activeMessages.value.firstOrNull { it.id == messageId }?.image
+        val voice = _activeMessages.value.firstOrNull { it.id == messageId }?.voice
+        if (voice != null && voicePlayback.value.id == voice.mediaId) voicePlayer.stop()
         viewModelScope.launch {
             try {
                 // 2.5.0+ sohbetlerde mesaj arşivi telefonlarda: silme, boş bir kayıtla herkese iletilir.
                 if (allMembersSupportV2(chatId, myUid)) repo.tombstoneMessage(chatId, messageId, myUid, myDisplayName(myUid))
                 else repo.deleteMessage(chatId, messageId)
                 withContext(Dispatchers.IO) { runCatching { localStore.delete(chatId, listOf(messageId)) } }
+                dropStars(chatId, listOf(messageId))
+                if ((chatDoc(chatId)?.pinnedId ?: "") == messageId) runCatching { repo.setPinned(chatId, myUid, null) }
                 if (image != null) {
                     media.deleteMedia(chatId, ImageMeta(image.mediaId, image.chunks, 0, 0, 0, null, image.remote))
+                }
+                if (voice != null) {
+                    media.deleteVoice(chatId, VoiceMeta(voice.mediaId, voice.chunks, 0, 0, emptyList(), voice.remote))
                 }
                 if (!wasLast) return@launch
                 if (isGroup) {
@@ -2618,7 +2956,9 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             } else null,
             canSend = if (isGroup) isMember else peer != null && peer.publicKey.isNotBlank(),
             hasCustomPhoto = !isGroup && customPhotos.containsKey(key),
-            peer = peer
+            peer = peer,
+            pinnedId = doc?.pinnedId.orEmpty(),
+            pinnedBy = doc?.pinnedBy.orEmpty()
         )
     }
 
@@ -2746,6 +3086,11 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "DakkViewModel"
+        private const val PREF_STARRED = "starred_messages"
+        private const val PREF_FESTIVE = "festive_enabled"
+        private const val PREF_FESTIVE_CARD_HINT = "festive_card_hint"
+        private const val PREF_FESTIVE_REMOTE = "festive_remote"
+        private const val PREF_FESTIVE_CELEBRATED = "festive_celebrated_year"
         private const val PREF_AUTO_UPDATE = "auto_update"
         private const val PREF_DATA_SAVER = "data_saver"
         private const val PREF_LOCAL_OWNER = "local_store_owner"
@@ -2766,8 +3111,14 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         private const val PREFIX_RESTORE_SERVED = "restore_served_"
         private const val PREFIX_MAILBOX = "mailbox_"
         private const val PREFIX_SWEPT = "swept_"
-        /** Bu sürümün özellik düzeyi (profilde "caps"): 1 = sıkıştırma, posta kutusu, WebP aktarımı, geri yükleme. */
-        const val CAPS = 1
+        /**
+         * Bu sürümün özellik düzeyi (profilde "caps"). Her düzey öncekileri de kapsar:
+         * 1 = sıkıştırma, posta kutusu, WebP aktarımı, geri yükleme (2.5.0); 2 = sesli mesaj (2.6.0).
+         */
+        const val CAPS = 2
+        const val CAPS_PACK = 1
+        const val CAPS_VOICE = 2
+        const val FEATURE_VOICE = "sesli_mesaj"
         private const val SWEEP_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
         private val RESENDABLE_TYPES = setOf("TEXT", "POLL")
         private const val CHAT_CONTEXT_MESSAGES = 30

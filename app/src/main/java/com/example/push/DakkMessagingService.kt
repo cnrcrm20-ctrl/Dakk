@@ -1,5 +1,6 @@
 package com.example.push
 
+import com.example.media.VoiceMeta
 import android.content.Context
 import android.util.Log
 import com.example.crypto.CryptoEngine
@@ -100,6 +101,7 @@ class DakkMessagingService : FirebaseMessagingService() {
         val text = when {
             messageType == "IMAGE" -> "📷 Fotoğraf"
             messageType == "POLL" -> "📊 Anket"
+            messageType == VoiceMeta.MESSAGE_TYPE -> VoiceMeta.parse(plain)?.let { VoiceMeta.preview(it.durationMs) } ?: VoiceMeta.LABEL
             plain == null -> "Yeni şifreli mesaj"
             isAssistant -> "🤖 $plain"
             else -> plain

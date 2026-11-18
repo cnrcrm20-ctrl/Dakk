@@ -68,6 +68,7 @@ fun PermissionsScreen(viewModel: DakkViewModel) {
     }
     val notifications = remember(tick) { DeviceTweaks.hasNotificationPermission(context) }
     val camera = remember(tick) { DeviceTweaks.hasCameraPermission(context) }
+    val microphone = remember(tick) { DeviceTweaks.hasMicrophonePermission(context) }
     val install = remember(tick) { DeviceTweaks.canInstallPackages(context) }
     val battery = remember(tick) { DeviceTweaks.isIgnoringBatteryOptimizations(context) }
 
@@ -76,6 +77,11 @@ fun PermissionsScreen(viewModel: DakkViewModel) {
         tick++
     }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) DeviceTweaks.open(context, DeviceTweaks.appDetailsIntent(context))
+        tick++
+    }
+
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) DeviceTweaks.open(context, DeviceTweaks.appDetailsIntent(context))
         tick++
     }
@@ -127,6 +133,15 @@ fun PermissionsScreen(viewModel: DakkViewModel) {
                 granted = camera
             ) {
                 if (!camera) cameraLauncher.launch(Manifest.permission.CAMERA)
+                else DeviceTweaks.open(context, DeviceTweaks.appDetailsIntent(context))
+            }
+            PermissionCard(
+                emoji = "🎤",
+                title = "Mikrofon",
+                text = "Yalnızca sesli mesaj kaydederken, mikrofon düğmesine dokunduğunda kullanılır.",
+                granted = microphone
+            ) {
+                if (!microphone) micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 else DeviceTweaks.open(context, DeviceTweaks.appDetailsIntent(context))
             }
             PermissionCard(

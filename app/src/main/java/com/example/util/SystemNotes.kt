@@ -20,6 +20,9 @@ object SystemNotes {
         if (seconds <= 0) "$actor kaybolan mesajları kapattı"
         else "$actor kaybolan mesajları açtı: yeni mesajlar ${Disappearing.label(seconds)} sonra kaybolur"
 
+    fun pinned(actor: String, pinned: Boolean): String =
+        if (pinned) "$actor bir mesajı sabitledi" else "$actor sabitlenen mesajı kaldırdı"
+
     fun groupCreated(actor: String, name: String): String = "$actor \"$name\" grubunu oluşturdu".take(MAX_LENGTH)
     fun renamed(actor: String, name: String): String = "$actor grubun adını \"$name\" yaptı".take(MAX_LENGTH)
     fun photoChanged(actor: String): String = "$actor grup fotoğrafını değiştirdi"
