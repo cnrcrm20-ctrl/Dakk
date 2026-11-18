@@ -25,3 +25,4 @@ debug.keystore*
 
 # Bakımcı notları (yalnızca yerelde)
 brain.md
+/.venv/

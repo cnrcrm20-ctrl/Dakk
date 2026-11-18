@@ -15,7 +15,17 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.runtime.mutableIntStateOf
+import android.widget.Toast
 import com.example.data.ChatIds
+import com.example.media.VoiceMeta
+import com.example.media.VoicePlayback
+import com.example.ui.components.VoiceMessageContent
+import com.example.ui.components.VoiceRecordingBar
 import com.example.ui.components.CreatePollDialog
 import com.example.ui.components.PollContent
 import com.example.ui.components.TypingIndicator
@@ -152,6 +162,11 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     val activeChat by viewModel.activeChat.collectAsStateWithLifecycle()
     val typers by viewModel.activeTyping.collectAsStateWithLifecycle()
     val searchRequest by viewModel.chatSearchRequest.collectAsStateWithLifecycle()
+    val jumpRequest by viewModel.jumpRequest.collectAsStateWithLifecycle()
+    val starred by viewModel.starred.collectAsStateWithLifecycle()
+    val playback by viewModel.voicePlayback.collectAsStateWithLifecycle()
+    val voiceElapsed by viewModel.voiceElapsed.collectAsStateWithLifecycle()
+    val voiceLevel by viewModel.voiceLevel.collectAsStateWithLifecycle()
 
     val chat = activeChat?.takeIf { it.key == peerUid }
     val isGroup = ChatIds.isGroup(peerUid)
@@ -173,6 +188,8 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     var pendingMention by remember { mutableStateOf<String?>(null) }
     var replyingTo by remember(peerUid) { mutableStateOf<UiMessage?>(null) }
     var creatingPoll by remember { mutableStateOf(false) }
+    val recording = voiceElapsed >= 0
+    val voiceEnabled = config.feature(DakkViewModel.FEATURE_VOICE, true)
     var searching by rememberSaveable(peerUid) { mutableStateOf(false) }
     var query by rememberSaveable(peerUid) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -183,6 +200,16 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
             searching = true
             viewModel.consumeChatSearchRequest()
         }
+    }
+
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) viewModel.startVoiceRecording(peerUid)
+        else Toast.makeText(context, "Sesli mesaj için mikrofon izni gerekiyor.", Toast.LENGTH_LONG).show()
+    }
+
+    fun startRecording() {
+        val hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (hasMic) viewModel.startVoiceRecording(peerUid) else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -221,6 +248,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
 
     BackHandler {
         when {
+            recording -> viewModel.cancelVoiceRecording()
             searching -> { searching = false; query = "" }
             else -> viewModel.closeChat()
         }
@@ -228,6 +256,25 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
 
     val showUnknownBanner = !isGroup && !isContact && peer != null && messages.any { !it.isFromMe }
     val headerCount = if (showUnknownBanner) 2 else 1
+    val pinnedMessage = remember(chat?.pinnedId, allMessages) {
+        chat?.pinnedId?.takeIf { it.isNotEmpty() }?.let { id -> allMessages.firstOrNull { it.id == id } }
+    }
+
+    // Yıldızlı mesajlar listesinden gelindiyse mesaja kaydırılır.
+    LaunchedEffect(jumpRequest, chatItems.size) {
+        val req = jumpRequest ?: return@LaunchedEffect
+        if (req.first != peerUid) return@LaunchedEffect
+        val target = chatItems.indexOfFirst { it.key == req.second }
+        if (target < 0) {
+            if (chatItems.isNotEmpty()) viewModel.consumeJumpRequest()
+            return@LaunchedEffect
+        }
+        searching = false
+        kotlinx.coroutines.delay(350)
+        listState.animateScrollToItem(headerCount + target)
+        viewModel.consumeJumpRequest()
+    }
+
     LaunchedEffect(chatItems.size, assistantTyping, typers.isNotEmpty()) {
         val extra = (if (assistantTyping) 1 else 0) + 1
         if (chatItems.isNotEmpty() && !(searching && query.isNotBlank())) {
@@ -413,9 +460,21 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                 replyingTo?.let { target ->
                     ReplyComposerBar(
                         authorLabel = if (target.isFromMe) "Sen" else nameOf(target.senderUid),
-                        text = ReplySnippets.of(target.poll?.let { "📊 ${it.question}" } ?: target.text, target.image != null),
+                        text = ReplySnippets.of(
+                            target.poll?.let { "📊 ${it.question}" } ?: target.voice?.let { VoiceMeta.LABEL } ?: target.text,
+                            target.image != null
+                        ),
                         onCancel = { replyingTo = null }
                     )
+                }
+                if (recording) {
+                    VoiceRecordingBar(
+                        elapsedMs = voiceElapsed,
+                        level = voiceLevel,
+                        onCancel = { viewModel.cancelVoiceRecording() },
+                        onSend = { viewModel.finishVoiceRecording(peerUid) }
+                    )
+                    return@Column
                 }
                 Row(
                     modifier = Modifier
@@ -475,9 +534,10 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(8.dp))
-                    val sendEnabled = canSend && draft.isNotBlank()
+                    val micMode = draft.isBlank() && voiceEnabled && canSend
+                    val sendEnabled = canSend && (draft.isNotBlank() || micMode)
                     IconButton(
-                        onClick = { submit() },
+                        onClick = { if (micMode) startRecording() else submit() },
                         enabled = sendEnabled,
                         modifier = Modifier
                             .size(52.dp)
@@ -485,8 +545,8 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                             .background(if (sendEnabled) DakkYellow else DakkDarkSurfaceVariant)
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Gönder",
+                            if (micMode) Icons.Default.Mic else Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (micMode) "Sesli mesaj kaydet" else "Gönder",
                             tint = if (sendEnabled) Color.Black else DakkTextTertiaryDark
                         )
                     }
@@ -494,94 +554,120 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
             }
         }
     ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
+        Box(
+            Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(padding)
         ) {
-            item(key = "e2ee_notice") {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Surface(
-                        color = DakkYellow.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 24.dp)
-                    ) {
-                        Text(
-                            if (searching && query.isNotBlank()) {
-                                if (visibleMessages.isEmpty()) "🔍 \"${query.trim()}\" için sonuç yok" else "🔍 ${visibleMessages.size} sonuç"
-                            } else "🔒 Mesajlar uçtan uca şifrelenir. Dakk dahil hiç kimse içeriğini okuyamaz.",
-                            color = DakkYellow,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
+            Column(Modifier.fillMaxSize()) {
+                pinnedMessage?.let { pin ->
+                    PinnedBar(
+                        author = if (pin.isFromMe) "Sen" else nameOf(pin.senderUid),
+                        text = snippetOf(pin),
+                        onClick = {
+                            val target = chatItems.indexOfFirst { it.key == pin.id }
+                            if (target >= 0) scope.launch { listState.animateScrollToItem(headerCount + target) }
+                        },
+                        onUnpin = if (canSend) ({ viewModel.setPinned(peerUid, null) }) else null
+                    )
                 }
-            }
-            if (showUnknownBanner && peer != null) {
-                item(key = "unknown_sender") {
-                    Surface(
-                        color = DakkDarkSurfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp)
-                    ) {
-                        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Bu kişi kişileriniz arasında değil.", color = Color.White, fontSize = 14.sp)
-                            Row {
-                                TextButton(onClick = { viewModel.confirmAddContact(peer) }) { Text("Kişilere ekle", color = DakkYellow) }
-                                TextButton(onClick = { confirmBlock = true }) { Text("Engelle", color = DakkStatusFailed) }
-                            }
-                        }
-                    }
-                }
-            }
-            itemsIndexed(chatItems, key = { _, it -> it.key }) { index, item ->
-                when (item) {
-                    is ChatItem.DateHeader -> DateChip(item.label)
-                    is ChatItem.Message -> {
-                        val m = item.message
-                        when {
-                            m.systemText != null -> SystemNoteRow(m.systemText)
-                            m.isScreenshotNotice -> ScreenshotNoticeRow(ScreenshotNotice.label(m.isFromMe, nameOf(m.senderUid)))
-                            else -> {
-                                val previous = (chatItems.getOrNull(index - 1) as? ChatItem.Message)?.message
-                                val firstOfRun = previous == null || previous.senderUid != m.senderUid ||
-                                    previous.systemText != null || previous.isScreenshotNotice
-                                MessageBubble(
-                                    message = m,
-                                    senderLabel = if (isGroup && !m.isFromMe && !m.isAssistant && firstOfRun) nameOf(m.senderUid) else null,
-                                    nameOf = ::nameOf,
-                                    myUid = myUid,
-                                    canInteract = canSend,
-                                    onLongPress = { if (!m.id.startsWith("upload_")) selected = m },
-                                    onOpenImage = { id -> viewingImage = id },
-                                    onRetryImage = { id -> viewModel.retryImage(peerUid, id) },
-                                    onReact = { emoji -> viewModel.react(peerUid, m.id, emoji) },
-                                    onVote = { option -> viewModel.vote(peerUid, m.id, option) },
-                                    onBuildTeams = {
-                                        if (viewModel.teamsAlreadyBuilt(m.id)) teamsConfirmId = m.id
-                                        else viewModel.buildTeams(peerUid, m.id)
-                                    },
-                                    onOpenQuote = { quoted ->
-                                        val target = chatItems.indexOfFirst { it.key == quoted.messageId }
-                                        if (target >= 0) scope.launch { listState.animateScrollToItem(headerCount + target) }
-                                    }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item(key = "e2ee_notice") {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Surface(
+                                color = DakkYellow.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 24.dp)
+                            ) {
+                                Text(
+                                    if (searching && query.isNotBlank()) {
+                                        if (visibleMessages.isEmpty()) "🔍 \"${query.trim()}\" için sonuç yok" else "🔍 ${visibleMessages.size} sonuç"
+                                    } else "🔒 Mesajlar uçtan uca şifrelenir. Dakk dahil hiç kimse içeriğini okuyamaz.",
+                                    color = DakkYellow,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                                 )
                             }
                         }
                     }
+                    if (showUnknownBanner && peer != null) {
+                        item(key = "unknown_sender") {
+                            Surface(
+                                color = DakkDarkSurfaceVariant,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                            ) {
+                                Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Bu kişi kişileriniz arasında değil.", color = Color.White, fontSize = 14.sp)
+                                    Row {
+                                        TextButton(onClick = { viewModel.confirmAddContact(peer) }) { Text("Kişilere ekle", color = DakkYellow) }
+                                        TextButton(onClick = { confirmBlock = true }) { Text("Engelle", color = DakkStatusFailed) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    itemsIndexed(chatItems, key = { _, it -> it.key }) { index, item ->
+                        when (item) {
+                            is ChatItem.DateHeader -> DateChip(item.label)
+                            is ChatItem.Message -> {
+                                val m = item.message
+                                when {
+                                    m.systemText != null -> SystemNoteRow(m.systemText)
+                                    m.isScreenshotNotice -> ScreenshotNoticeRow(ScreenshotNotice.label(m.isFromMe, nameOf(m.senderUid)))
+                                    else -> {
+                                        val previous = (chatItems.getOrNull(index - 1) as? ChatItem.Message)?.message
+                                        val firstOfRun = previous == null || previous.senderUid != m.senderUid ||
+                                            previous.systemText != null || previous.isScreenshotNotice
+                                        MessageBubble(
+                                            message = m,
+                                            senderLabel = if (isGroup && !m.isFromMe && !m.isAssistant && firstOfRun) nameOf(m.senderUid) else null,
+                                            nameOf = ::nameOf,
+                                            myUid = myUid,
+                                            canInteract = canSend,
+                                            onLongPress = { if (!m.id.startsWith("upload_")) selected = m },
+                                            onOpenImage = { id -> viewingImage = id },
+                                            onRetryImage = { id -> viewModel.retryImage(peerUid, id) },
+                                            starred = myUid != null && chat != null && viewModel.starKey(chat.chatId, m.id) in starred,
+                                            pinned = chat?.pinnedId == m.id,
+                                            playback = if (m.voice != null) playback else IdlePlayback,
+                                            onVoiceToggle = { id -> viewModel.toggleVoice(id) },
+                                            onVoiceSeek = { id, f -> viewModel.seekVoice(id, f) },
+                                            onVoiceSpeed = { viewModel.cycleVoiceSpeed() },
+                                            onVoiceRetry = { id -> viewModel.retryVoice(peerUid, id) },
+                                            onReact = { emoji -> viewModel.react(peerUid, m.id, emoji) },
+                                            onVote = { option -> viewModel.vote(peerUid, m.id, option) },
+                                            onBuildTeams = {
+                                                if (viewModel.teamsAlreadyBuilt(m.id)) teamsConfirmId = m.id
+                                                else viewModel.buildTeams(peerUid, m.id)
+                                            },
+                                            onOpenQuote = { quoted ->
+                                                val target = chatItems.indexOfFirst { it.key == quoted.messageId }
+                                                if (target >= 0) scope.launch { listState.animateScrollToItem(headerCount + target) }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (assistantTyping) {
+                        item(key = "assistant_typing") { AssistantTypingRow() }
+                    }
+                    item(key = "typing_bubble") {
+                        TypingIndicator(typers = typers, isGroup = isGroup)
+                    }
                 }
-            }
-            if (assistantTyping) {
-                item(key = "assistant_typing") { AssistantTypingRow() }
-            }
-            item(key = "typing_bubble") {
-                TypingIndicator(typers = typers, isGroup = isGroup)
             }
         }
     }
@@ -636,6 +722,28 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                             Icon(Icons.Default.ContentCopy, null)
                             Spacer(Modifier.width(8.dp))
                             Text("Kopyala")
+                        }
+                    }
+                    if (msg.status != MessageStatus.PENDING) {
+                        val isStarred = chat != null && viewModel.starKey(chat.chatId, msg.id) in starred
+                        TextButton(onClick = {
+                            viewModel.toggleStar(peerUid, msg.id)
+                            selected = null
+                        }) {
+                            Icon(if (isStarred) Icons.Default.StarBorder else Icons.Default.Star, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (isStarred) "Yıldızı kaldır" else "Yıldızla")
+                        }
+                    }
+                    if (canReact) {
+                        val isPinned = chat?.pinnedId == msg.id
+                        TextButton(onClick = {
+                            viewModel.setPinned(peerUid, if (isPinned) null else msg.id)
+                            selected = null
+                        }) {
+                            Icon(Icons.Default.PushPin, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (isPinned) "Sabitlemeyi kaldır" else "Sabitle")
                         }
                     }
                     if (msg.isFromMe && msg.status != MessageStatus.PENDING) {
@@ -815,6 +923,13 @@ private fun MessageBubble(
     onLongPress: () -> Unit,
     onOpenImage: (String) -> Unit,
     onRetryImage: (String) -> Unit,
+    starred: Boolean,
+    pinned: Boolean,
+    playback: VoicePlayback,
+    onVoiceToggle: (String) -> Unit,
+    onVoiceSeek: (String, Float) -> Unit,
+    onVoiceSpeed: () -> Unit,
+    onVoiceRetry: (String) -> Unit,
     onReact: (String) -> Unit,
     onVote: (Int) -> Unit,
     onBuildTeams: () -> Unit,
@@ -890,6 +1005,14 @@ private fun MessageBubble(
                     onRetry = { onRetryImage(image.mediaId) },
                     onLongPress = onLongPress
                 )
+                message.voice != null -> VoiceMessageContent(
+                    voice = message.voice,
+                    playback = playback,
+                    onToggle = { onVoiceToggle(message.voice.mediaId) },
+                    onSeek = { onVoiceSeek(message.voice.mediaId, it) },
+                    onSpeed = onVoiceSpeed,
+                    onRetry = { onVoiceRetry(message.voice.mediaId) }
+                )
                 message.poll != null -> PollContent(
                     poll = message.poll,
                     enabled = canInteract && message.status != MessageStatus.PENDING,
@@ -911,6 +1034,14 @@ private fun MessageBubble(
                     .padding(horizontal = if (image != null) 6.dp else 0.dp, vertical = if (image != null) 2.dp else 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (pinned) {
+                    Icon(Icons.Default.PushPin, "Sabitlendi", tint = DakkTextTertiaryDark, modifier = Modifier.size(11.dp))
+                    Spacer(Modifier.width(3.dp))
+                }
+                if (starred) {
+                    Icon(Icons.Default.Star, "Yıldızlı", tint = DakkYellow, modifier = Modifier.size(11.dp))
+                    Spacer(Modifier.width(3.dp))
+                }
                 if (message.expiresAt > 0) {
                     Icon(Icons.Default.Timer, "Kaybolan mesaj", tint = DakkTextTertiaryDark, modifier = Modifier.size(11.dp))
                     Spacer(Modifier.width(3.dp))
@@ -953,6 +1084,40 @@ private fun MessageBubble(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+private val IdlePlayback = VoicePlayback()
+
+private fun snippetOf(m: UiMessage): String = when {
+    m.image != null -> "📷 Fotoğraf"
+    m.voice != null -> VoiceMeta.preview(m.voice.durationMs)
+    m.poll != null -> "📊 ${m.poll.question}"
+    else -> m.text?.replace('\n', ' ') ?: "🔒 Mesaj"
+}
+
+/** Sohbetin üstündeki sabitlenen mesaj çubuğu. */
+@Composable
+private fun PinnedBar(author: String, text: String, onClick: () -> Unit, onUnpin: (() -> Unit)?) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(DakkDarkSurface)
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+    ) {
+        Icon(Icons.Default.PushPin, null, tint = DakkYellow, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Sabitlenen mesaj · $author", color = DakkYellow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(text, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (onUnpin != null) {
+            IconButton(onClick = onUnpin, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Sabitlemeyi kaldır", tint = DakkTextSecondaryDark, modifier = Modifier.size(18.dp))
             }
         }
     }

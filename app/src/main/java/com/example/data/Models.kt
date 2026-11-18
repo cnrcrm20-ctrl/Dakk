@@ -54,7 +54,11 @@ data class ChatDoc(
     /** Grup son mesaj önizlemesinin her üye için sarılmış anahtarı. */
     val lastMessageKeys: Map<String, String> = emptyMap(),
     /** Son mesaj kaybolan bir mesajsa silineceği zaman (0 = süresiz). */
-    val lastMessageExpiresAt: Long = 0L
+    val lastMessageExpiresAt: Long = 0L,
+    /** Sabitlenen mesajın kimliği (2.6.0+; boşsa sabitlenen mesaj yok). İçerik şifreli mesajın kendisindedir. */
+    val pinnedId: String = "",
+    /** Mesajı sabitleyen kişi. */
+    val pinnedBy: String = ""
 )
 
 /** Firestore: chats/{chatId}/messages/{id} */
@@ -116,6 +120,18 @@ data class ImageAttachment(
     val transitWebp: Boolean = false
 )
 
+/** Sesli mesaj (2.6.0+). localPath doluysa kayıt cihazda hazırdır; durumlar fotoğraflarla aynıdır. */
+data class VoiceAttachment(
+    val mediaId: String,
+    val chunks: Int,
+    val durationMs: Long,
+    val size: Long,
+    val waveform: List<Int>,
+    val localPath: String?,
+    val state: ImageState,
+    val remote: Boolean = false
+)
+
 /**
  * Arayüzde gösterilen mesaj. text == null ve image == null ise mesaj bu cihazda çözülemedi.
  * isAssistant: mesaj Dakk Asistan'ın sohbete eklediği bir yanıttır.
@@ -143,7 +159,9 @@ data class UiMessage(
     /** Kaybolan mesajsa silineceği zaman (0 = süresiz). */
     val expiresAt: Long = 0L,
     /** Mesaj bu cihazda açılamıyorsa gösterilecek açıklama (ör. gruba katılmadan önce gönderilmiş). */
-    val lockedText: String? = null
+    val lockedText: String? = null,
+    /** Sesli mesaj. */
+    val voice: VoiceAttachment? = null
 )
 
 /** Ekranda gösterilen anket. votes: seçenek sırası → oy veren kişi kimlikleri. */

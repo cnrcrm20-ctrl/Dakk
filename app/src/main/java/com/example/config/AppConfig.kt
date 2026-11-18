@@ -20,8 +20,23 @@ data class PublicConfig(
     val maintenanceEnabled: Boolean = false,
     val maintenanceMessage: String = "",
     val serverUrl: String = DEFAULT_SERVER_URL,
-    val announcement: Announcement? = null
+    val announcement: Announcement? = null,
+    /**
+     * Sunucudan açılıp kapatılabilen özellikler (2.6.0+): app_config/public içindeki `feature_*` boolean
+     * alanları. Yeni bir özellik uygulamaya eklenirken burada bir anahtarla korunur; kurucu panelinden
+     * veya /admin/config ile uygulama güncellemesi gerekmeden açılır/kapatılır.
+     */
+    val features: Map<String, Boolean> = emptyMap(),
+    /** Sohbet listesinin üstündeki kısa duyuru bandı (boşsa gösterilmez). */
+    val homeBanner: String = "",
+    val homeBannerUrl: String = "",
+    /** Bant bu andan sonra gizlenir (0 = süresiz). */
+    val homeBannerUntil: Long = 0L
 ) {
+    /** `feature_<name>` anahtarı sunucuda yoksa [default] döner. Ad "feature_" ön ekiyle de verilebilir. */
+    fun feature(name: String, default: Boolean = false): Boolean =
+        features[name.removePrefix(FEATURE_PREFIX)] ?: default
+
     /** Bu sürüm artık desteklenmiyorsa true (zorunlu güncelleme). */
     fun requiresUpdate(currentVersion: String): Boolean =
         minSupportedVersion.isNotBlank() && VersionUtils.isNewer(minSupportedVersion, currentVersion)
@@ -29,6 +44,7 @@ data class PublicConfig(
     val hasServer: Boolean get() = serverUrl.startsWith("https://")
 
     companion object {
+        const val FEATURE_PREFIX = "feature_"
         const val PROVIDER_GEMINI = "gemini"
         const val PROVIDER_CUSTOM = "custom"
         const val DEFAULT_MODEL = "gemini-2.5-flash"
@@ -51,7 +67,14 @@ data class PublicConfig(
                 maintenanceEnabled = data.bool("maintenance_enabled") ?: false,
                 maintenanceMessage = data.str("maintenance_message") ?: "",
                 serverUrl = data.str("server_url")?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: DEFAULT_SERVER_URL,
-                announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) }
+                announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) },
+                homeBanner = data.str("home_banner")?.trim()?.take(300).orEmpty(),
+                homeBannerUrl = data.str("home_banner_url")?.trim()?.takeIf { it.startsWith("https://") }.orEmpty(),
+                homeBannerUntil = data.str("home_banner_until")?.let { bannerUntil(it) }
+                    ?: data.long("home_banner_until") ?: 0L,
+                features = data.entries
+                    .filter { (k, v) -> k.startsWith(FEATURE_PREFIX) && k.length > FEATURE_PREFIX.length && v is Boolean }
+                    .associate { (k, v) -> k.removePrefix(FEATURE_PREFIX) to (v as Boolean) }
             )
         }
     }
@@ -139,4 +162,17 @@ internal fun Map<*, *>.long(key: String): Long? = when (val v = this[key]) {
     is String -> v.trim().toLongOrNull()
     is com.google.firebase.Timestamp -> v.toDate().time
     else -> null
+}
+
+/** "2026-12-31" → o günün sonu (telefonun saat diliminde); epoch milisaniye de kabul edilir. Geçersizse null. */
+internal fun bannerUntil(value: String, tz: java.util.TimeZone = java.util.TimeZone.getDefault()): Long? {
+    val s = value.trim()
+    s.toLongOrNull()?.let { return it.takeIf { v -> v > 0 } }
+    val m = Regex("""(\d{4})-(\d{2})-(\d{2})""").matchEntire(s) ?: return null
+    val c = java.util.Calendar.getInstance(tz).apply {
+        isLenient = false
+        clear()
+        set(m.groupValues[1].toInt(), m.groupValues[2].toInt() - 1, m.groupValues[3].toInt())
+    }
+    return runCatching { c.timeInMillis + 86_400_000L }.getOrNull()
 }

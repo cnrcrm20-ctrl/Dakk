@@ -1,0 +1,169 @@
+name: Sunucu (Supabase Edge + Firestore kuralları)
+
+# - Pull request: sunucu paketini derler, sözdizimini ve panel şemasını doğrular (gizli anahtar gerekmez).
+# - main'e push (cloud/** değiştiyse): Supabase Edge işlevi "dakk" otomatik yüklenir, ardından sağlık
+#   kontrolü yapılır. SUPABASE_ACCESS_TOKEN tanımlı değilse yükleme atlanır (uyarı verilir).
+# - Elle çalıştırma (Actions › Sunucu › Run workflow): Edge yükleme ve/veya Firestore kurallarını yayınlama.
+#   Kurallar yayınlanırken depodaki yer tutucu kurucu adresleri DAKK_FOUNDER_EMAILS ile değiştirilir;
+#   yer tutucu kalırsa yayın durdurulur (kurucu paneli kilitlenmesin diye).
+#
+# Gerekli secret (Settings › Secrets and variables › Actions):
+#   SUPABASE_ACCESS_TOKEN  supabase.com › Account › Access Tokens
+# Yönetici anahtarı ve kurucu adresleri bu jetonla Supabase Vault'tan okunur (dakk_admin_key,
+# dakk_founder_emails). İstenirse DAKK_ADMIN_KEY / DAKK_FOUNDER_EMAILS secret'ları Vault'un yerine geçer.
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths: [ "cloud/**", "firestore.rules", ".github/workflows/server.yml" ]
+  push:
+    # Geçici: 2.6.0 dalı main'e girene kadar bu daldan da yüklenebilsin (Run workflow düğmesi
+    # yalnızca main'deki iş akışlarında görünür). Birleştirmeden sonra bu dal silinebilir.
+    branches: [ "main", "arena/5b705576-dakk" ]
+    paths: [ "cloud/worker/**", "cloud/supabase/**", ".github/workflows/server.yml" ]
+  workflow_dispatch:
+    inputs:
+      deploy_edge:
+        description: "Edge işlevini yükle"
+        type: boolean
+        default: true
+      rules:
+        description: "Firestore kuralları"
+        type: choice
+        options: [ "dokunma", "yalnızca derle (deneme)", "yayınla" ]
+        default: "dokunma"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_REF: hkpmrbahktbujdjpnwwb
+  FUNCTION: dakk
+  BASE_URL: https://hkpmrbahktbujdjpnwwb.supabase.co/functions/v1/dakk
+
+jobs:
+  check:
+    name: Paketi derle ve doğrula
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Edge paketini üret
+        run: |
+          mkdir -p "$RUNNER_TEMP/edge/supabase/functions/$FUNCTION"
+          printf 'project_id = "%s"\n\n[functions.%s]\nverify_jwt = false\n' "$PROJECT_REF" "$FUNCTION" > "$RUNNER_TEMP/edge/supabase/config.toml"
+          node cloud/supabase/build-edge.mjs > "$RUNNER_TEMP/edge/supabase/functions/$FUNCTION/index.ts"
+          cp "$RUNNER_TEMP/edge/supabase/functions/$FUNCTION/index.ts" "$RUNNER_TEMP/bundle.mjs"
+          node --check "$RUNNER_TEMP/bundle.mjs"
+          node --check cloud/worker/dakk-worker.js
+          wc -c "$RUNNER_TEMP/bundle.mjs"
+      - name: Panel şeması geçerli JSON mu?
+        run: node -e "JSON.parse(require('fs').readFileSync('cloud/admin_panel.json','utf8'))"
+      - name: Kurallarda kurucu yer tutucusu var mı? (depo herkese açık; gerçek adres olmamalı)
+        run: grep -q "kurucu1@example.com" firestore.rules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-bundle
+          path: ${{ runner.temp }}/edge
+          retention-days: 7
+
+  deploy-edge:
+    name: Edge işlevini yükle
+    needs: check
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_edge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: edge-bundle
+          path: edge
+      - name: Anahtar var mı?
+        id: token
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::warning::SUPABASE_ACCESS_TOKEN secret'ı yok — Edge yüklemesi atlandı."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: supabase/setup-cli@v1
+        if: steps.token.outputs.ok == 'true'
+        with:
+          version: 2.122.1   # "latest" GitHub API hız sınırına takılıyor; sabit sürüm doğrudan indirilir
+      - name: Yükle
+        if: steps.token.outputs.ok == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        working-directory: edge
+        run: supabase functions deploy "$FUNCTION" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      - name: Sağlık kontrolü
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          for i in 1 2 3 4 5 6; do
+            BODY=$(curl -fsS "$BASE_URL?check=deep" || true)
+            if echo "$BODY" | jq -e '.ok == true and .configured == true and .checks.firestore == true and .checks.fcm == "ok"' >/dev/null 2>&1; then
+              echo "Sunucu sağlıklı ✓"; exit 0
+            fi
+            echo "Bekleniyor ($i)…"; sleep 10
+          done
+          echo "::error::Yüklemeden sonra sunucu sağlık kontrolünden geçmedi: $BODY"
+          exit 1
+
+  rules:
+    name: Firestore kuralları
+    needs: check
+    if: github.event_name == 'workflow_dispatch' && inputs.rules != 'dokunma'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Kurucu adreslerini yerleştir ve gönder
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DAKK_ADMIN_KEY: ${{ secrets.DAKK_ADMIN_KEY }}
+          DAKK_FOUNDER_EMAILS: ${{ secrets.DAKK_FOUNDER_EMAILS }}
+          MODE: ${{ inputs.rules }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DAKK_ADMIN_KEY:-}" ] || [ -z "${DAKK_FOUNDER_EMAILS:-}" ]; then
+            if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+              echo "::error::SUPABASE_ACCESS_TOKEN secret'ı gerekli."; exit 1
+            fi
+            Q="select (select decrypted_secret from vault.decrypted_secrets where name = 'dakk_admin_key') as k, (select decrypted_secret from vault.decrypted_secrets where name = 'dakk_founder_emails') as e"
+            RES=$(curl -fsS -X POST "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "content-type: application/json" \
+              --data "$(jq -n --arg q "$Q" '{query: $q}')") || { echo "::error::Vault okunamadı (jeton geçersiz olabilir)"; exit 1; }
+            K=$(echo "$RES" | jq -r '.[0].k // empty'); E=$(echo "$RES" | jq -r '.[0].e // empty')
+            [ -n "$K" ] && echo "::add-mask::$K"
+            DAKK_ADMIN_KEY="${DAKK_ADMIN_KEY:-$K}"; DAKK_FOUNDER_EMAILS="${DAKK_FOUNDER_EMAILS:-$E}"
+            export DAKK_FOUNDER_EMAILS
+            if [ -z "$DAKK_ADMIN_KEY" ] || [ -z "$DAKK_FOUNDER_EMAILS" ]; then
+              echo "::error::Vault'ta dakk_admin_key / dakk_founder_emails bulunamadı."; exit 1
+            fi
+          fi
+          LIST=$(node -e '
+            const list = process.env.DAKK_FOUNDER_EMAILS.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+            if (!list.length || !list.every(e => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e))) { console.error("Geçersiz adres listesi"); process.exit(1); }
+            console.log(list.map(e => `'"'"'${e}'"'"'`).join(", "));
+          ')
+          PLACEHOLDER="'kurucu1@example.com', 'kurucu2@example.com'"
+          grep -qF "$PLACEHOLDER" firestore.rules || { echo "::error::Yer tutucu satırı bulunamadı"; exit 1; }
+          LIST="$LIST" PLACEHOLDER="$PLACEHOLDER" node -e '
+            const fs = require("fs");
+            const src = fs.readFileSync("firestore.rules", "utf8").split(process.env.PLACEHOLDER).join(process.env.LIST);
+            if (src.includes("@example.com")) { console.error("Yer tutucu kaldı"); process.exit(1); }
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/rules.txt", src);
+          '
+          DRY=true; [ "$MODE" = "yayınla" ] && DRY=false
+          jq -n --rawfile source "$RUNNER_TEMP/rules.txt" --argjson dry "$DRY" '{source: $source, dryRun: $dry}' > "$RUNNER_TEMP/body.json"
+          HTTP=$(curl -sS -o "$RUNNER_TEMP/out.json" -w '%{http_code}' -X POST "$BASE_URL/admin/rules" \
+            -H "content-type: application/json" -H "x-dakk-admin: $DAKK_ADMIN_KEY" --data-binary "@$RUNNER_TEMP/body.json")
+          # Yanıtta kural metni yok; yalnızca durum ve ruleset adı.
+          jq '{ok, dryRun, stage, status, ruleset, previous}' "$RUNNER_TEMP/out.json" || cat "$RUNNER_TEMP/out.json"
+          [ "$HTTP" = "200" ] || { echo "::error::Kurallar gönderilemedi (HTTP $HTTP)"; exit 1; }

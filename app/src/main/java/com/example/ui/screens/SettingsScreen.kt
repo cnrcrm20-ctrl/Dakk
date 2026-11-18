@@ -140,7 +140,7 @@ fun SettingsScreen(viewModel: DakkViewModel) {
             }
             runCatching { context.startActivity(intent) }
         }
-        SettingRow(Icons.Default.VerifiedUser, "İzinler", "Bildirim, kamera, güncelleme ve pil") { viewModel.openPermissions() }
+        SettingRow(Icons.Default.VerifiedUser, "İzinler", "Bildirim, kamera, mikrofon, güncelleme ve pil") { viewModel.openPermissions() }
         Row(
             modifier = Modifier
                 .fillMaxWidth()

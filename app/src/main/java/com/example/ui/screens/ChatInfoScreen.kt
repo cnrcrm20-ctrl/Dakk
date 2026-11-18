@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -98,6 +99,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.ImageState
+import com.example.data.UiMessage
+import com.example.media.VoiceMeta
 import com.example.ui.ActiveChat
 import com.example.ui.ChatMember
 import com.example.ui.DakkViewModel
@@ -114,8 +117,11 @@ import com.example.ui.theme.DakkYellow
 import com.example.util.Disappearing
 import com.example.util.MuteOptions
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-private enum class InfoSheet { PROFILE, MUTE, DISAPPEARING, SETTINGS, PRIVACY, NICKNAMES, INVITE, MEMBERS }
+private enum class InfoSheet { PROFILE, MUTE, DISAPPEARING, SETTINGS, PRIVACY, NICKNAMES, INVITE, MEMBERS, STARRED }
 
 private val urlRegex = Regex("""https?://[^\s]+""")
 
@@ -130,6 +136,7 @@ fun ChatInfoScreen(key: String, viewModel: DakkViewModel) {
     val activeChat by viewModel.activeChat.collectAsStateWithLifecycle()
     val messages by viewModel.activeMessages.collectAsStateWithLifecycle()
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
+    val starred by viewModel.starred.collectAsStateWithLifecycle()
     val chat = activeChat?.takeIf { it.key == key }
 
     var sheet by remember { mutableStateOf<InfoSheet?>(null) }
@@ -236,6 +243,7 @@ fun ChatInfoScreen(key: String, viewModel: DakkViewModel) {
                     QuickAction(Icons.Default.Person, "Profil") { sheet = InfoSheet.PROFILE }
                 }
                 QuickAction(Icons.Default.Search, "Ara") { viewModel.openChatSearch(key) }
+                QuickAction(Icons.Default.Star, "Yıldızlı") { sheet = InfoSheet.STARRED }
                 QuickAction(
                     if (muted) Icons.Default.NotificationsOff else Icons.Default.Notifications,
                     if (muted) "Sessizde" else "Sessize al",
@@ -383,6 +391,13 @@ fun ChatInfoScreen(key: String, viewModel: DakkViewModel) {
                             onRemovePhoto = { viewModel.setCustomPhoto(chat.key, null) },
                             onAddContact = { chat.peer?.let { viewModel.confirmAddContact(it) }; sheet = null }
                         )
+                        InfoSheet.STARRED -> StarredSheet(
+                            messages = messages.filter { viewModel.starKey(chat.chatId, it.id) in starred }.reversed(),
+                            nameOf = { uid -> chat.member(uid)?.name ?: "Dakk Kullanıcısı" }
+                        ) { id ->
+                            sheet = null
+                            viewModel.openMessage(key, id)
+                        }
                         InfoSheet.MUTE -> MuteSheet(muted, chat.muteUntil) { duration ->
                             viewModel.setMute(key, duration)
                             sheet = null
@@ -643,7 +658,7 @@ private fun QuickAction(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(88.dp)
+            .width(78.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 6.dp)
@@ -803,6 +818,60 @@ private fun ProfileSheet(
     SheetAction(Icons.Default.AddAPhoto, "Fotoğrafı değiştir", "Yalnızca senin telefonunda görünür", onClick = onChangePhoto)
     if (chat.hasCustomPhoto) SheetAction(Icons.Default.Refresh, "Asıl fotoğrafa dön", null, onClick = onRemovePhoto)
     if (!isContact && chat.peer != null) SheetAction(Icons.Default.PersonAdd, "Kişilere ekle", null, onClick = onAddContact)
+}
+
+@Composable
+private fun StarredSheet(messages: List<UiMessage>, nameOf: (String) -> String, onOpen: (String) -> Unit) {
+    SheetTitle("Yıldızlı mesajlar")
+    if (messages.isEmpty()) {
+        Text(
+            "Henüz yıldızlı mesaj yok. Bir mesaja basılı tutup ⭐ Yıldızla'ya dokun; burada kolayca bulursun. " +
+                "Yıldızlar yalnızca bu telefonda tutulur.",
+            color = DakkTextSecondaryDark,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+        )
+        return
+    }
+    val format = remember { SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag("tr")) }
+    messages.forEach { m ->
+        Row(
+            verticalAlignment = Alignment.Top,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpen(m.id) }
+                .padding(horizontal = 24.dp, vertical = 10.dp)
+        ) {
+            Icon(Icons.Default.Star, null, tint = DakkYellow, modifier = Modifier.size(18.dp).padding(top = 2.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row {
+                    Text(
+                        if (m.isFromMe) "Sen" else nameOf(m.senderUid),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(format.format(Date(m.timestamp)), color = DakkTextTertiaryDark, fontSize = 11.sp)
+                }
+                Text(
+                    when {
+                        m.image != null -> "📷 Fotoğraf"
+                        m.voice != null -> VoiceMeta.preview(m.voice.durationMs)
+                        m.poll != null -> "📊 ${m.poll.question}"
+                        else -> m.text ?: "🔒 Mesaj"
+                    },
+                    color = DakkTextSecondaryDark,
+                    fontSize = 14.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }
 
 @Composable

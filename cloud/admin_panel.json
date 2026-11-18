@@ -55,8 +55,19 @@
     },
     {
       "title": "Özellikler",
+      "description": "2.6.0 ve sonrası: yeni özellikler burada feature_… anahtarlarıyla, uygulama güncellemesi gerekmeden açılıp kapatılır.",
       "fields": [
-        { "key": "images_enabled", "doc": "public", "type": "switch", "label": "Fotoğraf gönderme", "help": "Firestore ücretsiz kotası dolmak üzereyse geçici olarak kapatabilirsiniz.", "default": true }
+        { "key": "images_enabled", "doc": "public", "type": "switch", "label": "Fotoğraf gönderme", "help": "Firestore ücretsiz kotası dolmak üzereyse geçici olarak kapatabilirsiniz.", "default": true },
+        { "key": "feature_sesli_mesaj", "doc": "public", "type": "switch", "label": "Sesli mesajlar", "help": "Kapatılırsa mikrofon düğmesi gizlenir. Gönderilmiş sesli mesajlar dinlenmeye devam eder.", "default": true }
+      ]
+    },
+    {
+      "title": "Duyuru bandı",
+      "description": "Güncelleme gerektirmez. Sohbet listesinin en üstünde kısa, kapatılabilir bir duyuru (2.6.0+).",
+      "fields": [
+        { "key": "home_banner", "doc": "public", "type": "text", "label": "Duyuru bandı", "placeholder": "Boş = bant yok", "help": "Sohbet listesinin en üstünde tek satır. Kullanıcı kapatırsa o metin ona bir daha gösterilmez." },
+        { "key": "home_banner_url", "doc": "public", "type": "url", "label": "Bant bağlantısı", "placeholder": "https://… (isteğe bağlı)" },
+        { "key": "home_banner_until", "doc": "public", "type": "text", "label": "Bant bitiş tarihi", "placeholder": "2026-12-31 (boş = süresiz)", "help": "O günün sonunda bant kendiliğinden kalkar." }
       ]
     },
     {

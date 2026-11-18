@@ -113,6 +113,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val typingLabels by viewModel.typingLabels.collectAsStateWithLifecycle()
+    val banner by viewModel.homeBanner.collectAsStateWithLifecycle()
 
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -299,6 +300,8 @@ fun HomeScreen(viewModel: DakkViewModel) {
                             config.assistantEnabled -> ChatList(
                                 chats = filtered,
                                 typing = typingLabels,
+                                banner = banner,
+                                onDismissBanner = { viewModel.dismissHomeBanner() },
                                 showAssistant = true,
                                 onAssistant = { viewModel.openAssistant() },
                                 onAddContact = { showAddContact = true }
@@ -309,7 +312,13 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 action = "Kişi ekle",
                                 onAction = { showAddContact = true }
                             )
-                            else -> ChatList(filtered, typing = typingLabels, showAssistant = false) { viewModel.openChat(it.peerUid) }
+                            else -> ChatList(
+                                filtered,
+                                typing = typingLabels,
+                                banner = banner,
+                                onDismissBanner = { viewModel.dismissHomeBanner() },
+                                showAssistant = false
+                            ) { viewModel.openChat(it.peerUid) }
                         }
                     }
                 }
@@ -343,6 +352,8 @@ private fun ChatList(
     chats: List<ChatSummary>,
     typing: Map<String, String>,
     showAssistant: Boolean,
+    banner: com.example.config.PublicConfig? = null,
+    onDismissBanner: () -> Unit = {},
     onAssistant: () -> Unit = {},
     onAddContact: () -> Unit = {},
     onClick: (ChatSummary) -> Unit
@@ -355,6 +366,11 @@ private fun ChatList(
         if (topChatId != null && listState.firstVisibleItemIndex <= 2) listState.animateScrollToItem(0)
     }
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
+        if (banner != null) {
+            item(key = "home_banner") {
+                HomeBanner(banner.homeBanner, banner.homeBannerUrl, onDismissBanner)
+            }
+        }
         if (showAssistant) {
             item(key = "dakk_assistant") {
                 Row(
@@ -775,5 +791,36 @@ fun formatListTime(time: Long): String {
         isYesterday -> "Dün"
         now.get(Calendar.YEAR) == then.get(Calendar.YEAR) -> SimpleDateFormat("d MMM", locale).format(Date(time))
         else -> SimpleDateFormat("dd.MM.yyyy", locale).format(Date(time))
+    }
+}
+
+/** Sunucudan yönetilen tek satırlık duyuru (app_config/public → home_banner). Kapatılınca o duyuru bir daha çıkmaz. */
+@Composable
+private fun HomeBanner(text: String, url: String, onDismiss: () -> Unit) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .background(DakkYellow.copy(alpha = 0.14f))
+            .then(
+                if (url.isNotBlank()) Modifier.clickable { runCatching { uriHandler.openUri(url) } } else Modifier
+            )
+            .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text,
+            color = Color.White,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+        if (url.isNotBlank()) {
+            Text("›", color = DakkYellow, fontSize = 22.sp, modifier = Modifier.padding(horizontal = 6.dp))
+        }
+        androidx.compose.material3.IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            Text("✕", color = DakkTextSecondaryDark, fontSize = 14.sp)
+        }
     }
 }

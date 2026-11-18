@@ -2,6 +2,23 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.6.0] - 2026-11-18
+
+### Yeni
+- **Sesli mesajlar 🎤:** Yazı alanı boşken gönder düğmesi mikrofona dönüşüyor; dokun, konuş, gönder. En fazla
+  5 dakika. Kayıtlar fotoğraflar gibi uçtan uca şifreleniyor. Dinlerken dalga formuna dokunarak ileri/geri
+  sarılabiliyor, 1× / 1,5× / 2× hız seçilebiliyor. Sohbetteki herkesin 2.6.0 kullanması gerekiyor.
+- **Yıldızlı mesajlar ⭐:** Bir mesaja basılı tut → *Yıldızla*. Sohbet bilgilerindeki *Yıldızlı* düğmesinden
+  hepsini gör, dokununca mesaja git. Yıldızlar yalnızca senin telefonunda tutuluyor.
+- **Mesaj sabitleme 📌:** Önemli bir mesajı sohbetin üstüne sabitle (basılı tut → *Sabitle*). Sabitlenen mesaj
+  herkesin sohbetinin üstünde görünüyor; dokununca mesaja gidiyor. İçerik yine şifreli kalıyor.
+
+### İyileştirildi
+- **Özellikler uzaktan açılabiliyor:** Yeni özellikler, uygulamayı yeniden indirmeye gerek kalmadan sunucudan
+  açılıp kapatılabiliyor. Bir sorun çıkarsa özellik herkes için anında kapatılabiliyor.
+- **Duyuru bandı:** Sohbet listesinin üstünde kısa, kapatılabilir duyurular; güncelleme gerekmeden sunucudan
+  değiştiriliyor.
+
 ## [2.5.0] - 2026-11-15
 
 ### Yeni
