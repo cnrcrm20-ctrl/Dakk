@@ -25,11 +25,9 @@ import com.example.data.ChatIds
 import com.example.media.VoiceMeta
 import com.example.media.VoicePlayback
 import com.example.ui.components.ConfettiBurst
-import com.example.ui.components.FESTIVE_CARDS
-import com.example.ui.components.FestiveCardPicker
+import com.example.ui.components.EventCardPicker
 import com.example.ui.components.VoiceMessageContent
 import com.example.ui.components.VoiceRecordingBar
-import com.example.util.Festive
 import com.example.ui.components.CreatePollDialog
 import com.example.ui.components.PollContent
 import com.example.ui.components.TypingIndicator
@@ -171,7 +169,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     val playback by viewModel.voicePlayback.collectAsStateWithLifecycle()
     val voiceElapsed by viewModel.voiceElapsed.collectAsStateWithLifecycle()
     val voiceLevel by viewModel.voiceLevel.collectAsStateWithLifecycle()
-    val festive by viewModel.festiveActive.collectAsStateWithLifecycle()
+    val event by viewModel.activeEvent.collectAsStateWithLifecycle()
 
     val chat = activeChat?.takeIf { it.key == peerUid }
     val isGroup = ChatIds.isGroup(peerUid)
@@ -283,14 +281,15 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
         viewModel.consumeJumpRequest()
     }
 
-    // Yılbaşında "mutlu yıllar" yazan yeni bir mesaj gelince/gidince konfeti patlar.
+    // Etkinlikte (yılbaşı, bayram…) kutlama sözü yazan yeni bir mesaj gelince/gidince konfeti patlar.
     val lastMessage = allMessages.lastOrNull()
-    LaunchedEffect(lastMessage?.id, festive) {
+    LaunchedEffect(lastMessage?.id, event) {
         val m = lastMessage ?: return@LaunchedEffect
-        if (!festive || m.id in celebrated) return@LaunchedEffect
+        val current = event
+        if (current == null || m.id in celebrated) return@LaunchedEffect
         celebrated += m.id
         val fresh = System.currentTimeMillis() - m.timestamp < 90_000
-        if (fresh && Festive.isGreeting(m.text)) confetti++
+        if (fresh && current.isGreeting(m.text)) confetti++
     }
     LaunchedEffect(chatItems.size, assistantTyping, typers.isNotEmpty()) {
         val extra = (if (assistantTyping) 1 else 0) + 1
@@ -499,13 +498,14 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    if (festive && config.imagesEnabled) {
+                    val cardEvent = event
+                    if (cardEvent != null && cardEvent.cards.isNotEmpty() && config.imagesEnabled) {
                         IconButton(
                             onClick = { pickingCard = true },
                             enabled = canSend,
                             modifier = Modifier.size(44.dp)
                         ) {
-                            Text("🎄", fontSize = 22.sp)
+                            Text(cardEvent.emoji, fontSize = 22.sp)
                         }
                     }
                     if (config.imagesEnabled) {
@@ -819,11 +819,13 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
         )
     }
 
-    if (pickingCard) {
-        FestiveCardPicker(
-            onPick = { index ->
+    val pickerEvent = event
+    if (pickingCard && pickerEvent != null) {
+        EventCardPicker(
+            event = pickerEvent,
+            onPick = { card ->
                 pickingCard = false
-                viewModel.sendFestiveCard(peerUid, FESTIVE_CARDS[index])
+                viewModel.sendEventCard(peerUid, card)
             },
             onDismiss = { pickingCard = false }
         )

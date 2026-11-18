@@ -20,6 +20,22 @@ object TurkishSuffix {
         return if (endsWithVowel(n)) "$n'y$a" else "$n'$a"
     }
 
+    /** Sayıların yönelme hâli, okunuşuna göre: "2027'ye", "2028'e", "2029'a", "2030'a", "100'e". */
+    fun dativeNumber(number: Long): String {
+        val n = kotlin.math.abs(number)
+        val lastWord = when {
+            n == 0L -> "sıfır"
+            n % 10 != 0L -> listOf("", "bir", "iki", "üç", "dört", "beş", "altı", "yedi", "sekiz", "dokuz")[(n % 10).toInt()]
+            n % 100 != 0L -> listOf("", "on", "yirmi", "otuz", "kırk", "elli", "altmış", "yetmiş", "seksen", "doksan")[((n / 10) % 10).toInt()]
+            n % 1000 != 0L -> "yüz"
+            n % 1_000_000 != 0L -> "bin"
+            else -> "milyon"
+        }
+        val v = lastVowel(lastWord) ?: 'e'
+        val a = if (v in BACK) "a" else "e"
+        return if (endsWithVowel(lastWord)) "$number'y$a" else "$number'$a"
+    }
+
     /** İlgi hâli: "Ali'nin", "Ahmet'in", "Can'ın", "Burcu'nun". */
     fun genitive(name: String): String {
         val n = name.trim().ifEmpty { return name }

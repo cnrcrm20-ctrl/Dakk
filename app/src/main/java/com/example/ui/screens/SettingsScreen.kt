@@ -86,7 +86,7 @@ fun SettingsScreen(viewModel: DakkViewModel) {
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
     val dataSaver by viewModel.dataSaver.collectAsStateWithLifecycle()
     val saverLevel by viewModel.saverLevel.collectAsStateWithLifecycle()
-    val festiveSeason by viewModel.festiveSeason.collectAsStateWithLifecycle()
+    val seasonEvent by viewModel.seasonEvent.collectAsStateWithLifecycle()
     val festivePref by viewModel.festivePref.collectAsStateWithLifecycle()
 
     var showQr by remember { mutableStateOf(false) }
@@ -166,7 +166,8 @@ fun SettingsScreen(viewModel: DakkViewModel) {
                 colors = SwitchDefaults.colors(checkedTrackColor = DakkYellow, checkedThumbColor = Color.Black)
             )
         }
-        if (festiveSeason) {
+        val shownEvent = seasonEvent
+        if (shownEvent != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -174,12 +175,13 @@ fun SettingsScreen(viewModel: DakkViewModel) {
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("🎄", fontSize = 20.sp, modifier = Modifier.width(24.dp))
+                Text(shownEvent.emoji, fontSize = 20.sp, modifier = Modifier.width(24.dp))
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Yılbaşı süsleri", color = Color.White, fontSize = 16.sp)
+                    Text(if (shownEvent.hat) "Yılbaşı süsleri" else "Etkinlik süsleri", color = Color.White, fontSize = 16.sp)
                     Text(
-                        "Kar, geri sayım, şapkalı ördek ve konfeti. 2 Ocak'ta kendiliğinden kalkar",
+                        if (shownEvent.hat) "Kar, geri sayım, şapkalı ördek ve konfeti. 2 Ocak'ta kendiliğinden kalkar"
+                        else "Geri sayım, kartlar ve konfeti. ${java.text.SimpleDateFormat("d MMMM", java.util.Locale("tr")).format(java.util.Date(shownEvent.end))} tarihinde kendiliğinden kalkar",
                         color = DakkTextSecondaryDark,
                         fontSize = 13.sp
                     )

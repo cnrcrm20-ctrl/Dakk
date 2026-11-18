@@ -1,6 +1,6 @@
 package com.example
 
-import com.example.ui.components.MidnightCelebration
+import com.example.ui.components.EventCelebration
 import android.Manifest
 import android.app.Activity.ScreenCaptureCallback
 import android.content.Context
@@ -166,7 +166,7 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
     val isFounder by viewModel.isFounder.collectAsStateWithLifecycle()
     val announcement by viewModel.announcement.collectAsStateWithLifecycle()
     val preview by viewModel.previewAnnouncement.collectAsStateWithLifecycle()
-    val celebrationYear by viewModel.celebrationYear.collectAsStateWithLifecycle()
+    val celebration by viewModel.celebration.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
@@ -250,9 +250,9 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
         TutorialOverlay(onFinish = { viewModel.finishTutorial() })
         return
     }
-    if (dialogsAllowed && celebrationYear > 0) {
-        val year = celebrationYear
-        MidnightCelebration(year) { viewModel.dismissCelebration(year) }
+    val celebrating = celebration
+    if (dialogsAllowed && celebrating != null) {
+        EventCelebration(celebrating) { viewModel.dismissCelebration(celebrating.id) }
         return
     }
     if (dialogsAllowed) FoundContactDialog(viewModel)

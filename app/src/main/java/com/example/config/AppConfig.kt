@@ -26,7 +26,14 @@ data class PublicConfig(
      * alanları. Yeni bir özellik uygulamaya eklenirken burada bir anahtarla korunur; kurucu panelinden
      * veya /admin/config ile uygulama güncellemesi gerekmeden açılır/kapatılır.
      */
-    val features: Map<String, Boolean> = emptyMap()
+    val features: Map<String, Boolean> = emptyMap(),
+    /** Etkinlikler (bayram, özel gün…) — biçim: [com.example.util.Events.parse]. Boşsa yalnızca yerleşik yılbaşı. */
+    val eventJson: String = "",
+    /** Sohbet listesinin üstündeki kısa duyuru bandı (boşsa gösterilmez). */
+    val homeBanner: String = "",
+    val homeBannerUrl: String = "",
+    /** Bant bu andan sonra gizlenir (0 = süresiz). */
+    val homeBannerUntil: Long = 0L
 ) {
     /** `feature_<name>` anahtarı sunucuda yoksa [default] döner. Ad "feature_" ön ekiyle de verilebilir. */
     fun feature(name: String, default: Boolean = false): Boolean =
@@ -63,6 +70,11 @@ data class PublicConfig(
                 maintenanceMessage = data.str("maintenance_message") ?: "",
                 serverUrl = data.str("server_url")?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: DEFAULT_SERVER_URL,
                 announcement = (data["announcement"] as? Map<*, *>)?.let { Announcement.fromMap(it) },
+                eventJson = data.str("event_json")?.trim().orEmpty(),
+                homeBanner = data.str("home_banner")?.trim()?.take(300).orEmpty(),
+                homeBannerUrl = data.str("home_banner_url")?.trim()?.takeIf { it.startsWith("https://") }.orEmpty(),
+                homeBannerUntil = data.str("home_banner_until")?.let { com.example.util.Events.time(it, endOfDay = true) }
+                    ?: data.long("home_banner_until") ?: 0L,
                 features = data.entries
                     .filter { (k, v) -> k.startsWith(FEATURE_PREFIX) && k.length > FEATURE_PREFIX.length && v is Boolean }
                     .associate { (k, v) -> k.removePrefix(FEATURE_PREFIX) to (v as Boolean) }

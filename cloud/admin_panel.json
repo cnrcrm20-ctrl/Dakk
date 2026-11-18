@@ -63,6 +63,16 @@
       ]
     },
     {
+      "title": "Etkinlikler ve duyuru bandı",
+      "description": "Güncelleme gerektirmez. Bayram, özel gün gibi etkinlikler (geri sayım, kartlar, konfeti) ve sohbet listesinin üstündeki kısa bant. Hatalı etkinlik metni sessizce yok sayılır; yılbaşı yine çalışır.",
+      "fields": [
+        { "key": "home_banner", "doc": "public", "type": "text", "label": "Duyuru bandı", "placeholder": "Boş = bant yok", "help": "Sohbet listesinin en üstünde tek satır. Kullanıcı kapatırsa o metin ona bir daha gösterilmez." },
+        { "key": "home_banner_url", "doc": "public", "type": "url", "label": "Bant bağlantısı", "placeholder": "https://… (isteğe bağlı)" },
+        { "key": "home_banner_until", "doc": "public", "type": "text", "label": "Bant bitiş tarihi", "placeholder": "2026-12-31 (boş = süresiz)", "help": "O günün sonunda bant kendiliğinden kalkar." },
+        { "key": "event_json", "doc": "public", "type": "multiline", "label": "Etkinlikler (JSON)", "placeholder": "{\"events\": [{\"id\": \"bayram-2027\", \"start\": \"2027-03-19\", \"end\": \"2027-03-22\", \"countdown_to\": \"2027-03-20T00:00\", \"countdown_title\": \"Bayrama kalan\", \"done_title\": \"İyi Bayramlar!\", \"emoji\": \"🌙\", \"greetings\": [\"iyi bayramlar\"], \"cards\": [\"https://…/kart.webp\"]}]}", "help": "Boş = yalnızca yerleşik yılbaşı. \"yilbasi\": false yazarsanız yerleşik yılbaşı da kapanır.", "default": "" }
+      ]
+    },
+    {
       "title": "Dakk sunucusu",
       "description": "Uygulama kapalıyken mesaj bildirimleri ve özel API bu sunucu üzerinden çalışır.",
       "fields": [

@@ -19,6 +19,9 @@ Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik 
 ### İyileştirildi
 - **Özellikler uzaktan açılabiliyor:** Yeni özellikler, uygulamayı yeniden indirmeye gerek kalmadan sunucudan
   açılıp kapatılabiliyor. Bir sorun çıkarsa özellik herkes için anında kapatılabiliyor.
+- **Etkinlikler ve duyurular güncellemesiz:** Bayram ve özel günler (geri sayım, kartlar, konfeti, kutlama ekranı)
+  ve sohbet listesinin üstündeki kısa duyuru bandı artık sunucudan geliyor; yeni bir etkinlik için uygulamayı
+  güncellemek gerekmiyor. Sunucuya ulaşılamazsa yerleşik yılbaşı yine çalışıyor.
 
 ## [2.5.0] - 2026-11-15
 

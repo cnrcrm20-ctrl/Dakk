@@ -78,7 +78,7 @@ object Festive {
 
     // ------------------------------------------------------------------ "Mutlu yıllar" konfetisi
 
-    private val GREETINGS = listOf(
+    internal val GREETINGS = listOf(
         "mutlu yillar",
         "mutlu yeni yillar",
         "mutlu seneler",
@@ -98,10 +98,13 @@ object Festive {
      * Metin bir yılbaşı kutlaması mı? Büyük/küçük harf, Türkçe karakter, noktalama ve uzatılan harfler
      * ("mutluuu yıllaaar") yok sayılır.
      */
-    fun isGreeting(text: String?): Boolean {
-        if (text.isNullOrBlank()) return false
+    fun isGreeting(text: String?): Boolean = matchesAny(text, GREETINGS)
+
+    /** [phrases] önceden [normalize] edilmiş olmalı; her biri bir kelime başında aranır. */
+    fun matchesAny(text: String?, phrases: List<String>): Boolean {
+        if (text.isNullOrBlank() || phrases.isEmpty()) return false
         val t = " " + normalize(text) + " "
-        return GREETINGS.any { t.contains(" $it") }
+        return phrases.any { it.isNotEmpty() && t.contains(" $it") }
     }
 
     /** Türkçe katlama, harf dışını tek boşluğa indirme ve art arda aynı harfleri teke indirme. */

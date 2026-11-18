@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -53,6 +55,8 @@ import com.example.ui.theme.DakkDarkSurface
 import com.example.ui.theme.DakkOrange
 import com.example.ui.theme.DakkTextSecondaryDark
 import com.example.ui.theme.DakkYellow
+import com.example.util.DakkEvent
+import com.example.util.EventCard
 import com.example.util.Festive
 import kotlin.math.sin
 import kotlin.random.Random
@@ -159,11 +163,14 @@ fun ConfettiBurst(trigger: Int, modifier: Modifier = Modifier, pieces: Int = 90)
     }
 }
 
-/** Sohbet listesinin başındaki geri sayım kartı. */
+private fun eventColors(event: DakkEvent): List<Color> =
+    event.colors.takeIf { it.size == 2 }?.map { Color(it) } ?: listOf(Color(0xFF1B2A4A), Color(0xFF3A1D3F))
+
+/** Sohbet listesinin başındaki etkinlik kartı: geri sayım ya da kutlama yazısı. */
 @Composable
-fun NewYearCountdownCard(now: Long, onSendCard: (() -> Unit)?, modifier: Modifier = Modifier) {
-    val countdown = Festive.countdown(now)
-    val year = Festive.newYear(now)
+fun EventCountdownCard(event: DakkEvent, now: Long, onSendCard: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val countdown = event.countdown(now)
+    if (countdown == null && event.doneTitle.isBlank()) return
     Surface(
         color = Color.Transparent,
         shape = RoundedCornerShape(20.dp),
@@ -174,22 +181,26 @@ fun NewYearCountdownCard(now: Long, onSendCard: (() -> Unit)?, modifier: Modifie
         Box(
             Modifier
                 .clip(RoundedCornerShape(20.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF1B2A4A), Color(0xFF3A1D3F))))
+                .background(Brush.linearGradient(eventColors(event)))
                 .border(1.dp, DakkYellow.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
         ) {
-            SnowOverlay(Modifier.matchParentSize(), count = 14)
+            if (event.snow) SnowOverlay(Modifier.matchParentSize(), count = 14)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
-                Text(if (countdown == null) "🎉" else "🎄", fontSize = 34.sp)
+                Text(if (countdown == null) event.doneEmoji else event.emoji, fontSize = 34.sp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     if (countdown == null) {
-                        Text("Mutlu Yıllar! $year", color = DakkYellow, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Yeni yılın kutlu olsun 🥳", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                        Text(event.doneTitle, color = DakkYellow, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        if (event.doneText.isNotBlank()) {
+                            Text(event.doneText, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                        }
                     } else {
-                        Text("$year'e kalan", color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                        if (event.countdownTitle.isNotBlank()) {
+                            Text(event.countdownTitle, color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                        }
                         Text(
                             Festive.countdownLabel(countdown),
                             color = DakkYellow,
@@ -198,7 +209,7 @@ fun NewYearCountdownCard(now: Long, onSendCard: (() -> Unit)?, modifier: Modifie
                         )
                     }
                 }
-                if (onSendCard != null) {
+                if (onSendCard != null && event.cards.isNotEmpty()) {
                     TextButton(onClick = onSendCard) {
                         Text("Kart gönder", color = DakkYellow, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     }
@@ -208,9 +219,9 @@ fun NewYearCountdownCard(now: Long, onSendCard: (() -> Unit)?, modifier: Modifie
     }
 }
 
-/** Gece yarısı kutlaması: tam ekran, konfetili. Dokununca kapanır. */
+/** Geri sayım bitince tam ekran, konfetili kutlama. Dokununca kapanır. */
 @Composable
-fun MidnightCelebration(year: Int, onDismiss: () -> Unit) {
+fun EventCelebration(event: DakkEvent, onDismiss: () -> Unit) {
     androidx.activity.compose.BackHandler(onBack = onDismiss)
     var burst by remember { mutableLongStateOf(1L) }
     LaunchedEffect(Unit) {
@@ -226,67 +237,105 @@ fun MidnightCelebration(year: Int, onDismiss: () -> Unit) {
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.Center
     ) {
-        SnowOverlay(count = 60)
+        if (event.snow) SnowOverlay(count = 60)
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-            Image(
-                painter = painterResource(R.drawable.dakk_logo_xmas),
-                contentDescription = null,
-                modifier = Modifier
-                    .width(150.dp)
-                    .clip(RoundedCornerShape(28.dp))
-            )
+            if (event.hat) {
+                Image(
+                    painter = painterResource(R.drawable.dakk_logo_xmas),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .width(150.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                )
+            } else {
+                Text(event.doneEmoji, fontSize = 96.sp)
+            }
             Spacer(Modifier.height(24.dp))
-            Text("Mutlu Yıllar!", color = DakkYellow, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
-            Text("$year", color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "Dakk ailesi olarak sağlık, huzur ve bol kahkahalı bir yıl dileriz 🦆",
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center
-            )
+            if (event.celebrateTitle.isNotBlank()) {
+                Text(event.celebrateTitle, color = DakkYellow, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, lineHeight = 46.sp)
+            }
+            if (event.celebrateBig.isNotBlank()) {
+                Text(event.celebrateBig, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+            }
+            if (event.celebrateText.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    event.celebrateText,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
             Spacer(Modifier.height(28.dp))
             Text("Kapatmak için dokun", color = DakkTextSecondaryDark, fontSize = 12.sp)
         }
-        ConfettiBurst(trigger = burst.toInt(), pieces = 140)
+        if (event.confetti) ConfettiBurst(trigger = burst.toInt(), pieces = 140)
     }
 }
 
-/** Yılbaşı kartı seçici (alt sayfa). */
+@Composable
+private fun EventCardImage(card: EventCard, label: String, modifier: Modifier) {
+    when (card) {
+        is EventCard.Builtin -> Image(
+            painter = painterResource(FESTIVE_CARDS.getOrElse(card.index) { FESTIVE_CARDS[0] }),
+            contentDescription = label,
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+        )
+        is EventCard.Remote -> coil.compose.SubcomposeAsyncImage(
+            model = card.url,
+            contentDescription = label,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.background(Color.White.copy(alpha = 0.06f)),
+            loading = {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Yükleniyor…", color = DakkTextSecondaryDark, fontSize = 12.sp)
+                }
+            },
+            error = {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Yüklenemedi", color = DakkTextSecondaryDark, fontSize = 12.sp)
+                }
+            }
+        )
+    }
+}
+
+/** Etkinlik kartı seçici (alt sayfa). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FestiveCardPicker(onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+fun EventCardPicker(event: DakkEvent, onPick: (EventCard) -> Unit, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = DakkDarkSurface) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 20.dp)
         ) {
-            Text("🎄 Yılbaşı kartı gönder", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("${event.emoji} Kart gönder", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(
                 "Kart, fotoğraf gibi uçtan uca şifreli gönderilir.",
                 color = DakkTextSecondaryDark,
                 fontSize = 13.sp
             )
             Spacer(Modifier.height(14.dp))
-            FESTIVE_CARDS.toList().chunked(2).forEachIndexed { row, pair ->
+            event.cards.chunked(2).forEachIndexed { row, pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    pair.forEachIndexed { col, res ->
-                        val index = row * 2 + col
-                        Image(
-                            painter = painterResource(res),
-                            contentDescription = "Kart ${index + 1}",
-                            contentScale = ContentScale.Crop,
+                    pair.forEachIndexed { col, card ->
+                        EventCardImage(
+                            card = card,
+                            label = "Kart ${row * 2 + col + 1}",
                             modifier = Modifier
                                 .weight(1f)
                                 .aspectRatio(1080f / 1350f)
                                 .clip(RoundedCornerShape(14.dp))
-                                .clickable { onPick(index) }
+                                .clickable { onPick(card) }
                         )
                     }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(12.dp))
             }
