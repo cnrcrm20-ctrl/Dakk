@@ -16,8 +16,10 @@ on:
     branches: [ "main" ]
     paths: [ "cloud/**", "firestore.rules", ".github/workflows/server.yml" ]
   push:
-    branches: [ "main" ]
-    paths: [ "cloud/worker/**", "cloud/supabase/**" ]
+    # Geçici: 2.6.0 dalı main'e girene kadar bu daldan da yüklenebilsin (Run workflow düğmesi
+    # yalnızca main'deki iş akışlarında görünür). Birleştirmeden sonra bu dal silinebilir.
+    branches: [ "main", "arena/5b705576-dakk" ]
+    paths: [ "cloud/worker/**", "cloud/supabase/**", ".github/workflows/server.yml" ]
   workflow_dispatch:
     inputs:
       deploy_edge:
