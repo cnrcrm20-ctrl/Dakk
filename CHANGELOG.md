@@ -2,7 +2,7 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
-## [2.6.0] - Geliştiriliyor
+## [2.6.0] - 2026-11-18
 
 ### Yeni
 - **Sesli mesajlar 🎤:** Yazı alanı boşken gönder düğmesi mikrofona dönüşüyor; dokun, konuş, gönder. En fazla
