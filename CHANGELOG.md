@@ -2,7 +2,7 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
-## [2.6.1] - Geliştiriliyor
+## [2.6.1] - 2026-11-21
 
 ### Yeni
 - **Mesaj düzenleme ✏️:** Gönderdiğin metin mesajını 1 saat içinde düzeltebilirsin (basılı tut → *Düzenle*).
