@@ -441,7 +441,7 @@ private fun VersionChip(text: String, highlighted: Boolean) {
 }
 
 @Composable
-private fun NotesCard(blocks: List<ReleaseNotes.Block>) {
+internal fun NotesCard(blocks: List<ReleaseNotes.Block>) {
     Column(
         Modifier
             .fillMaxWidth()

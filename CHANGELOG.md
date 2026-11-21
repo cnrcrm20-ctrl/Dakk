@@ -2,6 +2,24 @@
 
 Bu dosyadaki her `## [sürüm]` başlığı, GitHub Release notlarına otomatik olarak aktarılır.
 
+## [2.6.1] - Geliştiriliyor
+
+### Yeni
+- **Mesaj düzenleme ✏️:** Gönderdiğin metin mesajını 1 saat içinde düzeltebilirsin (basılı tut → *Düzenle*).
+  Düzenlenen mesajın yanında herkes için "düzenlendi" yazıyor. Düzenleme de uçtan uca şifreli gidiyor.
+  Sohbetteki herkesin 2.6.1 kullanması gerekiyor.
+- **Mesaj iletme ↪:** Metni, fotoğrafı veya sesli mesajı tek seferde 5 sohbete kadar ilet (basılı tut → *İlet*).
+  İletilen mesajın üstünde "İletildi" yazıyor.
+- **Gizli sohbet 🔒:** Bir sohbeti parmak izinle (ya da ekran kilidinle) kilitle. Gizli sohbetler listede ve
+  aramada görünmüyor, bildirimlerinde kişi adı ve mesaj yazmıyor; yalnızca *Dakk / Yeni mesaj* çıkıyor. Ana
+  ekrandaki kilit simgesinden açılıyor, uygulama bir dakikadan uzun arka planda kalınca yeniden kilitleniyor.
+  Tamamen bu telefonda; karşı taraf bir şey görmüyor.
+- **Sohbet sabitleme ve arşiv 📌:** Sohbete basılı tut → en önemli 3 sohbeti en üste sabitle ya da arşive kaldır.
+  Arşiv, listenin en üstündeki *Arşiv* satırından açılıyor.
+- **Sohbet arka planı 🎨:** Sohbet menüsü → *Arka plan*. Her sohbete ayrı ya da tüm sohbetlere tek arka plan.
+- **Yenilikler ekranı ✨:** Güncellemeden sonraki ilk açılışta bu sürümde gelenler bir kez gösteriliyor
+  (ilk kurulumda gösterilmiyor).
+
 ## [2.6.0] - 2026-11-18
 
 ### Yeni

@@ -31,6 +31,10 @@ import com.example.auth.GoogleAuth
 import com.example.crypto.CryptoEngine
 import com.example.data.ChatDoc
 import com.example.data.ChatIds
+import com.example.data.ChatOrganizer
+import com.example.util.MessageEdits
+import com.example.util.WhatsNew
+import com.example.ui.components.ChatWallpapers
 import com.example.data.ChatPrefs
 import com.example.data.LocalMessageStore
 import com.example.data.Mailbox
@@ -106,12 +110,16 @@ sealed class Screen {
     object FounderPanel : Screen()
     /** Ayarlar → İzinler. */
     object Permissions : Screen()
+    /** Arşivlenen sohbetler (yalnızca bu telefonda). */
+    object Archived : Screen()
+    /** Gizli sohbetler: parmak izi / ekran kilidiyle açılır (yalnızca bu telefonda). */
+    object HiddenChats : Screen()
 
     /** Geçiş animasyonu için ekran derinliği. */
     val depth: Int
         get() = when (this) {
             Home -> 0
-            is Chat, Assistant, FounderPanel, Permissions -> 1
+            is Chat, Assistant, FounderPanel, Permissions, Archived, HiddenChats -> 1
             is ChatInfo, is NewGroup -> 2
         }
 }
@@ -403,6 +411,137 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // ------------------------------------------------------------------ Sohbet düzeni (2.6.1+, yalnızca bu telefon)
+
+    private val _organizer = MutableStateFlow(ChatOrganizer.load(app))
+    val organizer: StateFlow<ChatOrganizer> = _organizer
+
+    /** Ana liste (sabitlenenler üstte), arşiv ve gizli sohbetler. */
+    val chatLists: StateFlow<ChatOrganizer.Lists> = combine(chats, _organizer) { all, org -> org.organize(all) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatOrganizer.Lists(emptyList(), emptyList(), emptyList()))
+
+    private fun updateOrganizer(next: ChatOrganizer) {
+        _organizer.value = next
+        next.save(getApplication())
+    }
+
+    fun togglePinChat(chatId: String) {
+        val org = _organizer.value
+        if (org.isPinned(chatId)) {
+            updateOrganizer(org.unpin(chatId))
+            return
+        }
+        val next = org.pin(chatId)
+        if (next == null) _events.tryEmit("En fazla ${ChatOrganizer.MAX_PINNED} sohbet sabitlenebilir.")
+        else updateOrganizer(next)
+    }
+
+    fun toggleArchiveChat(chatId: String) {
+        val org = _organizer.value
+        if (org.isArchived(chatId)) {
+            updateOrganizer(org.unarchive(chatId))
+            _events.tryEmit("Sohbet arşivden çıkarıldı")
+        } else {
+            updateOrganizer(org.archive(chatId))
+            _events.tryEmit("Sohbet arşivlendi")
+        }
+    }
+
+    /** Parmak izi / ekran kilidi doğrulandıktan sonra çağrılır. */
+    fun hideChat(chatId: String, key: String) {
+        updateOrganizer(_organizer.value.hide(chatId))
+        notifications.cancelFor(key)
+        _vaultUnlocked.value = true
+        _events.tryEmit("🔒 Sohbet gizli sohbetlere taşındı")
+    }
+
+    fun unhideChat(chatId: String) {
+        updateOrganizer(_organizer.value.unhide(chatId))
+        _events.tryEmit("Sohbet yeniden sohbet listesinde")
+    }
+
+    private val _vaultUnlocked = MutableStateFlow(false)
+    /** Gizli sohbetler bu oturumda açıldı mı? Uygulama bir süre arka planda kalınca yeniden kilitlenir. */
+    val vaultUnlocked: StateFlow<Boolean> = _vaultUnlocked
+
+    /** Kilitliyken açılmak istenen gizli sohbet (bildirim, kişiler…): kilit açılınca açılır. */
+    private var pendingHiddenChat: String? = null
+    private var backgroundSince = 0L
+
+    fun openArchived() {
+        _screen.value = Screen.Archived
+    }
+
+    fun openHiddenChats() {
+        _screen.value = Screen.HiddenChats
+    }
+
+    fun onVaultUnlocked() {
+        _vaultUnlocked.value = true
+        val pending = pendingHiddenChat ?: return
+        pendingHiddenChat = null
+        openChat(pending)
+    }
+
+    fun lockVault() {
+        _vaultUnlocked.value = false
+        pendingHiddenChat = null
+        val myUid = sessionUid
+        val key = _activeKey.value
+        val inHidden = myUid != null && key != null && _organizer.value.isHidden(chatIdFor(key, myUid))
+        when {
+            inHidden -> closeChat()
+            _screen.value == Screen.HiddenChats -> _screen.value = Screen.Home
+            else -> Unit
+        }
+    }
+
+    fun onAppStopped() {
+        backgroundSince = System.currentTimeMillis()
+    }
+
+    fun onAppStarted() {
+        val since = backgroundSince
+        backgroundSince = 0L
+        if (since > 0 && System.currentTimeMillis() - since > VAULT_GRACE_MS && _vaultUnlocked.value) lockVault()
+    }
+
+    // ------------------------------------------------------------------ Sohbet arka planı (yalnızca bu telefon)
+
+    private val _wallpapers = MutableStateFlow(ChatWallpapers.load(prefs.getString(PREF_WALLPAPERS, null)))
+    val wallpapers: StateFlow<ChatWallpapers> = _wallpapers
+
+    /** [chatId] null ise tüm sohbetlerin varsayılanı değişir (ve sohbete özel seçimler temizlenir). */
+    fun setWallpaper(chatId: String?, id: String) {
+        _wallpapers.update { it.with(chatId, id) }
+        prefs.edit().putString(PREF_WALLPAPERS, _wallpapers.value.toJson()).apply()
+    }
+
+    // ------------------------------------------------------------------ Yenilikler ekranı (2.6.1+)
+
+    private val _whatsNew = MutableStateFlow<WhatsNew.Notes?>(null)
+    /** Güncellemeden sonraki ilk açılışta bir kez gösterilen yenilikler (ilk kurulumda gösterilmez). */
+    val whatsNew: StateFlow<WhatsNew.Notes?> = _whatsNew
+
+    private fun checkWhatsNew() {
+        val app = getApplication<Application>()
+        val code = BuildConfig.VERSION_CODE.toLong()
+        val seen = prefs.getLong(PREF_WHATS_NEW_SEEN, -1L)
+        if (seen >= code) return
+        val info = runCatching { app.packageManager.getPackageInfo(app.packageName, 0) }.getOrNull()
+        val freshInstall = info != null && info.firstInstallTime == info.lastUpdateTime
+        val notes = if (!WhatsNew.shouldShow(seen, code, freshInstall)) null
+        else WhatsNew.load(app)?.takeIf { it.version == appVersion }
+        if (notes == null) prefs.edit().putLong(PREF_WHATS_NEW_SEEN, code).apply()
+        else _whatsNew.value = notes
+    }
+
+    fun dismissWhatsNew() {
+        _whatsNew.value = null
+        prefs.edit().putLong(PREF_WHATS_NEW_SEEN, BuildConfig.VERSION_CODE.toLong()).apply()
+    }
+
     /** Açık sohbetin başlık, üye ve ayar bilgileri. */
     val activeChat: StateFlow<ActiveChat?> =
         combine(_activeKey, _chatDocs, _profiles, _rawContacts, combine(_mutes, _customPhotos) { m, p -> m to p }) {
@@ -472,6 +611,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     init {
         auth.addAuthStateListener(authListener)
         if (_autoUpdate.value) checkForUpdates(manual = false)
+        checkWhatsNew()
     }
 
     override fun onCleared() {
@@ -765,6 +905,12 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     fun openChat(peerUid: String) {
         val myUid = sessionUid ?: return
         val key = peerUid
+        // Gizli sohbet, nereden açılırsa açılsın (bildirim, kişiler, arama) önce kilidi ister.
+        if (_organizer.value.isHidden(chatIdFor(key, myUid)) && !_vaultUnlocked.value) {
+            pendingHiddenChat = key
+            _screen.value = Screen.HiddenChats
+            return
+        }
         val isGroup = ChatIds.isGroup(key)
         if (!isGroup) ensureProfile(key)
         notifications.cancelFor(key)
@@ -1219,12 +1365,30 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         val expired = docs.filter { Disappearing.isExpired(it.expiresAt, now) && !it.isPending }
         val ui = withContext(Dispatchers.Default) {
-            docs.filter { it.createdAt > cleared && !Disappearing.isExpired(it.expiresAt, now) }.map { it.toUi(myUid) }
+            val edits = resolveEdits(docs, myUid)
+            docs.filter {
+                it.createdAt > cleared && !Disappearing.isExpired(it.expiresAt, now) && it.messageType != MessageEdits.MESSAGE_TYPE
+            }.map { d ->
+                val u = d.toUi(myUid)
+                val e = edits[d.id]
+                if (e != null && d.messageType == "TEXT" && u.text != null) u.copy(text = e.text, editedAt = e.editedAt) else u
+            }
         }
         if (activeChatId(myUid) != chatId) return
         _activeMessages.value = ui
         startImageDownloads(chatId, docs, ui)
         if (expired.isNotEmpty()) deleteExpired(chatId, myUid, expired)
+    }
+
+    /** Sohbetteki düzenleme kayıtlarını çözer: mesaj kimliği → son hali. */
+    private fun resolveEdits(docs: List<MessageDoc>, myUid: String): Map<String, MessageEdits.Applied> {
+        val editDocs = docs.filter { it.messageType == MessageEdits.MESSAGE_TYPE && !it.deleted }
+        if (editDocs.isEmpty()) return emptyMap()
+        val senders = docs.associate { it.id to it.senderId }
+        val entries = editDocs.mapNotNull { d ->
+            MessageEdits.parse(decryptContent(d, myUid))?.let { MessageEdits.Entry(d.senderId, d.createdAt, it) }
+        }
+        return MessageEdits.resolve(entries) { senders[it] }
     }
 
     /** Süresi dolan kaybolan mesajları ve fotoğraflarını sunucudan siler. */
@@ -1332,6 +1496,13 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeChat() {
+        val closing = _activeKey.value?.let { key -> sessionUid?.let { chatIdFor(key, it) } }
+        val org = _organizer.value
+        val returnTo = when {
+            closing != null && org.isHidden(closing) && _vaultUnlocked.value -> Screen.HiddenChats
+            closing != null && org.isArchived(closing) -> Screen.Archived
+            else -> Screen.Home
+        }
         voiceRecorder.cancel()
         voicePlayer.stop()
         sendTypingStop()
@@ -1342,7 +1513,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         _activeKey.value = null
         _activeMessages.value = emptyList()
         lastActiveDocs = emptyList()
-        _screen.value = Screen.Home
+        _screen.value = returnTo
     }
 
     fun setForeground(foreground: Boolean) {
@@ -1496,7 +1667,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                 if (messageType == Polls.MESSAGE_TYPE) "🔒 Bu anket sen gruba katılmadan önce açıldı."
                 else if (messageType == VoiceMeta.MESSAGE_TYPE) "🔒 Bu sesli mesaj sen gruba katılmadan önce gönderildi."
                 else "🔒 Bu mesaj sen gruba katılmadan önce gönderildi."
-            } else null
+            } else null,
+            forwarded = forwarded
         )
     }
 
@@ -1596,6 +1768,92 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         return sent
     }
 
+    // ------------------------------------------------------------------ Mesaj düzenleme ve iletme (2.6.1+)
+
+    /** Mesaj şu an düzenlenebilir mi? (Kendi metin mesajım, gönderileli 1 saat olmadı.) */
+    fun canEditMessage(message: UiMessage): Boolean =
+        message.isFromMe && message.text != null && message.image == null && message.voice == null && message.poll == null &&
+            message.status != MessageStatus.PENDING && !message.isAssistant && message.systemText == null &&
+            _config.value.feature(FEATURE_EDIT, true) && MessageEdits.canEdit(message.timestamp, System.currentTimeMillis())
+
+    /** Gönderilmiş bir metin mesajını düzenler. Düzenleme sohbete şifreli bir kayıt olarak eklenir. */
+    fun editMessage(peerUid: String, messageId: String, rawText: String): Boolean {
+        val myUid = sessionUid ?: return false
+        val text = rawText.trim()
+        if (text.isEmpty()) return false
+        if (!_config.value.feature(FEATURE_EDIT, true)) {
+            _events.tryEmit("Mesaj düzenleme şu an kapalı.")
+            return false
+        }
+        val doc = lastActiveDocs.firstOrNull { it.id == messageId } ?: return false
+        if (doc.senderId != myUid || doc.messageType != "TEXT" || doc.isPending || doc.deleted || doc.isAssistant) return false
+        if (!MessageEdits.canEdit(doc.createdAt, System.currentTimeMillis())) {
+            _events.tryEmit("Mesajlar gönderildikten sonra 1 saat içinde düzenlenebilir.")
+            return false
+        }
+        if (_activeMessages.value.firstOrNull { it.id == messageId }?.text == text) return true
+        val payload = MessageEdits.encode(messageId, text)
+        if (payload.toByteArray(Charsets.UTF_8).size > MAX_MESSAGE_BYTES) {
+            _events.tryEmit("Mesaj çok uzun. Lütfen daha kısa parçalar halinde gönderin.")
+            return false
+        }
+        val chatId = chatIdFor(peerUid, myUid)
+        firstMemberBelow(chatId, myUid, CAPS_EDIT)?.let { name ->
+            _events.tryEmit("$name Dakk'ı güncelleyince mesajlarını düzenleyebilirsin.")
+            return false
+        }
+        return sendEncrypted(
+            peerUid, payload, previewOf(text), MessageEdits.MESSAGE_TYPE,
+            isAssistant = false, updateChat = false, notifyPeer = false
+        )
+    }
+
+    /** Açık sohbetteki bir mesajı başka sohbetlere iletir (en fazla [MAX_FORWARD]). */
+    fun forwardMessage(messageId: String, targets: List<String>) {
+        val myUid = sessionUid ?: return
+        val msg = _activeMessages.value.firstOrNull { it.id == messageId } ?: return
+        val keys = targets.distinct().take(MAX_FORWARD)
+        if (keys.isEmpty()) return
+        var sent = 0
+        keys.forEach { key ->
+            val ok = when {
+                msg.image != null -> {
+                    val path = msg.image.localPath
+                    if (path == null) false else {
+                        sendImage(key, Uri.fromFile(File(path)))
+                        true
+                    }
+                }
+                msg.voice != null -> forwardVoice(key, msg.voice, myUid)
+                msg.poll != null -> false
+                msg.text != null -> sendEncrypted(key, msg.text, previewOf(msg.text), "TEXT", isAssistant = false, forwarded = true)
+                else -> false
+            }
+            if (ok) sent++
+        }
+        _events.tryEmit(
+            when {
+                sent == 0 && msg.poll != null -> "Anketler iletilemez."
+                sent == 0 -> "Mesaj iletilemedi. Fotoğraf veya ses kaydı bu telefonda hazır olmayabilir."
+                sent == 1 -> "↪ İletildi"
+                else -> "↪ $sent sohbete iletildi"
+            }
+        )
+    }
+
+    private fun forwardVoice(key: String, voice: VoiceAttachment, myUid: String): Boolean {
+        val source = voice.localPath?.let { File(it) }?.takeIf { it.isFile } ?: return false
+        firstMemberBelow(chatIdFor(key, myUid), myUid, CAPS_VOICE)?.let { name ->
+            _events.tryEmit("$name Dakk'ı güncelleyince sesli mesaj gönderebilirsin.")
+            return false
+        }
+        // Yükleme, kaynak dosyayı siler; telefondaki kayıt korunsun diye kopyası gönderilir.
+        val copy = File(getApplication<Application>().cacheDir, "fwd_${System.nanoTime()}.m4a")
+        if (runCatching { source.copyTo(copy, overwrite = true) }.isFailure) return false
+        sendVoice(key, VoiceClip(copy, voice.durationMs, voice.waveform))
+        return true
+    }
+
     /** Mesaj "@dakk" ile başlıyorsa asistan sohbete katılır. */
     fun isAssistantMention(text: String): Boolean = AssistantMention.isMention(text)
 
@@ -1612,10 +1870,11 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         reply: ReplyDraft? = null,
         updateChat: Boolean = true,
         notifyPeer: Boolean = true,
-        presetKey: ByteArray? = null
+        presetKey: ByteArray? = null,
+        forwarded: Boolean = false
     ): Boolean {
         if (ChatIds.isGroup(peerUid)) {
-            return sendGroupEncrypted(peerUid, plain, preview, messageType, isAssistant, reply, updateChat, notifyPeer, presetKey)
+            return sendGroupEncrypted(peerUid, plain, preview, messageType, isAssistant, reply, updateChat, notifyPeer, presetKey, forwarded)
         }
         val myUid = sessionUid ?: return false
         val peer = _profiles.value[peerUid]
@@ -1657,6 +1916,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     reply = replyFields,
                     updateChat = updateChat,
                     expiresAt = expiresAt,
+                    forwarded = forwarded,
                     onSent = { messageId ->
                         val server = _config.value.serverUrl
                         if (notifyPeer && server.isNotBlank()) {
@@ -1685,7 +1945,8 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         reply: ReplyDraft?,
         updateChat: Boolean,
         notifyPeer: Boolean,
-        presetKey: ByteArray?
+        presetKey: ByteArray?,
+        forwarded: Boolean = false
     ): Boolean {
         val myUid = sessionUid ?: return false
         val doc = chatDoc(chatId)
@@ -1726,6 +1987,7 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
                     reply = replyFields,
                     updateChat = updateChat,
                     expiresAt = expiresAt,
+                    forwarded = forwarded,
                     onSent = { messageId ->
                         val server = _config.value.serverUrl
                         if (notifyPeer && server.isNotBlank()) {
@@ -3072,12 +3334,19 @@ class DakkViewModel(app: Application) : AndroidViewModel(app) {
         private const val PREFIX_SWEPT = "swept_"
         /**
          * Bu sürümün özellik düzeyi (profilde "caps"). Her düzey öncekileri de kapsar:
-         * 1 = sıkıştırma, posta kutusu, WebP aktarımı, geri yükleme (2.5.0); 2 = sesli mesaj (2.6.0).
+         * 1 = sıkıştırma, posta kutusu, WebP aktarımı, geri yükleme (2.5.0); 2 = sesli mesaj (2.6.0);
+         * 3 = mesaj düzenleme (2.6.1).
          */
-        const val CAPS = 2
+        const val CAPS = 3
         const val CAPS_PACK = 1
         const val CAPS_VOICE = 2
+        const val CAPS_EDIT = 3
         const val FEATURE_VOICE = "sesli_mesaj"
+        const val FEATURE_EDIT = "duzenleme"
+        const val MAX_FORWARD = 5
+        private const val VAULT_GRACE_MS = 60_000L
+        private const val PREF_WALLPAPERS = "chat_wallpapers"
+        private const val PREF_WHATS_NEW_SEEN = "whats_new_seen_code"
         private const val SWEEP_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
         private val RESENDABLE_TYPES = setOf("TEXT", "POLL")
         private const val CHAT_CONTEXT_MESSAGES = 30

@@ -209,7 +209,7 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() <= 60 &&
              data.content is string && data.content.size() <= 5000 &&
              data.deliveryStatus is string && (data.deliveryStatus in ['SENT', 'DELIVERED', 'READ']) &&
-             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE', 'SCREENSHOT', 'POLL', 'SYSTEM']) &&
+             data.messageType is string && (data.messageType in ['TEXT', 'AUDIO', 'IMAGE', 'SCREENSHOT', 'POLL', 'SYSTEM', 'EDIT']) &&
              (!('systemText' in data) || (data.messageType == 'SYSTEM' && data.systemText is string && data.systemText.size() <= 300)) &&
              (!('keys' in data) || (data.keys is map && data.keys.size() <= 51)) &&
              (!('expiresAt' in data) || data.expiresAt is timestamp) &&
@@ -221,6 +221,7 @@ service cloud.firestore {
              (!('replyPreview' in data) || (data.replyPreview is string && data.replyPreview.size() <= 1000)) &&
              !('reactions' in data) &&
              (!('del' in data) || (data.del == true && data.content == '')) &&
+             (!('fwd' in data) || data.fwd == true) &&
              (!('restoreTo' in data) || (data.messageType == 'SYSTEM' && data.restoreTo is string && data.restoreTo.size() <= 128)) &&
              data.createdAt is timestamp && data.createdAt <= request.time;
     }

@@ -228,7 +228,8 @@ class FirestoreRepository(context: Context) {
         votes = stringMap("votes"),
         senderName = getString("senderName").orEmpty(),
         deleted = getBoolean("del") ?: false,
-        restoreTo = getString("restoreTo")?.ifBlank { null }
+        restoreTo = getString("restoreTo")?.ifBlank { null },
+        forwarded = getBoolean("fwd") ?: false
     )
 
     /** Yanıtlanan mesaj bilgisi (alıntı metni şifrelidir). */
@@ -253,12 +254,13 @@ class FirestoreRepository(context: Context) {
         reply: ReplyFields? = null,
         updateChat: Boolean = true,
         expiresAt: Long = 0L,
+        forwarded: Boolean = false,
         onSent: (messageId: String) -> Unit = {},
         onError: (Exception) -> Unit
     ): String {
         val (chatTask, messageRef, messageTask) = writeMessage(
             chatId, myUid, peerUid, senderName, encryptedContent, encryptedPreview,
-            senderKey, recipientKey, messageType, isAssistant, reply, updateChat, expiresAt
+            senderKey, recipientKey, messageType, isAssistant, reply, updateChat, expiresAt, forwarded
         )
         chatTask?.addOnFailureListener { e -> Log.e(TAG, "Sohbet güncellenemedi", e); onError(e) }
         messageTask
@@ -301,7 +303,8 @@ class FirestoreRepository(context: Context) {
         isAssistant: Boolean,
         reply: ReplyFields?,
         updateChat: Boolean,
-        expiresAt: Long
+        expiresAt: Long,
+        forwarded: Boolean = false
     ): Triple<Task<Void>?, DocumentReference, Task<Void>> {
         val chatRef = db.collection("chats").document(chatId)
         val chatTask = if (updateChat) {
@@ -337,6 +340,7 @@ class FirestoreRepository(context: Context) {
                 put("replyPreview", reply.encryptedPreview)
             }
             if (expiresAt > 0) put("expiresAt", Timestamp(Date(expiresAt)))
+            if (forwarded) put("fwd", true)
         }
         val messageRef = chatRef.collection("messages").document()
         return Triple(chatTask, messageRef, messageRef.set(messagePayload))
@@ -359,12 +363,13 @@ class FirestoreRepository(context: Context) {
         reply: ReplyFields? = null,
         updateChat: Boolean = true,
         expiresAt: Long = 0L,
+        forwarded: Boolean = false,
         onSent: (messageId: String) -> Unit = {},
         onError: (Exception) -> Unit
     ): String {
         val (chatTask, messageRef, messageTask) = writeGroupMessage(
             chatId, myUid, senderName, encryptedContent, encryptedPreview, senderKey, keys,
-            messageType, isAssistant, reply, updateChat, expiresAt
+            messageType, isAssistant, reply, updateChat, expiresAt, forwarded
         )
         chatTask?.addOnFailureListener { e -> Log.e(TAG, "Grup güncellenemedi", e); onError(e) }
         messageTask
@@ -404,7 +409,8 @@ class FirestoreRepository(context: Context) {
         isAssistant: Boolean,
         reply: ReplyFields?,
         updateChat: Boolean,
-        expiresAt: Long
+        expiresAt: Long,
+        forwarded: Boolean = false
     ): Triple<Task<Void>?, DocumentReference, Task<Void>> {
         val chatRef = db.collection("chats").document(chatId)
         val chatTask = if (updateChat) {
@@ -437,6 +443,7 @@ class FirestoreRepository(context: Context) {
                 put("replyPreview", reply.encryptedPreview)
             }
             if (expiresAt > 0) put("expiresAt", Timestamp(Date(expiresAt)))
+            if (forwarded) put("fwd", true)
         }
         val messageRef = chatRef.collection("messages").document()
         return Triple(chatTask, messageRef, messageRef.set(payload))
