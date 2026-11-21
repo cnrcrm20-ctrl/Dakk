@@ -7,7 +7,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -35,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.notification.NotificationHelper
 import com.example.ui.DakkViewModel
@@ -61,10 +61,14 @@ import com.example.ui.screens.GroupInviteDialog
 import com.example.ui.screens.NewGroupScreen
 import com.example.ui.screens.FoundContactDialog
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.ArchivedChatsScreen
+import com.example.ui.screens.HiddenChatsScreen
+import com.example.ui.screens.WhatsNewScreen
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkTheme
 
-class MainActivity : ComponentActivity() {
+/** BiometricPrompt (gizli sohbet kilidi) FragmentActivity ister; FragmentActivity de bir ComponentActivity'dir. */
+class MainActivity : FragmentActivity() {
 
     private val viewModel: DakkViewModel by viewModels()
 
@@ -118,6 +122,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        viewModel.onAppStarted()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             (screenCaptureCallback as? ScreenCaptureCallback)?.let {
                 runCatching { registerScreenCaptureCallback(mainExecutor, it) }
@@ -126,6 +131,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        viewModel.onAppStopped()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             (screenCaptureCallback as? ScreenCaptureCallback)?.let {
                 runCatching { unregisterScreenCaptureCallback(it) }
@@ -241,6 +247,8 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
             Screen.Assistant -> AssistantScreen(viewModel)
             Screen.FounderPanel -> FounderPanelScreen(viewModel)
             Screen.Permissions -> PermissionsScreen(viewModel)
+            Screen.Archived -> ArchivedChatsScreen(viewModel)
+            Screen.HiddenChats -> HiddenChatsScreen(viewModel)
         }
     }
     if (tutorialVisible && screen == Screen.Home) {
@@ -249,6 +257,14 @@ fun DakkApp(viewModel: DakkViewModel, dialogsAllowed: Boolean = true) {
     }
     if (dialogsAllowed) FoundContactDialog(viewModel)
     if (dialogsAllowed) GroupInviteDialog(viewModel)
+
+    // Güncellemeden sonraki ilk açılış: yenilikler bir kez tam ekran gösterilir (ilk kurulumda değil).
+    val whatsNew by viewModel.whatsNew.collectAsStateWithLifecycle()
+    val notes = whatsNew
+    if (dialogsAllowed && notes != null) {
+        WhatsNewScreen(notes, onDone = { viewModel.dismissWhatsNew() })
+        return
+    }
 
     val pendingAnnouncement = announcement
     if (dialogsAllowed && pendingAnnouncement != null) {

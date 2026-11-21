@@ -94,7 +94,9 @@ data class MessageDoc(
     /** Mesaj herkesten silindi (2.5.0+ sohbetlerde silinen mesajın yerinde kalan boş kayıt). */
     val deleted: Boolean = false,
     /** Sohbet geçmişi geri yükleme notuysa geçmişin gönderildiği kişi. */
-    val restoreTo: String? = null
+    val restoreTo: String? = null,
+    /** Başka bir sohbetten iletildi (2.6.1+, şifresiz işaret). */
+    val forwarded: Boolean = false
 )
 
 enum class MessageStatus { PENDING, SENT, READ }
@@ -161,7 +163,11 @@ data class UiMessage(
     /** Mesaj bu cihazda açılamıyorsa gösterilecek açıklama (ör. gruba katılmadan önce gönderilmiş). */
     val lockedText: String? = null,
     /** Sesli mesaj. */
-    val voice: VoiceAttachment? = null
+    val voice: VoiceAttachment? = null,
+    /** Mesaj düzenlendiyse son düzenlemenin zamanı (0 = düzenlenmedi). */
+    val editedAt: Long = 0L,
+    /** Başka bir sohbetten iletildi. */
+    val forwarded: Boolean = false
 )
 
 /** Ekranda gösterilen anket. votes: seçenek sırası → oy veren kişi kimlikleri. */
@@ -201,7 +207,9 @@ data class ChatSummary(
     val isGroup: Boolean = false,
     val isMuted: Boolean = false,
     /** Fotoğraf modeli: adres, yerel dosya veya bayt dizisi (grup fotoğrafı). */
-    val photoModel: Any? = null
+    val photoModel: Any? = null,
+    /** Bu telefonda üste sabitlendi. */
+    val isPinned: Boolean = false
 )
 
 object ChatIds {

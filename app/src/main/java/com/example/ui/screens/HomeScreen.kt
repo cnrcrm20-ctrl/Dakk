@@ -3,6 +3,11 @@ package com.example.ui.screens
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.filled.PushPin
+import com.example.ui.components.rememberBiometricGate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -108,7 +113,9 @@ import java.util.Locale
 @Composable
 fun HomeScreen(viewModel: DakkViewModel) {
     val tab by viewModel.tab.collectAsStateWithLifecycle()
-    val chats by viewModel.chats.collectAsStateWithLifecycle()
+    val lists by viewModel.chatLists.collectAsStateWithLifecycle()
+    val chats = lists.main
+    val organizer by viewModel.organizer.collectAsStateWithLifecycle()
     val chatsLoaded by viewModel.chatsLoaded.collectAsStateWithLifecycle()
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
@@ -119,8 +126,11 @@ fun HomeScreen(viewModel: DakkViewModel) {
     var query by rememberSaveable { mutableStateOf("") }
     var chatQuery by rememberSaveable { mutableStateOf("") }
     var showAddContact by rememberSaveable { mutableStateOf(false) }
+    var actionsFor by remember { mutableStateOf<ChatSummary?>(null) }
+    val biometric = rememberBiometricGate()
 
     val unreadCount = chats.count { it.isUnread && !it.isMuted }
+    val archivedUnread = lists.archived.count { it.isUnread && !it.isMuted }
 
     Scaffold(
         containerColor = DakkDarkBg,
@@ -172,6 +182,9 @@ fun HomeScreen(viewModel: DakkViewModel) {
                 },
                 actions = {
                     if (tab == HomeTab.CHATS) {
+                        IconButton(onClick = { viewModel.openHiddenChats() }) {
+                            Icon(Icons.Outlined.Lock, contentDescription = "Gizli sohbetler")
+                        }
                         IconButton(onClick = { viewModel.openNewGroup() }, modifier = Modifier.coachTarget(CoachTargets.NEW_GROUP)) {
                             Icon(Icons.Default.GroupAdd, contentDescription = "Yeni grup")
                         }
@@ -272,12 +285,16 @@ fun HomeScreen(viewModel: DakkViewModel) {
         ) {
             when (tab) {
                 HomeTab.CHATS -> Column(Modifier.fillMaxSize()) {
-                    if (chatsLoaded && (chats.isNotEmpty() || contacts.isNotEmpty())) {
+                    if (chatsLoaded && (chats.isNotEmpty() || lists.archived.isNotEmpty() || contacts.isNotEmpty())) {
                         ChatSearchBar(query = chatQuery, onQueryChange = { chatQuery = it })
                     }
                     val searchingChats = chatQuery.isNotBlank()
                     val filtered = remember(chats, chatQuery) {
                         chats.filter { SearchText.matchesAny(chatQuery, it.peerName, it.preview) }
+                    }
+                    // Aramada arşivdekiler de bulunur; gizli sohbetler asla.
+                    val searchHits = remember(lists, chatQuery) {
+                        (lists.main + lists.archived).filter { SearchText.matchesAny(chatQuery, it.peerName, it.preview) }
                     }
                     val otherContacts = remember(contacts, chats, chatQuery) {
                         if (!searchingChats) emptyList()
@@ -291,7 +308,7 @@ fun HomeScreen(viewModel: DakkViewModel) {
                             !chatsLoaded -> CenteredLoading()
                             searchingChats -> SearchResults(
                                 query = chatQuery,
-                                chats = filtered,
+                                chats = searchHits,
                                 typing = typingLabels,
                                 contacts = otherContacts,
                                 onChat = { viewModel.openChat(it.peerUid) },
@@ -304,9 +321,13 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 onDismissBanner = { viewModel.dismissHomeBanner() },
                                 showAssistant = true,
                                 onAssistant = { viewModel.openAssistant() },
-                                onAddContact = { showAddContact = true }
+                                onAddContact = { showAddContact = true },
+                                archivedCount = lists.archived.size,
+                                archivedUnread = archivedUnread,
+                                onArchived = { viewModel.openArchived() },
+                                onLongPress = { actionsFor = it }
                             ) { viewModel.openChat(it.peerUid) }
-                            chats.isEmpty() -> EmptyState(
+                            chats.isEmpty() && lists.archived.isEmpty() -> EmptyState(
                                 title = "Henüz sohbet yok",
                                 message = "Bir arkadaşınızı ekleyin ve ilk şifreli mesajınızı gönderin.",
                                 action = "Kişi ekle",
@@ -317,7 +338,11 @@ fun HomeScreen(viewModel: DakkViewModel) {
                                 typing = typingLabels,
                                 banner = banner,
                                 onDismissBanner = { viewModel.dismissHomeBanner() },
-                                showAssistant = false
+                                showAssistant = false,
+                                archivedCount = lists.archived.size,
+                                archivedUnread = archivedUnread,
+                                onArchived = { viewModel.openArchived() },
+                                onLongPress = { actionsFor = it }
                             ) { viewModel.openChat(it.peerUid) }
                         }
                     }
@@ -345,6 +370,19 @@ fun HomeScreen(viewModel: DakkViewModel) {
     if (showAddContact) {
         AddContactSheet(viewModel = viewModel, onDismiss = { showAddContact = false })
     }
+
+    actionsFor?.let { chat ->
+        ChatActionsSheet(
+            chat = chat,
+            pinned = organizer.isPinned(chat.chatId),
+            archived = organizer.isArchived(chat.chatId),
+            hidden = false,
+            onPin = { viewModel.togglePinChat(chat.chatId) },
+            onArchive = { viewModel.toggleArchiveChat(chat.chatId) },
+            onHide = { biometric.authenticate("Gizli sohbete taşı") { viewModel.hideChat(chat.chatId, chat.peerUid) } },
+            onDismiss = { actionsFor = null }
+        )
+    }
 }
 
 @Composable
@@ -356,6 +394,10 @@ private fun ChatList(
     onDismissBanner: () -> Unit = {},
     onAssistant: () -> Unit = {},
     onAddContact: () -> Unit = {},
+    archivedCount: Int = 0,
+    archivedUnread: Int = 0,
+    onArchived: () -> Unit = {},
+    onLongPress: ((ChatSummary) -> Unit)? = null,
     onClick: (ChatSummary) -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -370,6 +412,9 @@ private fun ChatList(
             item(key = "home_banner") {
                 HomeBanner(banner.homeBanner, banner.homeBannerUrl, onDismissBanner)
             }
+        }
+        if (archivedCount > 0) {
+            item(key = "archived_row") { ArchivedEntryRow(archivedCount, archivedUnread, onArchived) }
         }
         if (showAssistant) {
             item(key = "dakk_assistant") {
@@ -400,7 +445,7 @@ private fun ChatList(
                     modifier = Modifier.padding(start = 82.dp)
                 )
             }
-            if (chats.isEmpty()) {
+            if (chats.isEmpty() && archivedCount == 0) {
                 item(key = "no_chats") {
                     Column(
                         Modifier
@@ -429,18 +474,31 @@ private fun ChatList(
             }
         }
         items(chats, key = { it.chatId }) { chat ->
-            ChatRow(chat, query = "", typing = typing[chat.peerUid], onClick = { onClick(chat) })
+            ChatRow(
+                chat,
+                query = "",
+                typing = typing[chat.peerUid],
+                onClick = { onClick(chat) },
+                onLongPress = onLongPress?.let { cb -> { cb(chat) } }
+            )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatRow(chat: ChatSummary, query: String, typing: String?, onClick: () -> Unit) {
+internal fun ChatRow(
+    chat: ChatSummary,
+    query: String,
+    typing: String?,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null
+) {
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick)
+                .combinedClickable(onClick = onClick, onLongClick = onLongPress)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -467,6 +525,15 @@ private fun ChatRow(chat: ChatSummary, query: String, typing: String?, onClick: 
                                 modifier = Modifier.size(15.dp)
                             )
                         }
+                    }
+                    if (chat.isPinned) {
+                        Icon(
+                            Icons.Default.PushPin,
+                            contentDescription = "Sabitlendi",
+                            tint = DakkTextTertiaryDark,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
                     }
                     Text(
                         formatListTime(chat.lastMessageTime),

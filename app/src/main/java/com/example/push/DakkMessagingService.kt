@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.crypto.CryptoEngine
 import com.example.data.ChatIds
 import com.example.data.ChatPrefs
+import com.example.util.MessageEdits
 import com.example.data.FirestoreRepository
 import com.example.data.MessageDoc
 import com.example.notification.NotificationHelper
@@ -87,7 +88,7 @@ class DakkMessagingService : FirebaseMessagingService() {
             }
         }
         // Ekran görüntüsü ve sistem notları sohbet içinde gösterilir; ayrı bildirim çıkarmaz.
-        if (messageType == "SCREENSHOT" || messageType == "SYSTEM") return
+        if (messageType == "SCREENSHOT" || messageType == "SYSTEM" || messageType == MessageEdits.MESSAGE_TYPE) return
 
         val crypto = CryptoEngine(applicationContext)
         val plain = runCatching {

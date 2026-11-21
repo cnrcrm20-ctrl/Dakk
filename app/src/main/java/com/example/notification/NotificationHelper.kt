@@ -13,6 +13,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
+import com.example.data.ChatPrefs
 import com.example.R
 import com.example.util.Reactions
 
@@ -73,6 +74,8 @@ class NotificationHelper(context: Context) {
         messageId: String? = null
     ) {
         if (!canNotify()) return
+        // Gizli sohbet: bildirimde kişi adı, içerik ve hızlı yanıt düğmeleri gösterilmez.
+        val hidden = ChatPrefs.isHidden(appContext, chatId)
         val intent = Intent(appContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_OPEN_CHAT_UID, peerUid)
@@ -83,6 +86,25 @@ class NotificationHelper(context: Context) {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        if (hidden) {
+            val generic = NotificationCompat.Builder(appContext, CHANNEL_MESSAGES)
+                .setSmallIcon(R.drawable.ic_stat_dakk)
+                .setColor(0xFFFFCC00.toInt())
+                .setContentTitle("Dakk")
+                .setContentText("Yeni mesaj")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+                .setAutoCancel(true)
+                .setContentIntent(pending)
+                .build()
+            try {
+                NotificationManagerCompat.from(appContext).notify(notificationId(peerUid), generic)
+            } catch (_: SecurityException) {
+            }
+            return
+        }
 
         // Kilit ekranında "hassas içeriği gizle" açıksa yalnızca bu sürüm görünür.
         val publicVersion = NotificationCompat.Builder(appContext, CHANNEL_MESSAGES)

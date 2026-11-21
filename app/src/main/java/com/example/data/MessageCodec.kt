@@ -31,6 +31,7 @@ object MessageCodec {
         if (doc.votes.isNotEmpty()) o.put("v", JSONObject(doc.votes))
         if (doc.senderName.isNotEmpty()) o.put("n", doc.senderName)
         doc.restoreTo?.let { o.put("ro", it) }
+        if (doc.forwarded) o.put("f", true)
         return deflate(o.toString().toByteArray(Charsets.UTF_8))
     }
 
@@ -56,7 +57,8 @@ object MessageCodec {
             systemText = o.optString("st").ifBlank { null },
             votes = o.optJSONObject("v").toStringMap(),
             senderName = o.optString("n"),
-            restoreTo = o.optString("ro").ifBlank { null }
+            restoreTo = o.optString("ro").ifBlank { null },
+            forwarded = o.optBoolean("f")
         )
     } catch (_: Exception) {
         null

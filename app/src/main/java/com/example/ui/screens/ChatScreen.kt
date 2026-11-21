@@ -61,6 +61,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -121,6 +127,10 @@ import com.example.ui.components.AiConsentDialog
 import com.example.ui.components.Avatar
 import com.example.ui.components.ImageMessageContent
 import com.example.ui.components.ImageViewerDialog
+import com.example.ui.components.WallpaperBackground
+import com.example.ui.components.WallpaperPickerDialog
+import com.example.ui.components.rememberBiometricGate
+import com.example.util.MessageEdits
 import com.example.ui.theme.DakkDarkBg
 import com.example.ui.theme.DakkDarkSurface
 import com.example.ui.theme.DakkDarkSurfaceVariant
@@ -167,6 +177,10 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     val playback by viewModel.voicePlayback.collectAsStateWithLifecycle()
     val voiceElapsed by viewModel.voiceElapsed.collectAsStateWithLifecycle()
     val voiceLevel by viewModel.voiceLevel.collectAsStateWithLifecycle()
+    val wallpapers by viewModel.wallpapers.collectAsStateWithLifecycle()
+    val chatLists by viewModel.chatLists.collectAsStateWithLifecycle()
+    val organizer by viewModel.organizer.collectAsStateWithLifecycle()
+    val vaultUnlocked by viewModel.vaultUnlocked.collectAsStateWithLifecycle()
 
     val chat = activeChat?.takeIf { it.key == peerUid }
     val isGroup = ChatIds.isGroup(peerUid)
@@ -188,6 +202,11 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     var pendingMention by remember { mutableStateOf<String?>(null) }
     var replyingTo by remember(peerUid) { mutableStateOf<UiMessage?>(null) }
     var creatingPoll by remember { mutableStateOf(false) }
+    var editing by remember(peerUid) { mutableStateOf<UiMessage?>(null) }
+    var forwarding by remember { mutableStateOf<UiMessage?>(null) }
+    var pickingWallpaper by remember { mutableStateOf(false) }
+    var confirmHide by remember { mutableStateOf(false) }
+    val biometric = rememberBiometricGate()
     val recording = voiceElapsed >= 0
     val voiceEnabled = config.feature(DakkViewModel.FEATURE_VOICE, true)
     var searching by rememberSaveable(peerUid) { mutableStateOf(false) }
@@ -222,6 +241,13 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
 
     fun submit() {
         val text = draft
+        editing?.let { target ->
+            if (viewModel.editMessage(peerUid, target.id, text)) {
+                draft = ""
+                editing = null
+            }
+            return
+        }
         if (viewModel.isAssistantMention(text) && config.assistantEnabled && !viewModel.hasAiConsent("chat_$peerUid")) {
             pendingMention = text
         } else if (viewModel.sendMessage(peerUid, text, replyingTo)) {
@@ -249,6 +275,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
     BackHandler {
         when {
             recording -> viewModel.cancelVoiceRecording()
+            editing != null -> { editing = null; draft = "" }
             searching -> { searching = false; query = "" }
             else -> viewModel.closeChat()
         }
@@ -411,6 +438,22 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                             }
                         }
                         DropdownMenuItem(
+                            text = { Text("Arka plan") },
+                            leadingIcon = { Icon(Icons.Default.Wallpaper, null) },
+                            onClick = { menuOpen = false; pickingWallpaper = true }
+                        )
+                        if (chat != null) {
+                            val isHidden = organizer.isHidden(chat.chatId)
+                            DropdownMenuItem(
+                                text = { Text(if (isHidden) "Gizli sohbetten çıkar" else "Gizli sohbete taşı") },
+                                leadingIcon = { Icon(if (isHidden) Icons.Default.LockOpen else Icons.Default.Fingerprint, null) },
+                                onClick = {
+                                    menuOpen = false
+                                    if (isHidden) viewModel.unhideChat(chat.chatId) else confirmHide = true
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
                             text = { Text("Sohbeti temizle") },
                             leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
                             onClick = { menuOpen = false; confirmClear = true }
@@ -457,7 +500,14 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
-                replyingTo?.let { target ->
+                editing?.let { target ->
+                    ReplyComposerBar(
+                        authorLabel = "✏️ Mesajı düzenle",
+                        text = target.text.orEmpty(),
+                        onCancel = { editing = null; draft = "" }
+                    )
+                }
+                if (editing == null) replyingTo?.let { target ->
                     ReplyComposerBar(
                         authorLabel = if (target.isFromMe) "Sen" else nameOf(target.senderUid),
                         text = ReplySnippets.of(
@@ -534,7 +584,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(8.dp))
-                    val micMode = draft.isBlank() && voiceEnabled && canSend
+                    val micMode = draft.isBlank() && voiceEnabled && canSend && editing == null
                     val sendEnabled = canSend && (draft.isNotBlank() || micMode)
                     IconButton(
                         onClick = { if (micMode) startRecording() else submit() },
@@ -545,8 +595,12 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                             .background(if (sendEnabled) DakkYellow else DakkDarkSurfaceVariant)
                     ) {
                         Icon(
-                            if (micMode) Icons.Default.Mic else Icons.AutoMirrored.Filled.Send,
-                            contentDescription = if (micMode) "Sesli mesaj kaydet" else "Gönder",
+                            when {
+                                micMode -> Icons.Default.Mic
+                                editing != null -> Icons.Default.Check
+                                else -> Icons.AutoMirrored.Filled.Send
+                            },
+                            contentDescription = if (micMode) "Sesli mesaj kaydet" else if (editing != null) "Düzenlemeyi kaydet" else "Gönder",
                             tint = if (sendEnabled) Color.Black else DakkTextTertiaryDark
                         )
                     }
@@ -559,6 +613,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            WallpaperBackground(wallpapers.forChat(chat?.chatId), dark = true)
             Column(Modifier.fillMaxSize()) {
                 pinnedMessage?.let { pin ->
                     PinnedBar(
@@ -724,6 +779,30 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                             Text("Kopyala")
                         }
                     }
+                    if (canSend && viewModel.canEditMessage(msg)) {
+                        TextButton(onClick = {
+                            editing = msg
+                            replyingTo = null
+                            draft = msg.text.orEmpty()
+                            selected = null
+                        }) {
+                            Icon(Icons.Default.Edit, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Düzenle")
+                        }
+                    }
+                    if (msg.status != MessageStatus.PENDING && msg.poll == null && msg.lockedText == null &&
+                        (msg.text != null || msg.image?.localPath != null || msg.voice?.localPath != null)
+                    ) {
+                        TextButton(onClick = {
+                            forwarding = msg
+                            selected = null
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.Forward, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("İlet")
+                        }
+                    }
                     if (msg.status != MessageStatus.PENDING) {
                         val isStarred = chat != null && viewModel.starKey(chat.chatId, msg.id) in starred
                         TextButton(onClick = {
@@ -750,6 +829,7 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                         TextButton(onClick = {
                             viewModel.deleteMessage(peerUid, msg.id)
                             if (replyingTo?.id == msg.id) replyingTo = null
+                            if (editing?.id == msg.id) { editing = null; draft = "" }
                             selected = null
                         }) {
                             Icon(Icons.Default.Delete, null, tint = DakkStatusFailed)
@@ -760,6 +840,57 @@ fun ChatScreen(peerUid: String, viewModel: DakkViewModel) {
                 }
             },
             confirmButton = { TextButton(onClick = { selected = null }) { Text("Kapat") } }
+        )
+    }
+
+    forwarding?.let { msg ->
+        val targets = remember(chatLists, vaultUnlocked, peerUid) {
+            val base = chatLists.main + chatLists.archived + (if (vaultUnlocked) chatLists.hidden else emptyList())
+            base.filter { it.peerUid != peerUid }
+        }
+        ForwardSheet(
+            preview = snippetOf(msg),
+            chats = targets,
+            onSend = { keys ->
+                viewModel.forwardMessage(msg.id, keys)
+                forwarding = null
+            },
+            onDismiss = { forwarding = null }
+        )
+    }
+
+    if (pickingWallpaper) {
+        WallpaperPickerDialog(
+            current = wallpapers.forChat(chat?.chatId),
+            dark = true,
+            onPick = { id, forAll ->
+                viewModel.setWallpaper(if (forAll) null else chat?.chatId, id)
+                if (forAll) pickingWallpaper = false
+            },
+            onDismiss = { pickingWallpaper = false }
+        )
+    }
+
+    if (confirmHide && chat != null) {
+        AlertDialog(
+            onDismissRequest = { confirmHide = false },
+            containerColor = DakkDarkSurface,
+            icon = { Icon(Icons.Default.Fingerprint, null, tint = DakkYellow, modifier = Modifier.size(36.dp)) },
+            title = { Text("Gizli sohbete taşı") },
+            text = {
+                Text(
+                    "Bu sohbet listeden kalkar ve yalnızca parmak izin ya da ekran kilidinle açılır. " +
+                        "Bildirimlerde kişi adı ve mesaj görünmez. Yalnızca bu telefonda geçerlidir; $title bunu görmez.",
+                    color = DakkTextSecondaryDark
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmHide = false
+                    biometric.authenticate("Gizli sohbete taşı") { viewModel.hideChat(chat.chatId, peerUid) }
+                }) { Text("Kilitle", color = DakkYellow) }
+            },
+            dismissButton = { TextButton(onClick = { confirmHide = false }) { Text("Vazgeç") } }
         )
     }
 
@@ -985,6 +1116,16 @@ private fun MessageBubble(
                     Text("Dakk Asistan", color = DakkYellow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+            if (message.forwarded) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = if (image != null) 8.dp else 0.dp, top = if (image != null) 4.dp else 0.dp, bottom = 3.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Forward, null, tint = DakkTextTertiaryDark, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("İletildi", color = DakkTextTertiaryDark, fontSize = 12.sp, fontStyle = FontStyle.Italic)
+                }
+            }
             message.reply?.let { quote ->
                 ReplyQuoteBox(
                     authorLabel = if (quote.fromMe) "Sen" else nameOf(quote.senderUid),
@@ -1045,6 +1186,10 @@ private fun MessageBubble(
                 if (message.expiresAt > 0) {
                     Icon(Icons.Default.Timer, "Kaybolan mesaj", tint = DakkTextTertiaryDark, modifier = Modifier.size(11.dp))
                     Spacer(Modifier.width(3.dp))
+                }
+                if (message.editedAt > 0) {
+                    Text(MessageEdits.LABEL, color = DakkTextTertiaryDark, fontSize = 11.sp, fontStyle = FontStyle.Italic)
+                    Spacer(Modifier.width(4.dp))
                 }
                 Text(
                     SimpleDateFormat("HH:mm", turkish).format(Date(message.timestamp)),
